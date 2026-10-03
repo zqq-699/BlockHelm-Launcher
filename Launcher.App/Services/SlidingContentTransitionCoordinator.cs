@@ -116,7 +116,11 @@ public sealed class SlidingContentTransitionCoordinator
             return;
         }
 
-        if (!loadedElement.IsLoaded || (useSlideTransition && contentHost.ActualWidth <= 0))
+        // 被折叠的主页面仍可能保持 IsLoaded=true。隐藏时收到的深链接状态
+        // 应直接同步到终态，否则动画会在不可见树中被消费，并与随后的整页过渡重叠。
+        if (!loadedElement.IsLoaded
+            || !loadedElement.IsVisible
+            || (useSlideTransition && contentHost.ActualWidth <= 0))
         {
             Sync(showSecondaryLayer);
             return;

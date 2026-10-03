@@ -94,6 +94,15 @@ public partial class ResourcesPageView : UserControl
             if (sectionContentRoot is null)
                 return;
 
+            if (!IsVisible)
+            {
+                // 跨页深链接会在资源页隐藏时预先选好分区。
+                // 此时只同步终态，不强制布局、刷新虚拟列表或启动分区动画。
+                sectionTransitionService.SyncTo(viewModel.SelectedSection?.Id ?? SectionOrder[0]);
+                ResetSectionPresentation();
+                return;
+            }
+
             sectionContentRoot.UpdateLayout();
             ResetCurrentSectionScrollPosition();
             sectionTransitionService.MoveTo(viewModel.SelectedSection?.Id ?? SectionOrder[0]);

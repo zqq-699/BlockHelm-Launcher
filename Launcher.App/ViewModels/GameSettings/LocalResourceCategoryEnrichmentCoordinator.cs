@@ -109,7 +109,7 @@ internal sealed class LocalResourceCategoryEnrichmentCoordinator<T> : IDisposabl
         try
         {
             var iconProgress = new CallbackProgress<LocalContentIconResolution>(resolution =>
-                dispatcher.Post(() => ApplyIcon(resolution, expectedGeneration, cts)));
+                dispatcher.PostAfterTransition(() => ApplyIcon(resolution, expectedGeneration, cts)));
             foreach (var batch in candidates.Chunk(EnrichmentBatchSize))
             {
                 var cached = await service!
@@ -119,7 +119,7 @@ internal sealed class LocalResourceCategoryEnrichmentCoordinator<T> : IDisposabl
                     return;
 
                 if (cached.Count > 0)
-                    dispatcher.Post(() => Apply(cached, expectedGeneration, cts));
+                    dispatcher.PostAfterTransition(() => Apply(cached, expectedGeneration, cts));
 
                 var resolved = await service!
                     .ResolveMetadataAsync(batch, cts.Token, iconProgress)
@@ -128,7 +128,7 @@ internal sealed class LocalResourceCategoryEnrichmentCoordinator<T> : IDisposabl
                     return;
 
                 if (resolved.Count > 0)
-                    dispatcher.Post(() => Apply(resolved, expectedGeneration, cts));
+                    dispatcher.PostAfterTransition(() => Apply(resolved, expectedGeneration, cts));
             }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)

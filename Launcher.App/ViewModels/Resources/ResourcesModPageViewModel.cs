@@ -156,6 +156,11 @@ public partial class ResourcesModPageViewModel : ResourcesSectionViewModelBase, 
     [NotifyPropertyChangedFor(nameof(PageTitleIconSource))]
     private ResourcesModPageStep currentStep = ResourcesModPageStep.ProjectList;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageTitle))]
+    [NotifyPropertyChangedFor(nameof(PageTitleIconSource))]
+    private bool isProjectDetailsLoading;
+
     public bool IsProjectListStep => CurrentStep is ResourcesModPageStep.ProjectList;
 
     public bool IsProjectDetailsStep => CurrentStep is ResourcesModPageStep.ProjectDetails;
@@ -164,16 +169,18 @@ public partial class ResourcesModPageViewModel : ResourcesSectionViewModelBase, 
 
     public bool IsProjectContentStep => CurrentStep is not ResourcesModPageStep.ProjectList;
 
+    public string ProjectDetailsLoadingMessage => options.ProjectsLoadingText;
+
     public string PageTitle => IsProjectVersionsStep && Versions.SelectedTarget?.IsLocalDownload == false
         ? Versions.SelectedTarget.Title
         : IsProjectContentStep
-            ? Details.CurrentProject?.Title ?? Title
+            ? IsProjectDetailsLoading ? Title : Details.CurrentProject?.Title ?? Title
             : Title;
 
     public string? PageTitleIconSource => IsProjectVersionsStep && Versions.SelectedTarget?.IsLocalDownload == false
         ? Versions.SelectedTarget.IconSource
         : IsProjectContentStep
-            ? Details.CurrentProject?.IconSource
+            ? IsProjectDetailsLoading ? null : Details.CurrentProject?.IconSource
             : null;
 
     [RelayCommand]
@@ -195,6 +202,7 @@ public partial class ResourcesModPageViewModel : ResourcesSectionViewModelBase, 
     public void ResetToProjectList()
     {
         // 顶层分区重置需要彻底清空详情选择，但不必重新创建子 ViewModel。
+        IsProjectDetailsLoading = false;
         Details.Reset();
         Versions.Reset();
         CurrentStep = ResourcesModPageStep.ProjectList;
@@ -209,9 +217,27 @@ public partial class ResourcesModPageViewModel : ResourcesSectionViewModelBase, 
 
     public void BeginLoadMoreAvailableVersions() => Versions.BeginLoadMore();
 
+    public void BeginProjectDetailsLoading()
+    {
+        Details.Reset();
+        Versions.Reset();
+        IsProjectDetailsLoading = true;
+        CurrentStep = ResourcesModPageStep.ProjectDetails;
+        RaisePageTitleChanged();
+    }
+
+    public void CancelProjectDetailsLoading()
+    {
+        if (!IsProjectDetailsLoading)
+            return;
+
+        ResetToProjectList();
+    }
+
     public void ShowProjectDetails(ResourceProject project)
     {
         ArgumentNullException.ThrowIfNull(project);
+        IsProjectDetailsLoading = false;
         Details.SelectRoot(new ResourcesModProjectItemViewModel(
             project,
             fallbackIconKey: options.FallbackIconKey,

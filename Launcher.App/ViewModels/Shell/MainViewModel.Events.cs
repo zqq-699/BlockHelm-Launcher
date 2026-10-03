@@ -79,30 +79,41 @@ public Task SyncExternalInstanceCatalogAsync()
 
     private async Task OpenResourceProjectDetailsAsync(ResourceProjectReference reference)
     {
-        var project = await ResourcesPage.LoadProjectDetailsAsync(reference);
-        if (project is null)
+        var navigationPrepared = false;
+        uiDispatcher.Invoke(() =>
+        {
+            navigationPrepared = ResourcesPage.BeginLoadProjectDetails(reference);
+            if (!navigationPrepared)
+                return;
+
+            // 先展示轻量详情加载态并立即启动整页过渡，
+            // 远程项目信息不再阻塞用户对点击的视觉反馈。
+            CurrentPage = NavigationCatalog.ResourcesPage;
+            UpdateSecondaryItems();
+            UpdateNavigationSelection();
+        });
+        if (!navigationPrepared)
             return;
 
-        CurrentPage = NavigationCatalog.ResourcesPage;
-        UpdateSecondaryItems();
-        UpdateNavigationSelection();
-
-        // 以 Background 优先级排到 UI 可见性、模板和 DataContext 绑定之后，再发布详情目标。
-        // 否则首次启动时安装目标的入场状态会在隐藏视图中被消费，列表要到第二次点击才呈现。
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        uiDispatcher.Post(() =>
+        var project = await ResourcesPage.LoadProjectDetailsAsync(reference);
+        if (project is null)
         {
-            try
-            {
-                ResourcesPage.ShowProjectDetails(reference, project);
-                completion.TrySetResult();
-            }
-            catch (Exception exception)
-            {
-                completion.TrySetException(exception);
-            }
-        });
-        await completion.Task;
+            await uiDispatcher.PostAfterTransitionAsync(
+                () => ResourcesPage.CancelLoadProjectDetails(reference));
+            return;
+        }
+
+        if (!NavigationCatalog.IsPage(CurrentPage, NavigationCatalog.ResourcesPage))
+        {
+            await uiDispatcher.PostAfterTransitionAsync(
+                () => ResourcesPage.CancelLoadProjectDetails(reference));
+            return;
+        }
+
+        // 详情数据可能在整页动画期间返回；收尾后再替换加载态，
+        // 避免复杂绑定和依赖集合初始化抢占过渡帧。
+        await uiDispatcher.PostAfterTransitionAsync(
+            () => ResourcesPage.ShowProjectDetails(reference, project));
     }
 
     private void UpdateSecondaryItems()

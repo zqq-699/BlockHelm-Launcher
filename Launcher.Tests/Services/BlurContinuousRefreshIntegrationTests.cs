@@ -113,6 +113,55 @@ public sealed class BlurContinuousRefreshIntegrationTests
     }
 
     [Fact]
+    public void HiddenSlidingTransitionSynchronizesWithoutAcquiringRenderCache()
+    {
+        RunOnStaThread(() =>
+        {
+            var fixture = CreateFixture(includeSecondaryLayer: true);
+            try
+            {
+                fixture.Window.Show();
+                PumpDispatcher(DispatcherPriority.Render);
+                fixture.Root.Visibility = Visibility.Collapsed;
+                PumpDispatcher(DispatcherPriority.Render);
+                Assert.True(fixture.Root.IsLoaded);
+                Assert.False(fixture.Root.IsVisible);
+
+                var cacheAcquired = false;
+                var coordinator = new SlidingContentTransitionCoordinator(
+                    fixture.Root,
+                    fixture.Root,
+                    fixture.Scope,
+                    fixture.SecondaryScope!,
+                    secondaryFloatingElements: null,
+                    useSlideTransition: true,
+                    useScaleTransition: false,
+                    transitionScale: SlidingContentTransitionCoordinator.DefaultTransitionScale,
+                    renderCacheFactory: (transitionKind, elements) =>
+                    {
+                        cacheAcquired = true;
+                        return AcquireSupportedCache(transitionKind, elements);
+                    });
+                coordinator.Sync(showSecondaryLayer: false);
+
+                coordinator.AnimateTo(showSecondaryLayer: true);
+
+                Assert.False(cacheAcquired);
+                Assert.Null(fixture.Scope.CacheMode);
+                Assert.Null(fixture.SecondaryScope!.CacheMode);
+                Assert.Equal(Visibility.Collapsed, fixture.Scope.Visibility);
+                Assert.Equal(Visibility.Visible, fixture.SecondaryScope.Visibility);
+                Assert.Equal(0d, fixture.Scope.Opacity);
+                Assert.Equal(1d, fixture.SecondaryScope.Opacity);
+            }
+            finally
+            {
+                fixture.Window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void ImageModePageTransitionWithActiveControlBlurUsesOriginalLiveRefreshPath()
     {
         RunOnStaThread(() =>

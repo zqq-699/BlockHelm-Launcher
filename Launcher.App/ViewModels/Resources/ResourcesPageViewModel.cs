@@ -41,6 +41,7 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
     private readonly IStatusService? statusService;
     private readonly IExternalLinkService? externalLinkService;
     private readonly IResourceCatalogService? resourceCatalogService;
+    private ResourceProjectReference? pendingProjectDetailsReference;
 
     public ResourcesPageViewModel(
         IResourceCatalogService? resourceCatalogService = null,
@@ -296,7 +297,8 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
     public void BeginEnsureCurrentSectionLoaded()
     {
         // 页面激活事件不能等待网络请求，子页面自行观察并管理加载状态。
-        CurrentOnlineProjectPage?.BeginEnsureProjectsLoaded();
+        if (CurrentOnlineProjectPage?.IsProjectListStep is true)
+            CurrentOnlineProjectPage.BeginEnsureProjectsLoaded();
     }
 
     internal async Task<ResourceProject?> LoadProjectDetailsAsync(ResourceProjectReference reference)
@@ -329,15 +331,43 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         }
     }
 
-    internal void ShowProjectDetails(ResourceProjectReference reference, ResourceProject project)
+    internal bool BeginLoadProjectDetails(ResourceProjectReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        var section = ResolveProjectSection(reference.Kind);
+        if (section is null)
+            return false;
+
+        pendingProjectDetailsReference = reference;
+        SelectSection(section, logSelection: false);
+        CurrentOnlineProjectPage?.BeginProjectDetailsLoading();
+        return true;
+    }
+
+    internal bool CancelLoadProjectDetails(ResourceProjectReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        if (pendingProjectDetailsReference != reference)
+            return false;
+
+        pendingProjectDetailsReference = null;
+        CurrentOnlineProjectPage?.CancelProjectDetailsLoading();
+        return true;
+    }
+
+    internal bool ShowProjectDetails(ResourceProjectReference reference, ResourceProject project)
     {
         ArgumentNullException.ThrowIfNull(reference);
         ArgumentNullException.ThrowIfNull(project);
 
+        if (pendingProjectDetailsReference != reference)
+            return false;
+
         var section = ResolveProjectSection(reference.Kind);
         if (section is null)
-            return;
+            return false;
 
+        pendingProjectDetailsReference = null;
         SelectSection(section, logSelection: false);
         CurrentOnlineProjectPage?.ShowProjectDetails(project);
         logger?.LogInformation(
@@ -345,6 +375,7 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
             reference.Kind,
             reference.Source,
             reference.ProjectId);
+        return true;
     }
 
     private ResourcesSectionItem? ResolveProjectSection(ResourceProjectKind kind)
@@ -383,6 +414,9 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         // 同一分区重复选择只确保加载，不重置子页面搜索、详情或滚动状态。
         if (section is null || ReferenceEquals(SelectedSection, section))
             return;
+
+        if (logSelection)
+            pendingProjectDetailsReference = null;
 
         foreach (var item in Sections)
             item.IsSelected = ReferenceEquals(item, section);
@@ -429,6 +463,14 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         {
             if (!ReferenceEquals(sender, CurrentOnlineProjectPage))
                 return;
+
+            // 深链接进入详情时不加载背后的项目列表；用户真正返回列表时再确保首页就绪。
+            if (e.PropertyName is nameof(ResourcesModPageViewModel.CurrentStep)
+                && CurrentOnlineProjectPage?.IsProjectListStep is true)
+            {
+                pendingProjectDetailsReference = null;
+                CurrentOnlineProjectPage.BeginEnsureProjectsLoaded();
+            }
 
             OnPropertyChanged(nameof(PageTitle));
             OnPropertyChanged(nameof(PageTitleIconSource));

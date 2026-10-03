@@ -214,6 +214,17 @@
 
             <Grid x:Name="DetailsStepHost"
                   ClipToBounds="True">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding DataContext.IsProjectDetailsLoading, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}}"
+                                         Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
                 <Grid x:Name="InstallTargetStep"
                       Tag="InstallTargetStep">
                     <Grid.RenderTransform>
@@ -559,6 +570,11 @@
 
                 </Grid>
             </Grid>
+
+            <TextBlock Margin="12,82,12,0"
+                       Text="{Binding DataContext.ProjectDetailsLoadingMessage, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}}"
+                       Style="{StaticResource PageEmptyStateTextStyle}"
+                       Visibility="{Binding DataContext.IsProjectDetailsLoading, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}" />
         </Grid>
     </Grid>
 </UserControl>

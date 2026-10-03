@@ -656,7 +656,7 @@ public sealed class LocalModsViewModel : IDisposable
             return;
         }
 
-        uiDispatcher.Post(() =>
+        uiDispatcher.PostAfterTransition(() =>
         {
             // 排队等待 UI 线程期间所选实例仍可能变化，必须在真正写入模型前再次校验。
             if (enrichmentCts.IsCancellationRequested

@@ -160,11 +160,12 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
                     project.Project.ProjectId),
                 cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            uiDispatcher.Invoke(() =>
-            {
-                if (!cancellationToken.IsCancellationRequested && ReferenceEquals(CurrentProject, project))
-                    RelatedWebsite = website;
-            });
+            await uiDispatcher.PostAfterTransitionAsync(() =>
+                {
+                    if (!cancellationToken.IsCancellationRequested && ReferenceEquals(CurrentProject, project))
+                        RelatedWebsite = website;
+                })
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -173,11 +174,12 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
         {
             if (cancellationToken.IsCancellationRequested)
                 return;
-            uiDispatcher.Invoke(() =>
-            {
-                if (ReferenceEquals(CurrentProject, project))
-                    RelatedWebsite = null;
-            });
+            await uiDispatcher.PostAfterTransitionAsync(() =>
+                {
+                    if (ReferenceEquals(CurrentProject, project))
+                        RelatedWebsite = null;
+                })
+                .ConfigureAwait(false);
             logger?.LogWarning(
                 exception,
                 "Failed to load resource project related website. Kind={Kind} Source={Source} ProjectId={ProjectId}",
@@ -242,16 +244,17 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
                     }
                 }
             }
-            uiDispatcher.Invoke(() =>
-            {
-                if (cancellationToken.IsCancellationRequested || !ReferenceEquals(CurrentProject, project))
-                    return;
-                RequiredDependencies.Clear();
-                foreach (var item in items)
-                    RequiredDependencies.Add(item);
-                IsLoadingDependencies = false;
-                NotifyStateChanged();
-            });
+            await uiDispatcher.PostAfterTransitionAsync(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested || !ReferenceEquals(CurrentProject, project))
+                        return;
+                    RequiredDependencies.Clear();
+                    foreach (var item in items)
+                        RequiredDependencies.Add(item);
+                    IsLoadingDependencies = false;
+                    NotifyStateChanged();
+                })
+                .ConfigureAwait(false);
             if (thumbnailService is not null)
                 await RefreshDependencyThumbnailsAsync(project, items, cancellationToken).ConfigureAwait(false);
         }
@@ -262,12 +265,15 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
         {
             if (cancellationToken.IsCancellationRequested)
                 return;
-            uiDispatcher.Invoke(() =>
-            {
-                RequiredDependencies.Clear();
-                IsLoadingDependencies = false;
-                NotifyStateChanged();
-            });
+            await uiDispatcher.PostAfterTransitionAsync(() =>
+                {
+                    if (!ReferenceEquals(CurrentProject, project))
+                        return;
+                    RequiredDependencies.Clear();
+                    IsLoadingDependencies = false;
+                    NotifyStateChanged();
+                })
+                .ConfigureAwait(false);
             logger?.LogError(
                 exception,
                 "Failed to load resource project dependencies. Kind={Kind} Source={Source} ProjectId={ProjectId}",
@@ -291,15 +297,16 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
                     .ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(source) || cancellationToken.IsCancellationRequested)
                     return;
-                uiDispatcher.Invoke(() =>
-                {
-                    if (!cancellationToken.IsCancellationRequested
-                        && ReferenceEquals(CurrentProject, parent)
-                        && RequiredDependencies.Contains(item))
+                await uiDispatcher.PostAfterTransitionAsync(() =>
                     {
-                        item.SetManagedIconSource(source);
-                    }
-                });
+                        if (!cancellationToken.IsCancellationRequested
+                            && ReferenceEquals(CurrentProject, parent)
+                            && RequiredDependencies.Contains(item))
+                        {
+                            item.SetManagedIconSource(source);
+                        }
+                    })
+                    .ConfigureAwait(false);
             });
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }

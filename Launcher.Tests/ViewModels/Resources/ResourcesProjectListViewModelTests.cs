@@ -94,6 +94,68 @@ public sealed class ResourcesProjectListViewModelTests
         Assert.Equal("sodium", Assert.Single(viewModel.VisibleProjects).Project.ProjectId);
     }
 
+    [Fact]
+    public void ProjectDetailsDeepLinkDefersProjectListLoadUntilReturningToList()
+    {
+        var service = new SequencedResourceCatalogService(() => Task.FromResult(CreateSearchResult()));
+        var resources = new ResourcesPageViewModel(service);
+        var reference = new ResourceProjectReference(
+            ResourceProjectKind.Mod,
+            ResourceProjectSource.Modrinth,
+            "sodium");
+        var project = new ResourceProject
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            ProjectId = "sodium",
+            Title = "Sodium"
+        };
+
+        Assert.True(resources.BeginLoadProjectDetails(reference));
+        Assert.True(resources.ModPage.IsProjectDetailsLoading);
+        resources.ShowProjectDetails(reference, project);
+        resources.BeginEnsureCurrentSectionLoaded();
+
+        Assert.Equal("mods", resources.SelectedSection?.Id);
+        Assert.Same(resources.ModPage, resources.CurrentOnlineProjectPage);
+        Assert.Equal(ResourcesModPageStep.ProjectDetails, resources.ModPage.CurrentStep);
+        Assert.Same(project, resources.ModPage.Details.CurrentProject?.Project);
+        Assert.Equal(0, service.CallCount);
+
+        resources.ModPage.BackToProjectList();
+
+        Assert.Equal(ResourcesModPageStep.ProjectList, resources.ModPage.CurrentStep);
+        Assert.Equal(1, service.CallCount);
+    }
+
+    [Fact]
+    public void ProjectDetailsLoadingIgnoresCompletionAfterUserReturnsToList()
+    {
+        var resources = new ResourcesPageViewModel();
+        var reference = new ResourceProjectReference(
+            ResourceProjectKind.Mod,
+            ResourceProjectSource.Modrinth,
+            "sodium");
+        var project = new ResourceProject
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            ProjectId = "sodium",
+            Title = "Sodium"
+        };
+
+        Assert.True(resources.BeginLoadProjectDetails(reference));
+        Assert.True(resources.ModPage.IsProjectDetailsLoading);
+        Assert.Equal(ResourcesModPageStep.ProjectDetails, resources.ModPage.CurrentStep);
+
+        resources.ModPage.BackToProjectList();
+
+        Assert.False(resources.ModPage.IsProjectDetailsLoading);
+        Assert.Equal(ResourcesModPageStep.ProjectList, resources.ModPage.CurrentStep);
+        Assert.False(resources.ShowProjectDetails(reference, project));
+        Assert.Null(resources.ModPage.Details.CurrentProject);
+    }
+
     /// <summary>
     /// 结果落地和缩略图回填都是排队执行的，且大结果集是分批加入集合的：缩略图返回时，
     /// 后面几批还没进 VisibleProjects。曾经要求"已在集合中"才回填，这些图标会被静默丢弃，
