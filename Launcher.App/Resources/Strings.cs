@@ -36,6 +36,8 @@ public static class Strings
     public static string Search_Placeholder => Get(nameof(Search_Placeholder));
     public static string Back_Button => Get(nameof(Back_Button));
     public static string Back_Tooltip => Get(nameof(Back_Tooltip));
+    public static string Window_MaximizeTooltip => Get(nameof(Window_MaximizeTooltip));
+    public static string Window_RestoreTooltip => Get(nameof(Window_RestoreTooltip));
     public static string Cancel_Button => Get(nameof(Cancel_Button));
     public static string Confirm_Button => Get(nameof(Confirm_Button));
     public static string Delete_Button => Get(nameof(Delete_Button));

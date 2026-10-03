@@ -65,10 +65,20 @@
                             UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
 
-    <Border CornerRadius="8"
+    <Border x:Name="WindowSurface"
             BorderBrush="{DynamicResource Brush.Surface.WindowBorder}"
             BorderThickness="{DynamicResource Thickness.Surface.WindowBorder}"
             SnapsToDevicePixels="True">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="CornerRadius" Value="8" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding WindowState, ElementName=RootWindow}" Value="Maximized">
+                        <Setter Property="CornerRadius" Value="0" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
         <Grid Background="Transparent">
             <controls:ImageBackdropSource x:Name="LauncherBackgroundVisualSource"
                                           ImageSource="{Binding LauncherBackground.ImageSource}"
@@ -150,7 +160,7 @@
 
                 <Border Grid.Column="1"
                         Grid.Row="0"
-                        Margin="0,0,88,0"
+                        Margin="0,0,124,0"
                         Background="Transparent"
                         MouseLeftButtonDown="TitleBarDragArea_OnMouseLeftButtonDown" />
 
@@ -160,13 +170,44 @@
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top"
                             Margin="0,8,12,0">
-                    <Button Style="{StaticResource WindowCaptionButtonStyle}"
+                    <Button x:Name="MinimizeWindowButton"
+                            Style="{StaticResource WindowCaptionButtonStyle}"
                             Command="{Binding MinimizeWindowCommand}">
                         <TextBlock FontFamily="{DynamicResource LauncherIconFontFamily}"
                                    FontSize="10"
                                    Text="&#xE921;" />
                     </Button>
-                    <Button Style="{StaticResource WindowCaptionButtonStyle}"
+                    <Button x:Name="MaximizeRestoreButton"
+                            Margin="4,0,0,0"
+                            AutomationProperties.Name="{Binding ToolTip, RelativeSource={RelativeSource Self}}"
+                            Click="MaximizeRestoreButton_OnClick">
+                        <Button.Style>
+                            <Style TargetType="Button"
+                                   BasedOn="{StaticResource WindowCaptionButtonStyle}">
+                                <Setter Property="ToolTip" Value="{x:Static res:Strings.Window_MaximizeTooltip}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding WindowState, ElementName=RootWindow}" Value="Maximized">
+                                        <Setter Property="ToolTip" Value="{x:Static res:Strings.Window_RestoreTooltip}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <TextBlock FontFamily="{DynamicResource LauncherIconFontFamily}"
+                                   FontSize="10">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="&#xE922;" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding WindowState, ElementName=RootWindow}" Value="Maximized">
+                                            <Setter Property="Text" Value="&#xE923;" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Button>
+                    <Button x:Name="CloseWindowButton"
+                            Style="{StaticResource WindowCaptionButtonStyle}"
                             Margin="4,0,0,0"
                             Command="{Binding CloseWindowCommand}">
                         <TextBlock FontFamily="{DynamicResource LauncherIconFontFamily}"

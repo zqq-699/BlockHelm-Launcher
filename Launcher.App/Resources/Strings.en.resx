@@ -87,6 +87,12 @@
   <data name="Back_Tooltip" xml:space="preserve">
     <value>Back</value>
   </data>
+  <data name="Window_MaximizeTooltip" xml:space="preserve">
+    <value>Maximize</value>
+  </data>
+  <data name="Window_RestoreTooltip" xml:space="preserve">
+    <value>Restore</value>
+  </data>
   <data name="Cancel_Button" xml:space="preserve">
     <value>Cancel</value>
   </data>

@@ -24,6 +24,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shell;
 using System.Windows.Threading;
 using Launcher.App.Controls;
 using Launcher.App.Diagnostics;
@@ -80,6 +81,8 @@ public partial class MainWindow : Window
         ILogger<MainWindow>? logger = null)
     {
         InitializeComponent();
+        StateChanged += MainWindow_StateChanged;
+        UpdateWindowChromeCornerRadius();
         this.viewModel = viewModel;
         this.accountDialogService = accountDialogService;
         this.floatingMessageService = floatingMessageService;
@@ -105,6 +108,7 @@ public partial class MainWindow : Window
 
         viewModel.PropertyChanged += ViewModel_PropertyChanged;
         LauncherWindowBackdrop.Attach(this, themeService);
+        MaximizedWindowWorkArea.Attach(this);
         NativeCaptionButtons.Hide(this);
         Loaded += MainWindow_Loaded;
         Closing += Window_OnClosing;
@@ -159,6 +163,27 @@ public partial class MainWindow : Window
         WindowState = WindowState == WindowState.Maximized
             ? WindowState.Normal
             : WindowState.Maximized;
+    }
+
+    private void MaximizeRestoreButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ToggleWindowMaximizedState();
+    }
+
+    private void MainWindow_StateChanged(object? sender, EventArgs e)
+    {
+        UpdateWindowChromeCornerRadius();
+    }
+
+    private void UpdateWindowChromeCornerRadius()
+    {
+        var chrome = WindowChrome.GetWindowChrome(this);
+        if (chrome is not null)
+        {
+            chrome.CornerRadius = WindowState == WindowState.Maximized
+                ? new CornerRadius(0)
+                : new CornerRadius(8);
+        }
     }
 
     private FrameworkElement? ResolvePageRoot(string page)

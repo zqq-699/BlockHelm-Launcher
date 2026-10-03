@@ -87,6 +87,12 @@
   <data name="Back_Tooltip" xml:space="preserve">
     <value>返回</value>
   </data>
+  <data name="Window_MaximizeTooltip" xml:space="preserve">
+    <value>最大化</value>
+  </data>
+  <data name="Window_RestoreTooltip" xml:space="preserve">
+    <value>還原</value>
+  </data>
   <data name="Cancel_Button" xml:space="preserve">
     <value>取消</value>
   </data>
