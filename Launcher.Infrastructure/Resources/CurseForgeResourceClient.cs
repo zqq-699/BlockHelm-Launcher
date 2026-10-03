@@ -192,7 +192,7 @@ internal sealed class CurseForgeResourceClient(
                 .ToList();
         }
         var excludedIds = CreateCurrentIds(request.ProjectId, request.Slug, projectId.ToString());
-        var dependencyProjects = request.Kind is ResourceProjectKind.Mod
+        var dependencyProjects = request.Kind is ResourceProjectKind.Mod && request.IncludeDependencies
             ? await LoadDependencyProjectsAsync(CollectRequiredProjectIds(files, excludedIds), apiKey, cancellationToken).ConfigureAwait(false)
             : new Dictionary<string, ResourceProject>(StringComparer.OrdinalIgnoreCase);
 

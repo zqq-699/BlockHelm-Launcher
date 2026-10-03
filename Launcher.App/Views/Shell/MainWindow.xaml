@@ -867,6 +867,105 @@
                 </Grid>
             </controls:DialogHost>
 
+            <controls:DialogHost x:Name="ModUpdateDialogHost"
+                                 Grid.ColumnSpan="2"
+                                 Grid.RowSpan="2"
+                                 DialogWidth="440"
+                                 UseIntegratedOverlay="True"
+                                 IsOpen="{Binding IsModUpdateDialogOpen}"
+                                 DataContext="{Binding GameSettingsPage.Dialogs}">
+                <Grid Style="{StaticResource DialogContentGridStyle}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="{Binding ModUpdateDialogTitle}"
+                               Style="{StaticResource DialogTitleTextStyle}" />
+
+                    <TextBlock Grid.Row="1"
+                               Margin="0,16,0,0"
+                               Text="{Binding ModUpdateDialogMessage}"
+                               Style="{StaticResource DialogBodyTextStyle}" />
+
+                    <TextBlock Grid.Row="2"
+                               Margin="0,16,0,24"
+                               Text="{x:Static res:Strings.Dialog_ModUpdateRiskWarning}"
+                               Style="{StaticResource DialogBodyTextStyle}" />
+
+                    <StackPanel Grid.Row="3"
+                                Style="{StaticResource DialogFooterStyle}">
+                        <Button Style="{StaticResource LauncherDialogButtonStyle}"
+                                Content="{x:Static res:Strings.Cancel_Button}"
+                                Command="{Binding CancelModUpdateDialogCommand}" />
+                        <Button Style="{StaticResource LauncherPrimaryDialogButtonStyle}"
+                                Margin="{StaticResource DialogTrailingButtonMargin}"
+                                Content="{x:Static res:Strings.Dialog_UpdateButton}"
+                                Command="{Binding ConfirmModUpdateDialogCommand}" />
+                    </StackPanel>
+                </Grid>
+            </controls:DialogHost>
+
+            <controls:DialogHost x:Name="ModBulkUpdateDialogHost"
+                                 Grid.ColumnSpan="2"
+                                 Grid.RowSpan="2"
+                                 DialogWidth="440"
+                                 UseIntegratedOverlay="True"
+                                 IsOpen="{Binding IsModBulkUpdateDialogOpen}"
+                                 DataContext="{Binding GameSettingsPage.Dialogs}">
+                <Grid Style="{StaticResource DialogContentGridStyle}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="{x:Static res:Strings.Dialog_ModBulkUpdateTitle}"
+                               Style="{StaticResource DialogTitleTextStyle}" />
+
+                    <StackPanel Grid.Row="1"
+                                Margin="0,16,0,24">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding ModBulkUpdateDialogMessage}"
+                                       Style="{StaticResource DialogBodyTextStyle}" />
+                            <TextBlock Grid.Column="1"
+                                       Margin="16,0,0,0"
+                                       HorizontalAlignment="Right"
+                                       Text="{Binding ModBulkUpdateCheckingCountText}"
+                                       Visibility="{Binding IsModBulkUpdateChecking, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}"
+                                       Style="{StaticResource DialogBodyTextStyle}" />
+                        </Grid>
+                        <ProgressBar Height="5"
+                                     Margin="0,12,0,0"
+                                     Minimum="0"
+                                     Maximum="100"
+                                     Value="{Binding ModBulkUpdateCheckingProgress, Mode=OneWay}"
+                                     Visibility="{Binding IsModBulkUpdateChecking, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}"
+                                     Style="{StaticResource LauncherProgressBarStyle}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2"
+                                Style="{StaticResource DialogFooterStyle}">
+                        <Button Style="{StaticResource LauncherDialogButtonStyle}"
+                                Content="{x:Static res:Strings.Cancel_Button}"
+                                Visibility="{Binding CanCancelModBulkUpdate, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}"
+                                Command="{Binding CancelModBulkUpdateDialogCommand}" />
+                        <Button Style="{StaticResource LauncherPrimaryDialogButtonStyle}"
+                                Margin="{StaticResource DialogTrailingButtonMargin}"
+                                Content="{Binding ModBulkUpdateConfirmButtonText}"
+                                IsEnabled="{Binding CanConfirmModBulkUpdate}"
+                                Visibility="{Binding CanConfirmModBulkUpdate, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}"
+                                Command="{Binding ConfirmModBulkUpdateDialogCommand}" />
+                    </StackPanel>
+                </Grid>
+            </controls:DialogHost>
+
             <controls:DialogHost x:Name="DeleteModsDialogHost"
                                  Grid.ColumnSpan="2"
                                  Grid.RowSpan="2"

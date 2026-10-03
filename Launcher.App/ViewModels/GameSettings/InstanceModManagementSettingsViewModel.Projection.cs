@@ -191,6 +191,7 @@ public sealed partial class InstanceModManagementSettingsViewModel
         allModsByFullPath.Clear();
         foreach (var item in allModsByProjectionPath.Values)
             allModsByFullPath[item.FullPath] = item;
+        SynchronizeModUpdateBusyStates();
 
         // 搜索或筛选隐藏的项目不应继续留在批量选择中。
         if (IsMultiSelectMode)
@@ -315,6 +316,17 @@ public sealed partial class InstanceModManagementSettingsViewModel
         OnPropertyChanged(nameof(CanShowModUnavailableState));
         OnPropertyChanged(nameof(CanShowModLoadingState));
         OnPropertyChanged(nameof(ModUnavailableMessage));
+        OnPropertyChanged(nameof(CanUpdateAllMods));
+        UpdateAllModsCommand.NotifyCanExecuteChanged();
+    }
+
+    private void SynchronizeModUpdateBusyStates()
+    {
+        foreach (var item in allModsByProjectionPath.Values)
+        {
+            var path = Path.GetFullPath(item.FullPath);
+            item.IsUpdateBusy = IsBulkUpdateBusy || activeUpdatePaths.Contains(path);
+        }
     }
 
     private void EnterMultiSelectMode()

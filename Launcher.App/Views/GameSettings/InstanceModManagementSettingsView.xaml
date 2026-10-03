@@ -71,6 +71,11 @@
                                     Content="{x:Static res:Strings.GameSettings_ModManagementOnlineInstallButton}"
                                     Command="{Binding DataContext.InstallOnlineModCommand, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceModManagementSettingsView}}}"
                                     Style="{StaticResource LauncherDialogButtonStyle}" />
+                            <Button Margin="0,0,8,4"
+                                    Content="{x:Static res:Strings.GameSettings_ModManagementUpdateAllButton}"
+                                    IsEnabled="{Binding DataContext.CanUpdateAllMods, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceModManagementSettingsView}}}"
+                                    Command="{Binding DataContext.UpdateAllModsCommand, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceModManagementSettingsView}}}"
+                                    Style="{StaticResource LauncherDialogButtonStyle}" />
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
@@ -141,6 +146,18 @@
                                 <controls:SvgIcon Width="16"
                                                   Height="16"
                                                   IconKey="instance_setting_page/info"
+                                                  Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                            </Button>
+
+                            <Button Margin="4,0,0,0"
+                                    Style="{StaticResource InlineIconButtonStyle}"
+                                    ToolTip="{x:Static res:Strings.Dialog_UpdateButton}"
+                                    IsEnabled="{Binding CanUpdate}"
+                                    Command="{Binding DataContext.RequestModUpdateCommand, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceModManagementSettingsView}}}"
+                                    CommandParameter="{Binding}">
+                                <controls:SvgIcon Width="16"
+                                                  Height="16"
+                                                  IconKey="general/general_update"
                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
                             </Button>
 

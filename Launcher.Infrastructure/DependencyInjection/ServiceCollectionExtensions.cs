@@ -110,6 +110,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IUserFileDeletionService, UserFileDeletionService>();
         services.AddSingleton<IModService, ModService>();
         services.AddSingleton<LocalFileFingerprintService>();
+        services.AddSingleton<IModUpdateProvider, ModrinthModUpdateProvider>();
+        services.AddSingleton<IModUpdateProvider, CurseForgeModUpdateProvider>();
+        services.AddSingleton<IModUpdateFileTransaction, ModUpdateFileTransaction>();
         services.AddSingleton<ILocalModIconEnrichmentService, LocalModIconEnrichmentService>();
         services.AddSingleton<ILocalResourceCategoryEnrichmentService, LocalResourceCategoryEnrichmentService>();
         services.AddSingleton<IInstanceBackupService, InstanceBackupService>();

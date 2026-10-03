@@ -421,7 +421,15 @@ public sealed class CurseForgeApiClient
             }
 
             if (fingerprint is not null && projectId is not null && fileId is not null)
-                result[fingerprint.Value] = new CurseForgeFingerprintMatch(projectId.Value, fileId.Value);
+            {
+                result[fingerprint.Value] = new CurseForgeFingerprintMatch(
+                    projectId.Value,
+                    fileId.Value,
+                    file is null ? string.Empty : TryReadString(file.Value, "displayName")
+                        ?? TryReadString(file.Value, "fileName")
+                        ?? string.Empty,
+                    file is null ? null : TryReadDateTimeOffset(file.Value, "fileDate"));
+            }
         }
 
         return result;
@@ -518,7 +526,11 @@ public sealed class CurseForgeApiClient
         string? Sha512,
         bool IsDistributionRestricted);
 
-    internal sealed record CurseForgeFingerprintMatch(long ProjectId, long FileId);
+    internal sealed record CurseForgeFingerprintMatch(
+        long ProjectId,
+        long FileId,
+        string VersionNumber,
+        DateTimeOffset? FileDate);
 
     private sealed record DownloadUrlResult(HttpStatusCode StatusCode, string? DownloadUrl);
 
@@ -532,6 +544,18 @@ public sealed class CurseForgeApiClient
 
         public TimeSpan? RetryAfter { get; }
     }
+
+    private static string? TryReadString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) && property.ValueKind is JsonValueKind.String
+            ? property.GetString()
+            : null;
+
+    private static DateTimeOffset? TryReadDateTimeOffset(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property)
+        && property.ValueKind is JsonValueKind.String
+        && DateTimeOffset.TryParse(property.GetString(), out var value)
+            ? value
+            : null;
 
     private sealed record CurseForgeFingerprintRequest(
         [property: JsonPropertyName("fingerprints")] IReadOnlyList<long> Fingerprints);

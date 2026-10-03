@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILocalModpackImportService, LocalModpackImportService>();
         services.AddSingleton<IServerModpackDeploymentService, ServerModpackDeploymentService>();
         services.AddSingleton<IResourceDependencyPlanningService, ResourceDependencyPlanningService>();
+        services.AddSingleton<IModUpdateService, ModUpdateService>();
         return services;
     }
 }

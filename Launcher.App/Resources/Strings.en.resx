@@ -3765,4 +3765,40 @@ The current game folder will be backed up first.</value>
   <data name="Status_CustomFileDownloadFailed" xml:space="preserve"><value>Download failed. Check the network or save location and try again.</value></data>
   <data name="Status_ResourceProjectDestinationConflictFormat" xml:space="preserve"><value>“{0}” already exists or changed after confirmation. The download was stopped and the original file was not overwritten.</value></data>
   <data name="Status_ResourceProjectInstanceDestinationInvalid" xml:space="preserve"><value>Choose this instance's mods, resourcepacks, or shaderpacks folder. Other locations are not allowed.</value></data>
+  <data name="Dialog_ModUpdateTitle" xml:space="preserve"><value>Update mod</value></data>
+  <data name="Dialog_ModUpdateTitleFormat" xml:space="preserve"><value>Update {0}</value></data>
+  <data name="Dialog_ModUpdateMessageFormat" xml:space="preserve"><value>Current version: {0}&#xA;Target version: {1}&#xA;Source: {2}&#xA;Target file: {3}&#xA;Published: {4}</value></data>
+  <data name="Dialog_ModUpdateRiskWarning" xml:space="preserve"><value>Updating this mod may cause incompatibilities, prevent the instance from starting, or cause crashes. Are you sure you want to update?</value></data>
+  <data name="Dialog_ModUpdateUnknownDate" xml:space="preserve"><value>Unknown</value></data>
+  <data name="DownloadTask_ModUpdateSubtitleFormat" xml:space="preserve"><value>{0} → {1}</value></data>
+  <data name="Status_ModUpdateChecking" xml:space="preserve"><value>Checking for a mod update...</value></data>
+  <data name="Status_ModUpdateUpToDate" xml:space="preserve"><value>This mod is already up to date</value></data>
+  <data name="Status_ModUpdateNotRecognized" xml:space="preserve"><value>This mod could not be identified on Modrinth or CurseForge.</value></data>
+  <data name="Status_ModUpdateCheckUnavailable" xml:space="preserve"><value>A complete update check is temporarily unavailable. Please try again later.</value></data>
+  <data name="Status_ModUpdateAlreadyRunning" xml:space="preserve"><value>This mod already has an active check or update task.</value></data>
+  <data name="Status_ModUpdateTaskStarted" xml:space="preserve"><value>The update was added to Downloads.</value></data>
+  <data name="Status_ModUpdatePreparing" xml:space="preserve"><value>Preparing the mod update...</value></data>
+  <data name="Status_ModUpdateDownloading" xml:space="preserve"><value>Downloading and verifying the new version...</value></data>
+  <data name="Status_ModUpdateApplying" xml:space="preserve"><value>Backing up the old file and applying the update...</value></data>
+  <data name="Status_ModUpdateCompleted" xml:space="preserve"><value>Mod update completed.</value></data>
+  <data name="Status_ModUpdateTargetExistsFormat" xml:space="preserve"><value>The target file “{0}” already exists. The update stopped without overwriting it.</value></data>
+  <data name="Status_ModUpdateSourceChanged" xml:space="preserve"><value>The original mod file changed after the check, so the update was stopped.</value></data>
+  <data name="Status_ModUpdateIntegrityFailed" xml:space="preserve"><value>The downloaded file failed verification. The original mod was not changed.</value></data>
+  <data name="Status_ModUpdateFailed" xml:space="preserve"><value>The mod update failed. The original file was preserved or restored.</value></data>
+  <data name="GameSettings_ModManagementUpdateAllButton" xml:space="preserve"><value>Update all</value></data>
+  <data name="Dialog_ModBulkUpdateTitle" xml:space="preserve"><value>Update all mods</value></data>
+  <data name="Dialog_ModBulkUpdateMessageFormat" xml:space="preserve"><value>Updates available: {0}&#xA;Already up to date: {1}&#xA;Not recognized: {2}&#xA;Could not be checked: {3}</value></data>
+  <data name="Dialog_ModBulkUpdateFailed" xml:space="preserve"><value>Update failed.</value></data>
+  <data name="Dialog_ModBulkUpdateCheckingCountFormat" xml:space="preserve"><value>{0}/{1}</value></data>
+  <data name="DownloadTask_ModBulkUpdateTitle" xml:space="preserve"><value>Update all mods</value></data>
+  <data name="DownloadTask_ModBulkUpdateSubtitleFormat" xml:space="preserve"><value>{0} installed mods</value></data>
+  <data name="Status_ModBulkUpdateChecking" xml:space="preserve"><value>Checking all mods for updates...</value></data>
+  <data name="Status_ModBulkUpdateWaitingForConfirmation" xml:space="preserve"><value>Check complete. Waiting for confirmation...</value></data>
+  <data name="Status_ModBulkUpdateUpdating" xml:space="preserve"><value>Downloading, verifying, and updating mods...</value></data>
+  <data name="Status_ModBulkUpdateCheckIncompleteFormat" xml:space="preserve"><value>The full check could not be completed: {0} up to date, {1} not recognized, and {2} could not be checked.</value></data>
+  <data name="Status_ModBulkUpdateNoneFormat" xml:space="preserve"><value>No updates were found: {0} up to date and {1} not recognized.</value></data>
+  <data name="Status_ModBulkUpdateTaskStartedFormat" xml:space="preserve"><value>Started updating {0} mods.</value></data>
+  <data name="Status_ModBulkUpdatePartialFormat" xml:space="preserve"><value>Bulk update partially completed: {0} succeeded, {1} failed, and {2} could not be checked. First failure: {3}</value></data>
+  <data name="Status_ModBulkUpdateCompletedFormat" xml:space="preserve"><value>{0} mods updated.</value></data>
+  <data name="Status_ModBulkUpdateFailed" xml:space="preserve"><value>The bulk update failed. Completed updates were kept and the remaining original files were preserved.</value></data>
 </root>

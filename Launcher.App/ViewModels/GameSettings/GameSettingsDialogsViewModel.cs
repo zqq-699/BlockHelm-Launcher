@@ -24,6 +24,9 @@ using Launcher.App.Services;
 using Launcher.Application.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Launcher.Domain.Models;
+using System.Globalization;
+using System.IO;
 
 namespace Launcher.App.ViewModels.GameSettings;
 
@@ -45,6 +48,10 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
     [ObservableProperty] private bool isInvalidImportDialogOpen;
     [ObservableProperty] private string invalidImportDialogMessage = string.Empty;
     [ObservableProperty] private string invalidImportDialogTitle = Strings.Dialog_InvalidSaveImportTitle;
+    [ObservableProperty] private bool isModUpdateDialogOpen;
+    [ObservableProperty] private ModUpdateConfirmationRequest? pendingModUpdate;
+    [ObservableProperty] private bool isModBulkUpdateDialogOpen;
+    [ObservableProperty] private ModBulkUpdateConfirmationRequest? pendingModBulkUpdate;
 
     public GameSettingsDialogsViewModel(
         IGameInstanceService instanceService,
@@ -102,6 +109,88 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
         ? string.Empty
         : string.Format(Strings.Dialog_ReplaceModImportMessageFormat, PendingModImportConflict.FileName);
 
+    public string ModUpdateDialogTitle => PendingModUpdate is null
+        ? Strings.Dialog_ModUpdateTitle
+        : string.Format(Strings.Dialog_ModUpdateTitleFormat, PendingModUpdate.Title);
+
+    public string ModUpdateDialogMessage
+    {
+        get
+        {
+            if (PendingModUpdate is null)
+                return string.Empty;
+
+            var candidate = PendingModUpdate.Candidate;
+            var currentVersion = string.IsNullOrWhiteSpace(candidate.CurrentVersionNumber)
+                ? Path.GetFileName(candidate.LocalFile.FullPath)
+                : candidate.CurrentVersionNumber;
+            var targetVersion = string.IsNullOrWhiteSpace(candidate.TargetVersion.VersionNumber)
+                ? candidate.TargetVersion.Name
+                : candidate.TargetVersion.VersionNumber;
+            var source = candidate.Source is ResourceProjectSource.Modrinth
+                ? Strings.Resources_ModSourceModrinth
+                : Strings.Resources_ModSourceCurseForge;
+            var targetFileName = candidate.TargetVersion.FileName;
+            if (!candidate.LocalFile.IsEnabled
+                && !targetFileName.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
+            {
+                targetFileName += ".disabled";
+            }
+            var publishedAt = candidate.TargetVersion.PublishedAt?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)
+                ?? Strings.Dialog_ModUpdateUnknownDate;
+            return string.Format(
+                Strings.Dialog_ModUpdateMessageFormat,
+                currentVersion,
+                targetVersion,
+                source,
+                targetFileName,
+                publishedAt);
+        }
+    }
+
+    public string ModBulkUpdateDialogMessage => PendingModBulkUpdate?.Stage switch
+    {
+        ModBulkUpdateConfirmationStage.RiskConfirmation => Strings.Dialog_ModUpdateRiskWarning,
+        ModBulkUpdateConfirmationStage.Checking => Strings.Status_ModBulkUpdateChecking,
+        ModBulkUpdateConfirmationStage.Failed => Strings.Dialog_ModBulkUpdateFailed,
+        ModBulkUpdateConfirmationStage.Summary => string.Concat(
+            string.Format(
+                Strings.Dialog_ModBulkUpdateMessageFormat,
+                PendingModBulkUpdate.UpdateCount,
+                PendingModBulkUpdate.UpToDateCount,
+                PendingModBulkUpdate.NotRecognizedCount,
+                PendingModBulkUpdate.UnavailableCount),
+            Environment.NewLine,
+            Environment.NewLine,
+            Strings.Dialog_ModUpdateRiskWarning),
+        _ => string.Empty
+    };
+
+    public bool CanConfirmModBulkUpdate => PendingModBulkUpdate is
+        { Stage: not ModBulkUpdateConfirmationStage.Checking };
+
+    public bool CanCancelModBulkUpdate => PendingModBulkUpdate is
+        { Stage: not ModBulkUpdateConfirmationStage.Failed };
+
+    public bool IsModBulkUpdateChecking => PendingModBulkUpdate?.Stage is
+        ModBulkUpdateConfirmationStage.Checking;
+
+    public double ModBulkUpdateCheckingProgress => PendingModBulkUpdate?.CheckProgressPercent ?? 0;
+
+    public string ModBulkUpdateCheckingCountText => PendingModBulkUpdate is null
+        ? string.Empty
+        : string.Format(
+            Strings.Dialog_ModBulkUpdateCheckingCountFormat,
+            PendingModBulkUpdate.CheckCompletedCount,
+            PendingModBulkUpdate.CheckTotalCount);
+
+    public string ModBulkUpdateConfirmButtonText => PendingModBulkUpdate?.Stage is
+        ModBulkUpdateConfirmationStage.Summary
+            ? PendingModBulkUpdate.UpdateCount > 0
+                ? Strings.GameSettings_ModManagementUpdateAllButton
+                : Strings.Confirm_Button
+            : Strings.Confirm_Button;
+
     [RelayCommand]
     public void OpenDeleteInstance(GameSettingsInstanceItem instance)
     {
@@ -130,6 +219,69 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
     {
         PendingModImportConflict = request;
         IsReplaceModImportDialogOpen = true;
+    }
+
+    public void OpenModUpdate(ModUpdateConfirmationRequest request)
+    {
+        CloseModBulkUpdateDialog(cancel: true);
+        PendingModUpdate?.Resolve(false);
+        PendingModUpdate = request;
+        OnPropertyChanged(nameof(ModUpdateDialogTitle));
+        OnPropertyChanged(nameof(ModUpdateDialogMessage));
+        IsModUpdateDialogOpen = true;
+    }
+
+    public void OpenModBulkUpdate(ModBulkUpdateConfirmationRequest request)
+    {
+        PendingModUpdate?.Resolve(false);
+        PendingModUpdate = null;
+        IsModUpdateDialogOpen = false;
+        CloseModBulkUpdateDialog(cancel: true);
+        PendingModBulkUpdate = request;
+        request.Changed += PendingModBulkUpdate_Changed;
+        request.Closed += PendingModBulkUpdate_Closed;
+        NotifyModBulkUpdateDialogPropertiesChanged();
+        IsModBulkUpdateDialogOpen = true;
+    }
+
+    [RelayCommand]
+    private void CancelModUpdateDialog()
+    {
+        var pending = PendingModUpdate;
+        PendingModUpdate = null;
+        IsModUpdateDialogOpen = false;
+        pending?.Resolve(false);
+    }
+
+    [RelayCommand]
+    private void ConfirmModUpdateDialog()
+    {
+        var pending = PendingModUpdate;
+        PendingModUpdate = null;
+        IsModUpdateDialogOpen = false;
+        pending?.Resolve(true);
+    }
+
+    [RelayCommand]
+    private void CancelModBulkUpdateDialog()
+    {
+        var pending = PendingModBulkUpdate;
+        pending?.Cancel();
+        CloseModBulkUpdateDialog(cancel: false);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanConfirmModBulkUpdate))]
+    private void ConfirmModBulkUpdateDialog()
+    {
+        var pending = PendingModBulkUpdate;
+        if (pending is null || !CanConfirmModBulkUpdate)
+            return;
+
+        var close = pending.Stage is ModBulkUpdateConfirmationStage.Summary
+            or ModBulkUpdateConfirmationStage.Failed;
+        pending.Confirm();
+        if (close)
+            CloseModBulkUpdateDialog(cancel: false);
     }
 
     public void OpenSaveImportFailure(SaveImportFailureRequest request) =>
@@ -276,6 +428,45 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
 
     partial void OnPendingModImportConflictChanged(ModImportConflictRequest? value) =>
         OnPropertyChanged(nameof(ReplaceModImportDialogMessage));
+
+    partial void OnPendingModBulkUpdateChanged(ModBulkUpdateConfirmationRequest? value) =>
+        NotifyModBulkUpdateDialogPropertiesChanged();
+
+    private void PendingModBulkUpdate_Changed()
+    {
+        NotifyModBulkUpdateDialogPropertiesChanged();
+    }
+
+    private void PendingModBulkUpdate_Closed()
+    {
+        CloseModBulkUpdateDialog(cancel: false);
+    }
+
+    private void CloseModBulkUpdateDialog(bool cancel)
+    {
+        var pending = PendingModBulkUpdate;
+        if (pending is null)
+            return;
+
+        pending.Changed -= PendingModBulkUpdate_Changed;
+        pending.Closed -= PendingModBulkUpdate_Closed;
+        if (cancel)
+            pending.Cancel();
+        PendingModBulkUpdate = null;
+        IsModBulkUpdateDialogOpen = false;
+    }
+
+    private void NotifyModBulkUpdateDialogPropertiesChanged()
+    {
+        OnPropertyChanged(nameof(ModBulkUpdateDialogMessage));
+        OnPropertyChanged(nameof(CanConfirmModBulkUpdate));
+        OnPropertyChanged(nameof(CanCancelModBulkUpdate));
+        OnPropertyChanged(nameof(IsModBulkUpdateChecking));
+        OnPropertyChanged(nameof(ModBulkUpdateCheckingProgress));
+        OnPropertyChanged(nameof(ModBulkUpdateCheckingCountText));
+        OnPropertyChanged(nameof(ModBulkUpdateConfirmButtonText));
+        ConfirmModBulkUpdateDialogCommand.NotifyCanExecuteChanged();
+    }
 
     private void OpenContentDeletion(ContentKind kind, IReadOnlyList<string> fullPaths, IReadOnlyList<string> titles)
     {

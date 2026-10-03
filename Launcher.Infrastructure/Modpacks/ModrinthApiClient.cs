@@ -156,6 +156,10 @@ public sealed class ModrinthApiClient
             }
 
             result[hash] = new ModrinthVersionFileMatch(
+                version.ProjectId,
+                version.Id,
+                version.VersionNumber,
+                version.DatePublished,
                 file.Url,
                 file.Hashes.Sha1,
                 file.Hashes.Sha512,
@@ -188,6 +192,10 @@ public sealed class ModrinthApiClient
     }
 
     internal sealed record ModrinthVersionFileMatch(
+        string ProjectId,
+        string VersionId,
+        string VersionNumber,
+        DateTimeOffset? DatePublished,
         string Url,
         string Sha1,
         string? Sha512,
@@ -199,6 +207,18 @@ public sealed class ModrinthApiClient
 
     private sealed class ModrinthVersionMatch
     {
+        [JsonPropertyName("project_id")]
+        public string ProjectId { get; init; } = string.Empty;
+
+        [JsonPropertyName("id")]
+        public string Id { get; init; } = string.Empty;
+
+        [JsonPropertyName("version_number")]
+        public string VersionNumber { get; init; } = string.Empty;
+
+        [JsonPropertyName("date_published")]
+        public DateTimeOffset? DatePublished { get; init; }
+
         [JsonPropertyName("files")]
         public List<ModrinthVersionFile> Files { get; init; } = [];
     }

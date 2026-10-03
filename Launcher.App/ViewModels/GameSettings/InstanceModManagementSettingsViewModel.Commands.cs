@@ -33,6 +33,518 @@ namespace Launcher.App.ViewModels.GameSettings;
 public sealed partial class InstanceModManagementSettingsViewModel
 {
     [RelayCommand]
+    private async Task RequestModUpdateAsync(ModManagementModItemViewModel? mod)
+    {
+        if (mod is null
+            || !mod.HasProjectDetails
+            || IsBulkUpdateBusy
+            || selectedInstance is null
+            || modUpdateService is null
+            || downloadTasksPage is null)
+            return;
+
+        var localMod = ResolveLocalMod(mod.FullPath);
+        if (localMod is null)
+            return;
+        var operationPath = Path.GetFullPath(localMod.FullPath);
+        if (!activeUpdatePaths.Add(operationPath))
+        {
+            ReportModUpdateStatus(Strings.Status_ModUpdateAlreadyRunning);
+            return;
+        }
+
+        NotifyUpdateCommandAvailabilityChanged();
+
+        mod.IsUpdateBusy = true;
+        ReportModUpdateStatus(Strings.Status_ModUpdateChecking);
+        var instance = selectedInstance;
+        try
+        {
+            var result = await modUpdateService.CheckAsync(instance, localMod);
+            if (selectedInstance is null
+                || !string.Equals(instance.Id, selectedInstance.Id, StringComparison.Ordinal)
+                || !string.Equals(
+                    instance.InstanceDirectory,
+                    selectedInstance.InstanceDirectory,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ReleaseModUpdate(operationPath, mod);
+                return;
+            }
+            if (result.Status is not ModUpdateCheckStatus.UpdateAvailable || result.Candidate is null)
+            {
+                ReportModUpdateStatus(result.Status switch
+                {
+                    ModUpdateCheckStatus.UpToDate => Strings.Status_ModUpdateUpToDate,
+                    ModUpdateCheckStatus.NotRecognized => Strings.Status_ModUpdateNotRecognized,
+                    _ => Strings.Status_ModUpdateCheckUnavailable
+                });
+                ReleaseModUpdate(operationPath, mod);
+                return;
+            }
+
+            var request = new ModUpdateConfirmationRequest(mod.Title, result.Candidate);
+            ModUpdateConfirmationRequested?.Invoke(request);
+            if (ModUpdateConfirmationRequested is null || !await request.Completion)
+            {
+                ReleaseModUpdate(operationPath, mod);
+                return;
+            }
+
+            var task = downloadTasksPage.BeginTask(
+                string.Format(Strings.Dialog_ModUpdateTitleFormat, mod.Title),
+                string.Format(
+                    Strings.DownloadTask_ModUpdateSubtitleFormat,
+                    mod.FileName,
+                    ResolveUpdatedFileName(result.Candidate)));
+            task.Report(new LauncherProgress(
+                ModUpdateProgressStages.Preparing,
+                Strings.Status_ModUpdatePreparing,
+                0));
+            ReportModUpdateStatus(Strings.Status_ModUpdateTaskStarted);
+            var progress = task.CreateProgress(value => task.Report(value with
+            {
+                Message = FormatModUpdateProgress(value.Stage)
+            }));
+            var operation = RunModUpdateAsync(
+                instance,
+                result.Candidate,
+                operationPath,
+                mod,
+                task,
+                progress);
+            downloadTasksPage.TrackBackgroundTask(operation);
+        }
+        catch (OperationCanceledException)
+        {
+            ReleaseModUpdate(operationPath, mod);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Failed to check mod update. InstanceId={InstanceId} FileName={FileName}",
+                instance.Id,
+                Path.GetFileName(operationPath));
+            ReportModUpdateStatus(Strings.Status_ModUpdateCheckUnavailable);
+            ReleaseModUpdate(operationPath, mod);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUpdateAllMods))]
+    private void UpdateAllMods()
+    {
+        if (!CanUpdateAllMods || selectedInstance is null || modUpdateService is null || downloadTasksPage is null)
+            return;
+
+        var instance = selectedInstance;
+        var mods = localModsViewModel.CurrentMods.ToArray();
+        if (mods.Length == 0)
+            return;
+
+        var operationPaths = mods
+            .Select(mod => Path.GetFullPath(mod.FullPath))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (operationPaths.Any(activeUpdatePaths.Contains))
+        {
+            ReportModUpdateStatus(Strings.Status_ModUpdateAlreadyRunning);
+            return;
+        }
+
+        foreach (var path in operationPaths)
+            activeUpdatePaths.Add(path);
+        IsBulkUpdateBusy = true;
+        SynchronizeModUpdateBusyStates();
+        NotifyUpdateCommandAvailabilityChanged();
+
+        var request = new ModBulkUpdateConfirmationRequest();
+        ModBulkUpdateConfirmationRequested?.Invoke(request);
+        if (ModBulkUpdateConfirmationRequested is null)
+        {
+            ReleaseBulkModUpdate(operationPaths);
+            return;
+        }
+
+        var operation = RunBulkModUpdateAsync(instance, mods, operationPaths, request);
+        downloadTasksPage.TrackBackgroundTask(operation);
+    }
+
+    private async Task RunBulkModUpdateAsync(
+        GameInstance instance,
+        IReadOnlyList<LocalMod> mods,
+        IReadOnlyList<string> operationPaths,
+        ModBulkUpdateConfirmationRequest request)
+    {
+        Launcher.App.ViewModels.Download.DownloadTaskItem? task = null;
+        var updateStarted = false;
+        try
+        {
+            if (!await request.RiskCompletion)
+                return;
+            request.CancellationToken.ThrowIfCancellationRequested();
+            if (!IsSelectedInstance(instance))
+                return;
+
+            task = downloadTasksPage!.BeginTask(
+                Strings.DownloadTask_ModBulkUpdateTitle,
+                string.Format(Strings.DownloadTask_ModBulkUpdateSubtitleFormat, mods.Count));
+            task.Report(new LauncherProgress(
+                ModUpdateProgressStages.BatchChecking,
+                Strings.Status_ModBulkUpdateChecking,
+                0));
+            var progress = task.CreateProgress(value =>
+            {
+                if (value.Stage is ModUpdateProgressStages.BatchChecking
+                    && value.Percent is { } percent)
+                {
+                    ReportBulkCheckDialogProgress(request, percent);
+                }
+
+                task.Report(value with
+                {
+                    Message = FormatBulkModUpdateProgress(value.Stage)
+                });
+            });
+            request.BeginChecking(mods.Count, () => downloadTasksPage.CancelTask(task));
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            var check = await modUpdateService!
+                .CheckManyAsync(instance, mods, progress, task.CancellationToken);
+            task.CancellationToken.ThrowIfCancellationRequested();
+            if (!IsSelectedInstance(instance))
+            {
+                downloadTasksPage.CancelTask(task);
+                return;
+            }
+
+            var candidates = check.Items
+                .Where(item => item.Result.Status is ModUpdateCheckStatus.UpdateAvailable
+                    && item.Result.Candidate is not null)
+                .Select(item => item.Result.Candidate!)
+                .ToArray();
+            var unavailableCount = check.Items.Count(item => item.Result.Status is ModUpdateCheckStatus.Unavailable);
+            var notRecognizedCount = check.Items.Count(item => item.Result.Status is ModUpdateCheckStatus.NotRecognized);
+            var upToDateCount = check.Items.Count(item => item.Result.Status is ModUpdateCheckStatus.UpToDate);
+            var partialProviderFailureCount = check.Items.Count(item =>
+                item.Result.Status is ModUpdateCheckStatus.UpdateAvailable
+                && item.Result.SuccessfulProviderCount < check.ProviderCount);
+
+            task.Report(new LauncherProgress(
+                ModUpdateProgressStages.BatchWaitingForConfirmation,
+                Strings.Status_ModBulkUpdateWaitingForConfirmation,
+                20));
+            request.ShowSummary(
+                candidates.Length,
+                upToDateCount,
+                notRecognizedCount,
+                unavailableCount,
+                partialProviderFailureCount);
+
+            if (candidates.Length == 0)
+            {
+                var noUpdatesMessage = unavailableCount > 0
+                    ? string.Format(
+                        Strings.Status_ModBulkUpdateCheckIncompleteFormat,
+                        upToDateCount,
+                        notRecognizedCount,
+                        unavailableCount)
+                    : string.Format(
+                        Strings.Status_ModBulkUpdateNoneFormat,
+                        upToDateCount,
+                        notRecognizedCount);
+                if (unavailableCount > 0)
+                    task.Fail(noUpdatesMessage);
+                else
+                    task.Complete(noUpdatesMessage);
+                ReportModUpdateStatus(noUpdatesMessage);
+                await request.SummaryCompletion.WaitAsync(task.CancellationToken);
+                return;
+            }
+
+            if (!await request.SummaryCompletion.WaitAsync(task.CancellationToken))
+            {
+                downloadTasksPage.CancelTask(task);
+                return;
+            }
+
+            ReportModUpdateStatus(string.Format(Strings.Status_ModBulkUpdateTaskStartedFormat, candidates.Length));
+            updateStarted = true;
+            var update = await modUpdateService.UpdateManyAsync(
+                instance,
+                candidates,
+                progress,
+                task.CancellationToken);
+            var successCount = update.Items.Count(item => item.Result is not null);
+            var failedItems = update.Items.Where(item => item.FailureReason is not null).ToArray();
+            var failedCount = failedItems.Length;
+            var firstFailure = failedItems.FirstOrDefault();
+            var firstFailureFileName = firstFailure is not null
+                ? Path.GetFileName(firstFailure.Candidate.LocalFile.FullPath)
+                : Path.GetFileName(check.Items.FirstOrDefault(item =>
+                    item.Result.Status is ModUpdateCheckStatus.Unavailable)?.FullPath);
+            var message = failedCount > 0 || unavailableCount > 0
+                ? string.Format(
+                    Strings.Status_ModBulkUpdatePartialFormat,
+                    successCount,
+                    failedCount,
+                    unavailableCount,
+                    firstFailureFileName)
+                : string.Format(
+                    Strings.Status_ModBulkUpdateCompletedFormat,
+                    successCount);
+            if (failedCount > 0 || unavailableCount > 0)
+                task.Fail(message);
+            else
+                task.Complete(message);
+            ReportModUpdateStatus(message);
+            await RefreshModsAfterBulkUpdateAsync(instance);
+        }
+        catch (OperationCanceledException) when (task?.CancellationToken.IsCancellationRequested is true)
+        {
+            if (task is not null)
+                downloadTasksPage?.CancelTask(task);
+            logger.LogInformation(
+                "Mod update batch canceled. InstanceId={InstanceId} Count={Count}",
+                instance.Id,
+                mods.Count);
+            if (updateStarted)
+                await RefreshModsAfterBulkUpdateAsync(instance);
+        }
+        catch (Exception) when (request.CancellationToken.IsCancellationRequested
+            || task?.CancellationToken.IsCancellationRequested is true)
+        {
+            if (task is not null)
+                downloadTasksPage?.CancelTask(task);
+            logger.LogInformation(
+                "Mod update batch canceled while the current operation was completing. InstanceId={InstanceId} Count={Count}",
+                instance.Id,
+                mods.Count);
+            if (updateStarted)
+                await RefreshModsAfterBulkUpdateAsync(instance);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Mod update batch failed. InstanceId={InstanceId} Count={Count}",
+                instance.Id,
+                mods.Count);
+            task?.Fail(Strings.Status_ModBulkUpdateFailed);
+            ReportModUpdateStatus(Strings.Status_ModBulkUpdateFailed);
+            if (!updateStarted && request.Stage is ModBulkUpdateConfirmationStage.Checking)
+            {
+                request.ShowFailure();
+                await request.SummaryCompletion;
+            }
+            if (updateStarted)
+                await RefreshModsAfterBulkUpdateAsync(instance);
+        }
+        finally
+        {
+            request.Close();
+            ReleaseBulkModUpdate(operationPaths);
+        }
+    }
+
+    private async Task RefreshModsAfterBulkUpdateAsync(GameInstance instance)
+    {
+        if (!IsSelectedInstance(instance))
+            return;
+
+        localModsViewModel.InvalidateSnapshot();
+        try
+        {
+            await localModsViewModel.RefreshModsAsync();
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Mod update batch completed but the local mod list could not be refreshed. InstanceId={InstanceId}",
+                instance.Id);
+        }
+    }
+
+    private bool IsSelectedInstance(GameInstance instance) =>
+        selectedInstance is not null
+        && string.Equals(instance.Id, selectedInstance.Id, StringComparison.Ordinal)
+        && string.Equals(
+            instance.InstanceDirectory,
+            selectedInstance.InstanceDirectory,
+            StringComparison.OrdinalIgnoreCase);
+
+    private void ReleaseBulkModUpdate(IReadOnlyList<string> operationPaths)
+    {
+        void Release()
+        {
+            foreach (var path in operationPaths)
+                activeUpdatePaths.Remove(path);
+            IsBulkUpdateBusy = false;
+            SynchronizeModUpdateBusyStates();
+            NotifyUpdateCommandAvailabilityChanged();
+        }
+
+        if (uiDispatcher.HasAccess)
+            Release();
+        else
+            uiDispatcher.Post(Release);
+    }
+
+    private async Task RunModUpdateAsync(
+        GameInstance instance,
+        ModUpdateCandidate candidate,
+        string operationPath,
+        ModManagementModItemViewModel item,
+        Launcher.App.ViewModels.Download.DownloadTaskItem task,
+        IProgress<LauncherProgress> progress)
+    {
+        try
+        {
+            await modUpdateService!.UpdateAsync(instance, candidate, progress, task.CancellationToken);
+            task.Complete(Strings.Status_ModUpdateCompleted);
+            ReportModUpdateStatus(Strings.Status_ModUpdateCompleted);
+            localModsViewModel.InvalidateSnapshot();
+            try
+            {
+                await localModsViewModel.RefreshModsAsync();
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Mod update completed but the local mod list could not be refreshed. InstanceId={InstanceId} FileName={FileName}",
+                    instance.Id,
+                    Path.GetFileName(operationPath));
+            }
+        }
+        catch (OperationCanceledException) when (task.CancellationToken.IsCancellationRequested)
+        {
+            logger.LogInformation(
+                "Mod update canceled. InstanceId={InstanceId} FileName={FileName}",
+                instance.Id,
+                Path.GetFileName(operationPath));
+        }
+        catch (ModUpdateConflictException exception)
+        {
+            var message = exception.Reason switch
+            {
+                ModUpdateConflictReason.TargetExists => string.Format(
+                    Strings.Status_ModUpdateTargetExistsFormat,
+                    Path.GetFileName(exception.Path)),
+                ModUpdateConflictReason.SourceChanged => Strings.Status_ModUpdateSourceChanged,
+                _ => Strings.Status_ModUpdateFailed
+            };
+            task.Fail(message);
+            ReportModUpdateStatus(message);
+            logger.LogWarning(
+                exception,
+                "Mod update stopped by a file conflict. InstanceId={InstanceId} FileName={FileName} Reason={Reason}",
+                instance.Id,
+                Path.GetFileName(operationPath),
+                exception.Reason);
+        }
+        catch (ResourceProjectIntegrityException exception)
+        {
+            task.Fail(Strings.Status_ModUpdateIntegrityFailed);
+            ReportModUpdateStatus(Strings.Status_ModUpdateIntegrityFailed);
+            logger.LogWarning(
+                exception,
+                "Mod update integrity validation failed. InstanceId={InstanceId} FileName={FileName} VersionId={VersionId}",
+                instance.Id,
+                Path.GetFileName(operationPath),
+                candidate.TargetVersion.VersionId);
+        }
+        catch (Exception exception)
+        {
+            task.Fail(Strings.Status_ModUpdateFailed);
+            ReportModUpdateStatus(Strings.Status_ModUpdateFailed);
+            logger.LogError(
+                exception,
+                "Mod update failed. InstanceId={InstanceId} FileName={FileName} Provider={Provider} VersionId={VersionId}",
+                instance.Id,
+                Path.GetFileName(operationPath),
+                candidate.Source,
+                candidate.TargetVersion.VersionId);
+        }
+        finally
+        {
+            ReleaseModUpdate(operationPath, item);
+        }
+    }
+
+    private void ReleaseModUpdate(string operationPath, ModManagementModItemViewModel item)
+    {
+        void Release()
+        {
+            activeUpdatePaths.Remove(operationPath);
+            item.IsUpdateBusy = false;
+            if (allModsByFullPath.TryGetValue(operationPath, out var current))
+                current.IsUpdateBusy = false;
+            NotifyUpdateCommandAvailabilityChanged();
+        }
+
+        if (uiDispatcher.HasAccess)
+            Release();
+        else
+            uiDispatcher.Post(Release);
+    }
+
+    private void ReportModUpdateStatus(string message)
+    {
+        void Report()
+        {
+            statusService.Report(message);
+            floatingMessageService.Show(message);
+        }
+
+        if (uiDispatcher.HasAccess)
+            Report();
+        else
+            uiDispatcher.Post(Report);
+    }
+
+    private static string FormatModUpdateProgress(string stage) => stage switch
+    {
+        ModUpdateProgressStages.Applying => Strings.Status_ModUpdateApplying,
+        ModUpdateProgressStages.Downloading => Strings.Status_ModUpdateDownloading,
+        _ => Strings.Status_ModUpdatePreparing
+    };
+
+    private static string FormatBulkModUpdateProgress(string stage) => stage switch
+    {
+        ModUpdateProgressStages.BatchWaitingForConfirmation => Strings.Status_ModBulkUpdateWaitingForConfirmation,
+        ModUpdateProgressStages.BatchUpdating => Strings.Status_ModBulkUpdateUpdating,
+        _ => Strings.Status_ModBulkUpdateChecking
+    };
+
+    private void ReportBulkCheckDialogProgress(
+        ModBulkUpdateConfirmationRequest request,
+        double batchPercent)
+    {
+        void Report() => request.ReportCheckingProgress(batchPercent);
+
+        if (uiDispatcher.HasAccess)
+            Report();
+        else
+            uiDispatcher.Post(Report);
+    }
+
+    private void NotifyUpdateCommandAvailabilityChanged()
+    {
+        OnPropertyChanged(nameof(CanUpdateAllMods));
+        UpdateAllModsCommand.NotifyCanExecuteChanged();
+    }
+
+    private static string ResolveUpdatedFileName(ModUpdateCandidate candidate)
+    {
+        var fileName = candidate.TargetVersion.FileName;
+        if (!candidate.LocalFile.IsEnabled && !fileName.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
+            fileName += ".disabled";
+        return fileName;
+    }
+
+    [RelayCommand]
     private void OpenResourceDetails(ModManagementModItemViewModel? mod)
     {
         if (mod?.ProjectReference is { } reference)

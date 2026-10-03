@@ -130,7 +130,7 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
 
         var versions = await httpClient.GetFromJsonAsync<List<ModrinthVersion>>(url, cancellationToken).ConfigureAwait(false) ?? [];
         var currentIds = CreateCurrentIds(request.ProjectId, request.Slug, projectId);
-        var dependencies = request.Kind is ResourceProjectKind.Mod
+        var dependencies = request.Kind is ResourceProjectKind.Mod && request.IncludeDependencies
             ? await LoadDependencyProjectsAsync(CollectRequiredProjectIds(versions, currentIds), cancellationToken).ConfigureAwait(false)
             : new Dictionary<string, ResourceProject>(StringComparer.OrdinalIgnoreCase);
 

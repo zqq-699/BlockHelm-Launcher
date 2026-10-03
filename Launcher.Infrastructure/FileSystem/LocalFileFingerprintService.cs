@@ -102,6 +102,26 @@ public sealed class LocalFileFingerprintService
         }
     }
 
+    internal Task<LocalFileFingerprint> GetFreshFingerprintAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = CreateIdentity(path);
+        return ComputeFingerprintAsync(identity.ReadPath, cancellationToken);
+    }
+
+    internal void Invalidate(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        var fullPath = Path.GetFullPath(path);
+        var stablePath = fullPath.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase)
+            ? fullPath[..^".disabled".Length]
+            : fullPath;
+        lock (cacheLock)
+            entries.Remove(stablePath);
+    }
+
     private async Task<LocalFileFingerprint> ComputeFingerprintAsync(
         string path,
         CancellationToken cancellationToken)
@@ -253,6 +273,7 @@ public sealed class LocalFileFingerprintService
     {
         public bool Matches(LocalFileFingerprintIdentity other) =>
             string.Equals(StablePath, other.StablePath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(ReadPath, other.ReadPath, StringComparison.OrdinalIgnoreCase)
             && Length == other.Length
             && LastWriteTimeUtcTicks == other.LastWriteTimeUtcTicks;
     }

@@ -37,6 +37,8 @@ public sealed class ResourceProjectVersionsRequest
 
     public bool ForServerInstallation { get; init; }
 
+    public bool IncludeDependencies { get; init; } = true;
+
     public int Offset { get; init; }
 
     public int PageSize { get; init; } = 50;

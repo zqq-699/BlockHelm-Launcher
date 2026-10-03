@@ -67,7 +67,8 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
         IUiDispatcher uiDispatcher,
         ILogger<GameSettingsDetailsViewModel>? logger = null,
         ILoggerFactory? loggerFactory = null,
-        IModpackExportService? modpackExportService = null)
+        IModpackExportService? modpackExportService = null,
+        IModUpdateService? modUpdateService = null)
     {
         var resolvedLogger = logger ?? NullLogger<GameSettingsDetailsViewModel>.Instance;
         this.logger = resolvedLogger;
@@ -99,10 +100,15 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
             filePickerService,
             importPathValidator,
             floatingMessageService,
-            logger: loggerFactory?.CreateLogger<InstanceModManagementSettingsViewModel>());
+            uiDispatcher: uiDispatcher,
+            logger: loggerFactory?.CreateLogger<InstanceModManagementSettingsViewModel>(),
+            modUpdateService: modUpdateService,
+            downloadTasksPage: downloadTasksPage);
         ModManagement.DeleteModsRequested += ModManagement_DeleteModsRequested;
         ModManagement.ImportModConflictRequested += ModManagement_ImportModConflictRequested;
         ModManagement.OnlineModInstallRequested += ModManagement_OnlineModInstallRequested;
+        ModManagement.ModUpdateConfirmationRequested += request => ModUpdateConfirmationRequested?.Invoke(request);
+        ModManagement.ModBulkUpdateConfirmationRequested += request => ModBulkUpdateConfirmationRequested?.Invoke(request);
         SaveManagement = new InstanceSaveManagementSettingsViewModel(
             this,
             localSavesViewModel,
@@ -166,6 +172,8 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
     public event Action<ResourcePackImportFailureRequest>? ResourcePackImportFailedRequested;
     public event Action<ShaderPackDeleteRequest>? DeleteShaderPacksRequested;
     public event Action<ShaderPackImportFailureRequest>? ShaderPackImportFailedRequested;
+    public event Action<ModUpdateConfirmationRequest>? ModUpdateConfirmationRequested;
+    public event Action<ModBulkUpdateConfirmationRequest>? ModBulkUpdateConfirmationRequested;
 
     public bool HasSelectedInstance => SelectedInstance is not null;
 

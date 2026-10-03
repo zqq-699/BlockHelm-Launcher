@@ -88,6 +88,8 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
         Details.ResourcePackImportFailedRequested += Dialogs.OpenResourcePackImportFailure;
         Details.ShaderPackImportFailedRequested += Dialogs.OpenShaderPackImportFailure;
         Details.OnlineModInstallRequested += Details_OnlineModInstallRequested;
+        Details.ModUpdateConfirmationRequested += Dialogs.OpenModUpdate;
+        Details.ModBulkUpdateConfirmationRequested += Dialogs.OpenModBulkUpdate;
         Details.ModManagement.ResourceDetailsRequested += reference => ResourceProjectDetailsRequested?.Invoke(reference);
         Details.ResourcePackManagement.ResourceDetailsRequested += reference => ResourceProjectDetailsRequested?.Invoke(reference);
         Details.ShaderPackManagement.ResourceDetailsRequested += reference => ResourceProjectDetailsRequested?.Invoke(reference);

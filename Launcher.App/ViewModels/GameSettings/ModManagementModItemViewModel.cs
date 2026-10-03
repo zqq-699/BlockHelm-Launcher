@@ -70,6 +70,12 @@ public sealed partial class ModManagementModItemViewModel : ObservableObject
     private bool isSelected;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUpdate))]
+    private bool isUpdateBusy;
+
+    public bool CanUpdate => HasProjectDetails && !IsUpdateBusy;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasTitleTags))]
     private IReadOnlyList<string> titleTags = [];
 
@@ -79,6 +85,7 @@ public sealed partial class ModManagementModItemViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasProjectDetails))]
+    [NotifyPropertyChangedFor(nameof(CanUpdate))]
     private ResourceProjectReference? projectReference;
 
     public void SyncFrom(LocalMod mod)

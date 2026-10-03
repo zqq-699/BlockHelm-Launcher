@@ -22,6 +22,7 @@ using CommunityToolkit.Mvvm.Input;
 using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.App.ViewModels.Shared;
+using Launcher.App.ViewModels.Download;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -43,11 +44,14 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
     private readonly IInstanceContentImportPathValidator importPathValidator;
     private readonly IUiDispatcher uiDispatcher;
     private readonly IFloatingMessageService floatingMessageService;
+    private readonly IModUpdateService? modUpdateService;
+    private readonly DownloadTasksPageViewModel? downloadTasksPage;
     private readonly ILogger<InstanceModManagementSettingsViewModel> logger;
     // 投影路径索引用于跨刷新复用 Item ViewModel；同名启用/禁用文件并存时必须保持两个独立键。
     private readonly Dictionary<string, ModManagementModItemViewModel> allModsByProjectionPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ModManagementModItemViewModel> allModsByFullPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> selectedModPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> activeUpdatePaths = new(StringComparer.OrdinalIgnoreCase);
     // 冲突对话框通过 TaskCompletionSource 将事件驱动 UI 转换为可顺序 await 的导入步骤。
     private TaskCompletionSource<bool>? pendingImportConflictResolutionSource;
     // 生命周期字段用于合并重复加载、隐藏页面刷新和同一 Dispatcher 周期内的集合事件。
@@ -87,7 +91,12 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
     private bool isLoadingMods;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUpdateAllMods))]
     private bool hasLoadedMods;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUpdateAllMods))]
+    private bool isBulkUpdateBusy;
 
     [ObservableProperty]
     private IReadOnlyList<ModManagementModItemViewModel> visibleMods = Array.Empty<ModManagementModItemViewModel>();
@@ -107,7 +116,9 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
         IInstanceContentImportPathValidator importPathValidator,
         IFloatingMessageService floatingMessageService,
         IUiDispatcher? uiDispatcher = null,
-        ILogger<InstanceModManagementSettingsViewModel>? logger = null)
+        ILogger<InstanceModManagementSettingsViewModel>? logger = null,
+        IModUpdateService? modUpdateService = null,
+        DownloadTasksPageViewModel? downloadTasksPage = null)
         : base(parent)
     {
         this.localModsViewModel = localModsViewModel;
@@ -116,6 +127,8 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
         this.filePickerService = filePickerService;
         this.importPathValidator = importPathValidator;
         this.floatingMessageService = floatingMessageService;
+        this.modUpdateService = modUpdateService;
+        this.downloadTasksPage = downloadTasksPage;
         this.uiDispatcher = uiDispatcher ?? ImmediateUiDispatcher.Instance;
         this.logger = logger ?? NullLogger<InstanceModManagementSettingsViewModel>.Instance;
         this.localModsViewModel.ModsChanged += LocalModsViewModel_ModsChanged;
@@ -126,6 +139,8 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
     public event Action<ModImportConflictRequest>? ImportModConflictRequested;
     public event Action<GameInstance>? OnlineModInstallRequested;
     public event Action<ResourceProjectReference>? ResourceDetailsRequested;
+    public event Action<ModUpdateConfirmationRequest>? ModUpdateConfirmationRequested;
+    public event Action<ModBulkUpdateConfirmationRequest>? ModBulkUpdateConfirmationRequested;
 
     public override bool UsesFullViewportLayout => true;
 
@@ -140,6 +155,15 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
     public bool CanShowModScrollableContent => IsModManagementSupported && isInitialProjectionReady;
 
     public bool HasInstalledMods => InstalledModCount > 0;
+
+    public bool CanUpdateAllMods =>
+        IsModManagementSupported
+        && HasLoadedMods
+        && HasInstalledMods
+        && !IsBulkUpdateBusy
+        && activeUpdatePaths.Count == 0
+        && modUpdateService is not null
+        && downloadTasksPage is not null;
 
     public bool CanShowModListSection => IsModManagementSupported && (IsLoadingMods || HasInstalledMods);
 
