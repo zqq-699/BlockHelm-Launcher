@@ -2,29 +2,29 @@
   "schemaVersion": 1,
   "appId": "BlockHelm-Launcher",
   "channel": "release",
-  "versionName": "0.9.15",
-  "versionCode": 91599,
-  "publishedAt": "2026-09-04T05:34:02Z",
+  "versionName": "0.9.16",
+  "versionCode": 91699,
+  "publishedAt": "2026-10-04T12:45:50Z",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "releaseNotes": "# 正式版 0.9.15\r\n\r\n* 新增多个 Minecraft 目录的管理与切换功能。\r\n* 优化页面切换、首页启动菜单动画和账户列表加载。\r\n* 支持拖入第三方服务器卡片，并修复第三方账户的皮肤预览。\r\n* 修复旧版 Minecraft 的语言代码兼容问题。\r\n* 调整离线账户 UUID 生成模式为两种，移除随机生成模式。",
+  "releaseNotes": "# 正式版 0.9.16\r\n\r\n* 新增实例模组的单个和批量更新功能，可从 Modrinth 与 CurseForge 检查并安装兼容更新。\r\n* 主窗口现在支持最大化功能。\r\n* 优化动画与过渡效果，减少页面切换卡顿。",
   "assets": [
     {
       "platform": "windows",
       "arch": "x64",
       "packageType": "exe",
       "fileName": "BlockHelm_Launcher_x64.exe",
-      "size": 12933216,
-      "sha256": "81919fd179f1f077d1ee9420a07c4bfe8b539a9bcd5c25579a4e176dcdda03cf",
+      "size": 13070944,
+      "sha256": "4e901071de47bde9b1938d5b1a5d492c390a3a492cc034685ab66509314996d5",
       "urls": [
         {
           "name": "gitee",
-          "url": "https://gitee.com/zqq-699/BlockHelm-Launcher/releases/download/v0.9.15/BlockHelm_Launcher_x64.exe",
+          "url": "https://gitee.com/zqq-699/BlockHelm-Launcher/releases/download/v0.9.16/BlockHelm_Launcher_x64.exe",
           "priority": 1
         },
         {
           "name": "github",
-          "url": "https://github.com/zqq-699/BlockHelm-Launcher/releases/download/v0.9.15/BlockHelm_Launcher_x64.exe",
+          "url": "https://github.com/zqq-699/BlockHelm-Launcher/releases/download/v0.9.16/BlockHelm_Launcher_x64.exe",
           "priority": 2
         }
       ]
