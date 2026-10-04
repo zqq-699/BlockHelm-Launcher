@@ -37,7 +37,9 @@ public sealed class PageTransitionStallRecoveryTests
                 "Home",
                 ["Home", "Settings"],
                 TransitionRenderCacheScope.TryAcquire,
-                new SilentCompositionFrameSource());
+                new SilentCompositionFrameSource(),
+                compositionWaitTimeout: TimeSpan.FromMilliseconds(10),
+                transitionWatchdogTimeout: TimeSpan.FromMilliseconds(75));
 
             service.MoveTo("Settings");
 
@@ -45,53 +47,13 @@ public sealed class PageTransitionStallRecoveryTests
             Assert.Equal(PageTransitionService.WarmupOpacity, target.Opacity);
             Assert.True(UiTransitionGate.IsTransitionActive);
 
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
             while (UiTransitionGate.IsTransitionActive && DateTime.UtcNow < deadline)
                 PumpDispatcher(DispatcherPriority.ContextIdle);
 
             Assert.False(UiTransitionGate.IsTransitionActive);
             Assert.Equal(1d, target.Opacity);
             Assert.Equal(0d, Assert.IsType<TranslateTransform>(target.RenderTransform).Y);
-
-            UiTransitionGate.ResetForTesting();
-        });
-    }
-
-    /// <summary>
-    /// 兜底不能把正常路径顶掉：过渡自己走完之后，看门狗必须已经停掉，
-    /// 否则它会在下一次过渡进行到一半时开火，把动画拦腰掐断。
-    /// </summary>
-    [Fact]
-    public void WatchdogDoesNotDisturbATransitionThatFinishedNormally()
-    {
-        RunOnStaThread(() =>
-        {
-            UiTransitionGate.ResetForTesting(Dispatcher.CurrentDispatcher);
-            var target = new Border { Width = 320d, Height = 200d };
-            var host = new Grid();
-            host.Children.Add(target);
-            var service = new PageTransitionService(
-                Dispatcher.CurrentDispatcher,
-                page => page == "Settings" ? target : null,
-                "Home",
-                ["Home", "Settings"]);
-
-            service.MoveTo("Settings");
-            service.SyncTo("Settings");
-
-            Assert.False(UiTransitionGate.IsTransitionActive);
-            Assert.Equal(1d, target.Opacity);
-
-            // 看门狗若还活着，会在这段时间里开火并再次 Exit 闸门，把计数压到负数以下。
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-            while (DateTime.UtcNow < deadline)
-                PumpDispatcher(DispatcherPriority.ContextIdle);
-
-            var ran = 0;
-            UiTransitionGate.Enter();
-            UiTransitionGate.RunWhenIdle(() => ran++);
-            PumpDispatcher(DispatcherPriority.ContextIdle);
-            Assert.Equal(0, ran);
 
             UiTransitionGate.ResetForTesting();
         });

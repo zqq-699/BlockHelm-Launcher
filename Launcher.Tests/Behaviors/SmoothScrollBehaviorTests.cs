@@ -25,8 +25,7 @@ public sealed class SmoothScrollBehaviorTests
     [Fact]
     public void EveryXamlOverrideUses130Milliseconds()
     {
-        var appDirectory = Path.Combine(FindRepositoryRoot(), "Launcher.App");
-        var overrides = Directory.EnumerateFiles(appDirectory, "*.xaml", SearchOption.AllDirectories)
+        var overrides = TestRepository.EnumerateProjectFiles("Launcher.App", "*.xaml")
             .SelectMany(FindDurationOverrides)
             .ToArray();
 
@@ -54,19 +53,6 @@ public sealed class SmoothScrollBehaviorTests
             if (value is not null)
                 yield return (filePath, value);
         }
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Launcher.sln")))
-                return directory.FullName;
-            directory = directory.Parent;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate repository root.");
     }
 
 }

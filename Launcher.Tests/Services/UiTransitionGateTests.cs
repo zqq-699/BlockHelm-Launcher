@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Windows.Threading;
 using Launcher.App.Services;
@@ -142,12 +143,7 @@ public sealed class UiTransitionGateTests
             Assert.False(wait.IsCompleted);
 
             UiTransitionGate.Exit();
-
-            // 本线程没有 SynchronizationContext，async 续体在线程池上完成，
-            // 因此不能泵一次就断言，要反复泵到截止时间。
-            var deadline = DateTime.UtcNow.AddSeconds(5);
-            while (!wait.IsCompleted && DateTime.UtcNow < deadline)
-                Pump();
+            PumpUntil(wait);
 
             Assert.True(wait.IsCompleted);
         });
@@ -169,16 +165,12 @@ public sealed class UiTransitionGateTests
             // 第一次过渡结束，但在续体轮到执行之前，下一次过渡就开始了。
             UiTransitionGate.Exit();
             UiTransitionGate.Enter();
-            var deadline = DateTime.UtcNow.AddMilliseconds(600);
-            while (!wait.IsCompleted && DateTime.UtcNow < deadline)
-                Pump();
+            Pump();
 
             Assert.False(wait.IsCompleted);
 
             UiTransitionGate.Exit();
-            deadline = DateTime.UtcNow.AddSeconds(5);
-            while (!wait.IsCompleted && DateTime.UtcNow < deadline)
-                Pump();
+            PumpUntil(wait);
 
             Assert.True(wait.IsCompleted);
         });
@@ -204,19 +196,18 @@ public sealed class UiTransitionGateTests
     {
         RunOnStaThread(() =>
         {
-            UiTransitionGate.ResetForTesting(Dispatcher.CurrentDispatcher);
+            var now = DateTime.UtcNow;
+            UiTransitionGate.ResetForTesting(Dispatcher.CurrentDispatcher, () => now);
             var ran = 0;
             UiTransitionGate.Enter();
             UiTransitionGate.RunWhenIdle(() => ran++);
 
-            // 过渡一直不结束地反复交替：没有上限的话这件工作永远排不出去。
-            var deadline = DateTime.UtcNow + UiTransitionGate.MaximumDeferral + TimeSpan.FromSeconds(3);
-            while (ran == 0 && DateTime.UtcNow < deadline)
-            {
-                UiTransitionGate.Exit();
-                UiTransitionGate.Enter();
-                Pump();
-            }
+            UiTransitionGate.Exit();
+            UiTransitionGate.Enter();
+            Pump();
+            now += UiTransitionGate.MaximumDeferral;
+            UiTransitionGate.ReleaseExpiredActionsForTesting();
+            Pump();
 
             Assert.Equal(1, ran);
         });
@@ -231,17 +222,18 @@ public sealed class UiTransitionGateTests
     {
         RunOnStaThread(() =>
         {
-            UiTransitionGate.ResetForTesting(Dispatcher.CurrentDispatcher);
+            var now = DateTime.UtcNow;
+            UiTransitionGate.ResetForTesting(Dispatcher.CurrentDispatcher, () => now);
             var ran = 0;
             UiTransitionGate.Enter();
             UiTransitionGate.RunWhenIdle(() => ran++);
             Pump();
             Assert.Equal(0, ran);
 
-            // 刻意一次 Exit 都不调用。
-            var deadline = DateTime.UtcNow + UiTransitionGate.MaximumDeferral + TimeSpan.FromSeconds(3);
-            while (ran == 0 && DateTime.UtcNow < deadline)
-                Pump();
+            // 刻意一次 Exit 都不调用，只推进测试时钟并触发一次巡检。
+            now += UiTransitionGate.MaximumDeferral;
+            UiTransitionGate.ReleaseExpiredActionsForTesting();
+            Pump();
 
             Assert.Equal(1, ran);
             Assert.Equal(0, UiTransitionGate.PendingCount);
@@ -253,7 +245,21 @@ public sealed class UiTransitionGateTests
 
     private static void Pump()
     {
-        Dispatcher.CurrentDispatcher.Invoke(static () => { }, DispatcherPriority.ContextIdle);
+        var frame = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+    }
+
+    private static void PumpUntil(Task task)
+    {
+        var timeout = Stopwatch.StartNew();
+        while (!task.IsCompleted && timeout.Elapsed < TimeSpan.FromSeconds(1))
+        {
+            Pump();
+            Thread.Yield();
+        }
     }
 
     private static void RunOnStaThread(Action action)
@@ -261,13 +267,20 @@ public sealed class UiTransitionGateTests
         Exception? failure = null;
         var thread = new Thread(() =>
         {
+            var previousContext = SynchronizationContext.Current;
             try
             {
+                SynchronizationContext.SetSynchronizationContext(
+                    new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
                 action();
             }
             catch (Exception exception)
             {
                 failure = exception;
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previousContext);
             }
         });
         thread.SetApartmentState(ApartmentState.STA);

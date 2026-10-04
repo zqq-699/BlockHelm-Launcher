@@ -33,27 +33,49 @@ namespace Launcher.Infrastructure.Persistence;
 public sealed class JsonSettingsService : ISettingsService
 {
     private static readonly TimeSpan BootstrapCrossProcessLockTimeout = TimeSpan.FromMilliseconds(250);
-    private static readonly TimeSpan CrossProcessLockRetryDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan DefaultCrossProcessLockRetryDelay = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
     /// 等待设置锁的上限。锁只在一次"读取+写入"期间被持有，正常情况下毫秒级就能拿到；
     /// 但网络盘上的陈旧 .lock 可能永远不释放，无上限的等待会把点击变成无响应，
     /// 所以超时后主动放弃，让调用方按一次保存失败处理。
     /// </summary>
-    private static readonly TimeSpan CrossProcessLockTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DefaultCrossProcessLockTimeout = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly string settingsPath;
     private readonly LauncherPathProvider pathProvider;
     private readonly ILogger<JsonSettingsService> logger;
+    private readonly TimeSpan crossProcessLockTimeout;
+    private readonly TimeSpan crossProcessLockRetryDelay;
     private readonly SemaphoreSlim ioLock = new(1, 1);
     private readonly ConditionalWeakTable<LauncherSettings, LauncherSettings> loadedBaselines = new();
 
     public JsonSettingsService(string? dataDirectory = null, ILogger<JsonSettingsService>? logger = null)
+        : this(
+            dataDirectory,
+            logger,
+            DefaultCrossProcessLockTimeout,
+            DefaultCrossProcessLockRetryDelay)
     {
+    }
+
+    internal JsonSettingsService(
+        string? dataDirectory,
+        ILogger<JsonSettingsService>? logger,
+        TimeSpan crossProcessLockTimeout,
+        TimeSpan crossProcessLockRetryDelay)
+    {
+        if (crossProcessLockTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(crossProcessLockTimeout));
+        if (crossProcessLockRetryDelay <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(crossProcessLockRetryDelay));
+
         pathProvider = new LauncherPathProvider();
         var root = dataDirectory ?? pathProvider.DefaultDataDirectory;
         settingsPath = Path.Combine(root, "settings.json");
         this.logger = logger ?? NullLogger<JsonSettingsService>.Instance;
+        this.crossProcessLockTimeout = crossProcessLockTimeout;
+        this.crossProcessLockRetryDelay = crossProcessLockRetryDelay;
     }
 
     public string LoadLauncherLanguageForBootstrap() =>
@@ -233,15 +255,15 @@ public sealed class JsonSettingsService : ISettingsService
             }
             catch (IOException exception) when (IsSharingViolation(exception))
             {
-                if (waited.Elapsed >= CrossProcessLockTimeout)
+                if (waited.Elapsed >= crossProcessLockTimeout)
                 {
                     throw new TimeoutException(
                         $"Timed out waiting for the launcher settings lock. LockPath={lockPath} "
-                        + $"TimeoutSeconds={CrossProcessLockTimeout.TotalSeconds}",
+                        + $"TimeoutSeconds={crossProcessLockTimeout.TotalSeconds}",
                         exception);
                 }
 
-                await Task.Delay(CrossProcessLockRetryDelay, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(crossProcessLockRetryDelay, cancellationToken).ConfigureAwait(false);
             }
         }
     }

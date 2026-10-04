@@ -77,7 +77,10 @@ public sealed class UserDeletionEntryPointTests : TestTempDirectory
         var deletion = new RecordingUserFileDeletionService();
         var cacheRoot = Path.Combine(TempRoot, "skins");
         var source = CreateFile("source.png", [1, 2, 3, 4]);
-        var cache = new AccountSkinCacheService(new HttpClient(), cacheRoot, deletion);
+        var cache = new AccountSkinCacheService(
+            new HttpClient(new RejectNetworkHandler()),
+            cacheRoot,
+            deletion);
         var account = new LauncherAccount
         {
             Id = "offline",
@@ -121,5 +124,13 @@ public sealed class UserDeletionEntryPointTests : TestTempDirectory
             Directories.Add(Path.GetFullPath(path));
             Directory.Delete(path, recursive: true);
         }
+    }
+
+    private sealed class RejectNetworkHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("This test must not access the network.");
     }
 }

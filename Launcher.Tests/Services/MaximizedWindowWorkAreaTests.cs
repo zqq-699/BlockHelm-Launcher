@@ -36,4 +36,29 @@ public sealed class MaximizedWindowWorkAreaTests
             new MaximizedWindowBounds(expectedX, expectedY, expectedWidth, expectedHeight),
             bounds);
     }
+
+    [Theory]
+    [InlineData(900, 600, 1, 1, 112, 112, 900, 600)]
+    [InlineData(900, 600, 1.25, 1.25, 112, 112, 1125, 750)]
+    [InlineData(900, 600, 1.5, 1.5, 112, 112, 1350, 900)]
+    [InlineData(40, 30, 1, 1, 120, 80, 120, 80)]
+    public void CalculateMinimumTrackSizeUsesDpiAndPreservesExistingMinimum(
+        double minimumWidth,
+        double minimumHeight,
+        double dpiScaleX,
+        double dpiScaleY,
+        int existingWidth,
+        int existingHeight,
+        int expectedWidth,
+        int expectedHeight)
+    {
+        var size = MaximizedWindowWorkArea.CalculateMinimumTrackSize(
+            minimumWidth,
+            minimumHeight,
+            dpiScaleX,
+            dpiScaleY,
+            new NativeWindowSize(existingWidth, existingHeight));
+
+        Assert.Equal(new NativeWindowSize(expectedWidth, expectedHeight), size);
+    }
 }

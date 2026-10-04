@@ -18,8 +18,9 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 public sealed class SegmentedDownloadTests : TestTempDirectory
 {
     private const string DownloadUrl = "https://downloads.example.test/client.jar";
+    private const int TestSegmentedDownloadSize = 512 * 1024;
     private static readonly byte[] LargePayload = CreatePayload(
-        checked((int)MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize));
+        TestSegmentedDownloadSize);
 
     [Fact]
     public async Task TrustedLargeFileUsesRangesAndPublishesVerifiedPayload()
@@ -292,7 +293,8 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
                 delayAsync: static (_, _) => ValueTask.CompletedTask),
             bmclApiRequestRateLimiter: new BmclApiRequestRateLimiter(TimeSpan.Zero),
             nextRetryJitter: () => 0,
-            segmentedDownloadCoordinator: new SegmentedDownloadCoordinator());
+            segmentedDownloadCoordinator: new SegmentedDownloadCoordinator(),
+            minimumSegmentedDownloadSize: TestSegmentedDownloadSize);
     }
 
     private static RecordingRequestHandler FullResponseHandler(byte[] payload) =>

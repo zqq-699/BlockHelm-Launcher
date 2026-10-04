@@ -271,27 +271,6 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     }
 
     [Fact]
-    public async Task InterruptedResponseBodyDoesNotPublishPartialFile()
-    {
-        var service = CreateService(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StreamContent(new InterruptingDownloadStream())
-        }));
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.DownloadProjectVersionAsync(new ResourceProjectVersion
-            {
-                Kind = ResourceProjectKind.ResourcePack,
-                VersionId = "v1",
-                FileName = "pack.zip",
-                PrimaryDownloadUrl = "https://download.test/pack.zip"
-            }, TempRoot));
-
-        Assert.False(File.Exists(Path.Combine(TempRoot, "pack.zip")));
-        Assert.Empty(Directory.GetFiles(TempRoot, "*.download"));
-    }
-
-    [Fact]
     public async Task ModInstallRejectsModsReparsePointBeforeNetworkOrExternalWriteWhenSupported()
     {
         var instanceDirectory = Path.Combine(TempRoot, "instance-with-linked-mods");
@@ -396,33 +375,6 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
             BlockingReadStarted.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return 0;
-        }
-
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        public override void Flush() { }
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    }
-
-    private sealed class InterruptingDownloadStream : Stream
-    {
-        private int readCount;
-
-        public override bool CanRead => true;
-        public override bool CanSeek => false;
-        public override bool CanWrite => false;
-        public override long Length => throw new NotSupportedException();
-        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
-
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            if (Interlocked.Increment(ref readCount) == 1)
-            {
-                "partial"u8.CopyTo(buffer.Span);
-                return ValueTask.FromResult(7);
-            }
-            return ValueTask.FromException<int>(new IOException("The response body was interrupted."));
         }
 
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();

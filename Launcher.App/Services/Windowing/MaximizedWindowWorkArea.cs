@@ -20,12 +20,15 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 
 namespace Launcher.App.Services;
 
 internal readonly record struct NativeMonitorBounds(int Left, int Top, int Right, int Bottom);
 
 internal readonly record struct MaximizedWindowBounds(int X, int Y, int Width, int Height);
+
+internal readonly record struct NativeWindowSize(int Width, int Height);
 
 internal static class MaximizedWindowWorkArea
 {
@@ -37,6 +40,18 @@ internal static class MaximizedWindowWorkArea
         ArgumentNullException.ThrowIfNull(window);
 
         HwndSource? source = null;
+        HwndSourceHook hook = (
+            IntPtr handle,
+            int message,
+            IntPtr wParam,
+            IntPtr lParam,
+            ref bool handled) => WindowProcedure(
+                window,
+                handle,
+                message,
+                wParam,
+                lParam,
+                ref handled);
 
         void AttachHook()
         {
@@ -48,7 +63,7 @@ internal static class MaximizedWindowWorkArea
                 return;
 
             source = HwndSource.FromHwnd(handle);
-            source?.AddHook(WindowProcedure);
+            source?.AddHook(hook);
         }
 
         void OnSourceInitialized(object? sender, EventArgs e) => AttachHook();
@@ -56,7 +71,7 @@ internal static class MaximizedWindowWorkArea
         void OnClosed(object? sender, EventArgs e)
         {
             if (source is not null)
-                source.RemoveHook(WindowProcedure);
+                source.RemoveHook(hook);
 
             window.SourceInitialized -= OnSourceInitialized;
             window.Closed -= OnClosed;
@@ -78,7 +93,20 @@ internal static class MaximizedWindowWorkArea
             Math.Max(0, workArea.Bottom - workArea.Top));
     }
 
+    internal static NativeWindowSize CalculateMinimumTrackSize(
+        double minimumWidth,
+        double minimumHeight,
+        double dpiScaleX,
+        double dpiScaleY,
+        NativeWindowSize existingMinimum)
+    {
+        return new NativeWindowSize(
+            Math.Max(existingMinimum.Width, ConvertDipToPixels(minimumWidth, dpiScaleX)),
+            Math.Max(existingMinimum.Height, ConvertDipToPixels(minimumHeight, dpiScaleY)));
+    }
+
     private static IntPtr WindowProcedure(
+        Window window,
         IntPtr handle,
         int message,
         IntPtr wParam,
@@ -111,11 +139,32 @@ internal static class MaximizedWindowWorkArea
                 monitorInfo.WorkArea.Right,
                 monitorInfo.WorkArea.Bottom));
         var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+        var dpi = VisualTreeHelper.GetDpi(window);
+        var minimumTrackSize = CalculateMinimumTrackSize(
+            window.MinWidth,
+            window.MinHeight,
+            dpi.DpiScaleX,
+            dpi.DpiScaleY,
+            new NativeWindowSize(
+                minMaxInfo.MinTrackSize.X,
+                minMaxInfo.MinTrackSize.Y));
         minMaxInfo.MaxPosition = new NativePoint(bounds.X, bounds.Y);
         minMaxInfo.MaxSize = new NativePoint(bounds.Width, bounds.Height);
+        minMaxInfo.MinTrackSize = new NativePoint(
+            minimumTrackSize.Width,
+            minimumTrackSize.Height);
         Marshal.StructureToPtr(minMaxInfo, lParam, false);
         handled = true;
         return IntPtr.Zero;
+    }
+
+    private static int ConvertDipToPixels(double value, double scale)
+    {
+        if (!double.IsFinite(value) || value <= 0d || !double.IsFinite(scale) || scale <= 0d)
+            return 0;
+
+        var pixels = Math.Ceiling(value * scale);
+        return pixels >= int.MaxValue ? int.MaxValue : (int)pixels;
     }
 
     [DllImport("user32.dll")]

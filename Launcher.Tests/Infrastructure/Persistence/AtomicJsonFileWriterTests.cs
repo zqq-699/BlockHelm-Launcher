@@ -33,16 +33,23 @@ public sealed class AtomicJsonFileWriterTests : TestTempDirectory
         var destination = Path.Combine(TempRoot, "payload.json");
         await AtomicJsonFileWriter.WriteAsync(destination, new Payload("first"), JsonOptions, CancellationToken.None);
 
-        var blocker = OpenExclusively(destination);
-        var release = Task.Run(async () =>
-        {
-            await Task.Delay(200);
-            blocker.Dispose();
-        });
+        using var blocker = OpenExclusively(destination);
+        var retryCount = 0;
 
-        await AtomicJsonFileWriter.WriteAsync(destination, new Payload("second"), JsonOptions, CancellationToken.None);
-        await release;
+        await AtomicJsonFileWriter.WriteAsync(
+            destination,
+            new Payload("second"),
+            JsonOptions,
+            CancellationToken.None,
+            maxMoveAttempts: 2,
+            retryAsync: _ =>
+            {
+                retryCount++;
+                blocker.Dispose();
+                return Task.CompletedTask;
+            });
 
+        Assert.Equal(1, retryCount);
         Assert.Equal("second", ReadPayload(destination).Name);
         Assert.Empty(Directory.GetFiles(TempRoot, "*.tmp"));
     }
@@ -55,11 +62,14 @@ public sealed class AtomicJsonFileWriterTests : TestTempDirectory
 
         using (OpenExclusively(destination))
         {
-            var exception = await Record.ExceptionAsync(() => AtomicJsonFileWriter.WriteAsync(
-                destination,
-                new Payload("second"),
-                JsonOptions,
-                CancellationToken.None));
+            var exception = await Record.ExceptionAsync(() =>
+                AtomicJsonFileWriter.WriteAsync(
+                    destination,
+                    new Payload("second"),
+                    JsonOptions,
+                    CancellationToken.None,
+                    maxMoveAttempts: 2,
+                    retryAsync: _ => Task.CompletedTask));
 
             Assert.True(exception is IOException or UnauthorizedAccessException, $"Unexpected exception: {exception}");
         }

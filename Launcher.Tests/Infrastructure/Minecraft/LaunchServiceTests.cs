@@ -121,34 +121,14 @@ public sealed class LaunchServiceTests : TestTempDirectory
         Assert.DoesNotContain("super-secret-access-token", capturedOutput);
     }
 
-    [Fact]
-    public async Task ReadyGameOutputCompletesLaunchWhenWindowDiscoveryMisses()
+    [Theory]
+    [InlineData("[Render thread/INFO]: OpenAL initialized on device Test")]
+    [InlineData("[Render thread/INFO]: Sound engine started")]
+    [InlineData("Created 1024x1024 minecraft:textures/atlas/blocks-atlas")]
+    public void StartupReadinessDetectorRecognizesStableGameOutput(string line)
     {
-        var settings = CreateSettings();
-        settings.DefaultCheckFilesBeforeLaunch = false;
-        var launcher = new FakeLauncherFactory
-        {
-            BuildProcess = (_, _) => CreateCommandProcess(
-                "/c echo [Render thread/INFO]: OpenAL initialized on device Test"
-                + " & ping 127.0.0.1 -n 3 >nul & exit 0")
-        };
-        var service = CreateService(
-            launcher: launcher,
-            crashMonitor: new LaunchCrashMonitor(),
-            startupReadinessWaiter: new GameStartupReadinessWaiter(new NeverVisibleWindowProbe()));
-        var reports = new List<LauncherProgress>();
-
-        var session = await service.LaunchAsync(
-                CreateInstance(settings.MinecraftDirectory, "Output Ready"),
-                CreateAccount(),
-                settings,
-                new InlineProgress(reports))
-            .WaitAsync(TimeSpan.FromSeconds(10));
-        var exit = await session.ExitTask.WaitAsync(TimeSpan.FromSeconds(10));
-
-        Assert.Contains(reports, report => report.Percent == 100);
-        Assert.Null(exit.FailureReport);
-        Assert.Equal(0, exit.ExitCode);
+        Assert.True(GameStartupLogReadinessDetector.IsReadyLine(line));
+        Assert.False(GameStartupLogReadinessDetector.IsReadyLine("Preparing spawn area: 75%"));
     }
 
     [Fact]
@@ -762,8 +742,4 @@ public sealed class LaunchServiceTests : TestTempDirectory
             Task.FromResult(GameStartupReadinessResult.WindowVisible);
     }
 
-    private sealed class NeverVisibleWindowProbe : IGameWindowReadinessProbe
-    {
-        public bool HasVisibleTopLevelWindow(int processId) => false;
-    }
 }

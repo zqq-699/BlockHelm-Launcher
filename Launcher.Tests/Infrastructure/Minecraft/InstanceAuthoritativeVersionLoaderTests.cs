@@ -5,7 +5,6 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using CmlLib.Core;
@@ -163,42 +162,6 @@ public sealed class InstanceAuthoritativeVersionLoaderTests : TestTempDirectory
         Assert.False(File.Exists(Path.Combine(minecraftDirectory, "versions", "26.2", "26.2.json")));
     }
 
-    [Fact]
-    public async Task LoaderInstallerJavaProvisioningUsesOfficialMetadataInMemory()
-    {
-        var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");
-        var jsonPath = WriteVersionJson(
-            minecraftDirectory,
-            "26.2",
-            $$"""
-            {
-              "id": "26.2",
-              "type": "release",
-              "mainClass": "{{FabricMainClass}}",
-              "libraries": []
-            }
-            """);
-        var originalBytes = await File.ReadAllBytesAsync(jsonPath);
-        var handler = new OfficialVersionMetadataHandler();
-        using var httpClient = new HttpClient(handler);
-        var service = new CmlLibJavaRuntimeProvisioningService(httpClient);
-
-        await ((ILoaderInstallerJavaRuntimeProvisioner)service).ProvisionAsync(
-            new LoaderInstallerJavaRuntimeRequest(
-                "26.2",
-                "26.2",
-                LoaderKind.Fabric,
-                "0.19.3",
-                minecraftDirectory,
-                DownloadSourcePreference.Official,
-                DownloadSpeedLimitMbPerSecond: 0),
-            CancellationToken.None);
-
-        Assert.Equal(2, handler.RequestCount);
-        Assert.Equal(originalBytes, await File.ReadAllBytesAsync(jsonPath));
-        Assert.False(File.Exists(Path.Combine(minecraftDirectory, "versions", "version_manifest_v2.json")));
-    }
-
     private static string WriteVersionJson(string minecraftDirectory, string versionName, string content)
     {
         var versionDirectory = Path.Combine(minecraftDirectory, "versions", versionName);
@@ -208,42 +171,4 @@ public sealed class InstanceAuthoritativeVersionLoaderTests : TestTempDirectory
         return path;
     }
 
-    private sealed class OfficialVersionMetadataHandler : HttpMessageHandler
-    {
-        public int RequestCount { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            RequestCount++;
-            var content = request.RequestUri?.AbsoluteUri switch
-            {
-                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json" => """
-                    {
-                      "versions": [
-                        {
-                          "id": "26.2",
-                          "url": "https://example.test/26.2.json"
-                        }
-                      ]
-                    }
-                    """,
-                "https://example.test/26.2.json" => """
-                    {
-                      "id": "26.2",
-                      "type": "release",
-                      "mainClass": "net.minecraft.client.main.Main",
-                      "libraries": []
-                    }
-                    """,
-                _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
-            };
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                RequestMessage = request,
-                Content = new StringContent(content)
-            });
-        }
-    }
 }

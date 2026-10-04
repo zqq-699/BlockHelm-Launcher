@@ -53,6 +53,7 @@ internal sealed class MinecraftDownloadRequestExecutor
     private readonly Func<double> nextRetryJitter;
     private readonly TimeProvider timeProvider;
     private readonly SegmentedDownloadCoordinator segmentedDownloadCoordinator;
+    private readonly long minimumSegmentedDownloadSize;
 
     public MinecraftDownloadRequestExecutor(
         HttpClient httpClient,
@@ -66,8 +67,12 @@ internal sealed class MinecraftDownloadRequestExecutor
         Func<double>? nextRetryJitter = null,
         BmclApiRequestRateLimiter? bmclApiRequestRateLimiter = null,
         TimeProvider? timeProvider = null,
-        SegmentedDownloadCoordinator? segmentedDownloadCoordinator = null)
+        SegmentedDownloadCoordinator? segmentedDownloadCoordinator = null,
+        long minimumSegmentedDownloadSize = MinimumSegmentedDownloadSize)
     {
+        if (minimumSegmentedDownloadSize <= SegmentedSplitThreshold)
+            throw new ArgumentOutOfRangeException(nameof(minimumSegmentedDownloadSize));
+
         this.logger = logger ?? NullLogger.Instance;
         this.bandwidthLimiter = bandwidthLimiter;
         this.limiter = limiter ?? ImportConcurrencyLimiter.Shared;
@@ -81,6 +86,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         this.nextRetryJitter = nextRetryJitter ?? Random.Shared.NextDouble;
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.segmentedDownloadCoordinator = segmentedDownloadCoordinator ?? SegmentedDownloadCoordinator.Shared;
+        this.minimumSegmentedDownloadSize = minimumSegmentedDownloadSize;
         transport = new MinecraftDownloadTransport(
             httpClient,
             this.retryOptions,
@@ -514,7 +520,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 var validated = ValidateSegmentResponse(context.Response, probeRange, strongETag);
                 var responseStrongETag = GetStrongETag(context.Response);
                 if (!integrity.IsVerifiable
-                    && (validated.TotalLength < MinimumSegmentedDownloadSize
+                    && (validated.TotalLength < minimumSegmentedDownloadSize
                         || string.IsNullOrWhiteSpace(responseStrongETag)))
                 {
                     throw new SegmentedDownloadNotSupportedException(
@@ -1127,7 +1133,7 @@ internal sealed class MinecraftDownloadRequestExecutor
     {
         if (!integrity.HasStrongHash
             && !(options?.AllowUnverifiedSegmentedDownload == true && !integrity.IsVerifiable)
-            || integrity.ExpectedSize.HasValue && integrity.ExpectedSize.Value < MinimumSegmentedDownloadSize)
+            || integrity.ExpectedSize.HasValue && integrity.ExpectedSize.Value < minimumSegmentedDownloadSize)
             return false;
         if ((options?.PersistenceMode ?? DownloadPersistenceMode.TaskScopedResumable)
             is not DownloadPersistenceMode.TaskScopedResumable)

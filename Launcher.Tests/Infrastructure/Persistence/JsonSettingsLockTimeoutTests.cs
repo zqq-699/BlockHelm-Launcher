@@ -18,12 +18,14 @@ public sealed class JsonSettingsLockTimeoutTests : TestTempDirectory
     // 回归时 UpdateAsync 会永远等下去。用一个外层看门狗把"挂死"变成"失败"，
     // 否则整个测试套件会被一个回归拖住。看门狗刻意不用 TimeoutException，
     // 免得和被测的超时行为混为一谈。
-    private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan LockTimeout = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(10);
 
     [Fact]
     public async Task UpdateGivesUpInsteadOfWaitingForeverOnAHeldLock()
     {
-        var service = new JsonSettingsService(TempRoot);
+        var service = CreateService();
         await service.LoadAsync();
 
         using var holder = HoldLock();
@@ -39,7 +41,7 @@ public sealed class JsonSettingsLockTimeoutTests : TestTempDirectory
     [Fact]
     public async Task AFailedAttemptDoesNotPoisonLaterWrites()
     {
-        var service = new JsonSettingsService(TempRoot);
+        var service = CreateService();
         await service.LoadAsync();
 
         using (HoldLock())
@@ -58,6 +60,13 @@ public sealed class JsonSettingsLockTimeoutTests : TestTempDirectory
         FileMode.OpenOrCreate,
         FileAccess.ReadWrite,
         FileShare.None);
+
+    private JsonSettingsService CreateService() =>
+        new(
+            dataDirectory: TempRoot,
+            logger: null,
+            crossProcessLockTimeout: LockTimeout,
+            crossProcessLockRetryDelay: RetryDelay);
 
     private static async Task<Exception?> BoundedAsync(Func<Task> action)
     {

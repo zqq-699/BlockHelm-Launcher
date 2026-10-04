@@ -23,10 +23,13 @@ namespace Launcher.Tests.Architecture;
 
 public sealed class LayerDependencyContractTests
 {
+    private static readonly string[] ProductionProjects =
+        ["Launcher.App", "Launcher.Application", "Launcher.Domain", "Launcher.Infrastructure"];
+
     [Fact]
     public void ProjectReferencesFollowLayerDirection()
     {
-        var root = FindRepositoryRoot();
+        var root = new DirectoryInfo(TestRepository.Root);
 
         AssertProjectReferences(root, "Launcher.Domain");
         AssertProjectReferences(root, "Launcher.Application", "Launcher.Domain");
@@ -37,10 +40,9 @@ public sealed class LayerDependencyContractTests
     [Fact]
     public void SourceDoesNotRestoreLauncherCoreOrReverseLayerDependencies()
     {
-        var root = FindRepositoryRoot();
-        var sourceFiles = EnumerateSourceFiles(root)
-            .Where(file => new[] { "Launcher.App", "Launcher.Application", "Launcher.Domain", "Launcher.Infrastructure" }
-                .Any(project => IsUnder(file, root, project)))
+        var root = new DirectoryInfo(TestRepository.Root);
+        var sourceFiles = ProductionProjects
+            .SelectMany(project => TestRepository.EnumerateProjectFiles(project, "*.cs"))
             .ToArray();
 
         Assert.DoesNotContain(sourceFiles, file => File.ReadAllText(file).Contains("using Launcher.Core", StringComparison.Ordinal));
@@ -67,7 +69,7 @@ public sealed class LayerDependencyContractTests
     [Fact]
     public void ShellKeepsStateMonitoringAndBlockingShutdownOutOfUiBoundaries()
     {
-        var root = FindRepositoryRoot();
+        var root = new DirectoryInfo(TestRepository.Root);
         var mainWindowSource = File.ReadAllText(Path.Combine(
             root.FullName,
             "Launcher.App",
@@ -85,10 +87,8 @@ public sealed class LayerDependencyContractTests
     [Fact]
     public void ProductionCodeDoesNotSynchronouslyBlockOnTasksOrUseAsyncVoidViewModels()
     {
-        var root = FindRepositoryRoot();
-        var productionFiles = EnumerateSourceFiles(root)
-            .Where(file => new[] { "Launcher.App", "Launcher.Application", "Launcher.Domain", "Launcher.Infrastructure" }
-                .Any(project => IsUnder(file, root, project)))
+        var productionFiles = ProductionProjects
+            .SelectMany(project => TestRepository.EnumerateProjectFiles(project, "*.cs"))
             .ToArray();
         var blockingFiles = productionFiles
             .Where(file => File.ReadAllText(file).Contains("GetAwaiter().GetResult()", StringComparison.Ordinal))
@@ -107,7 +107,7 @@ public sealed class LayerDependencyContractTests
     [Fact]
     public void OnlineResourcePageDoesNotReabsorbChildRequestState()
     {
-        var root = FindRepositoryRoot();
+        var root = new DirectoryInfo(TestRepository.Root);
         var source = File.ReadAllText(Path.Combine(
             root.FullName,
             "Launcher.App",
@@ -137,13 +137,6 @@ public sealed class LayerDependencyContractTests
         Assert.Equal(expectedReferences.Order(StringComparer.Ordinal), references);
     }
 
-    private static IEnumerable<string> EnumerateSourceFiles(DirectoryInfo root)
-    {
-        return Directory.EnumerateFiles(root.FullName, "*.cs", SearchOption.AllDirectories)
-            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase));
-    }
-
     private static bool IsUnder(string file, DirectoryInfo root, string project)
     {
         var projectRoot = Path.Combine(root.FullName, project) + Path.DirectorySeparatorChar;
@@ -157,11 +150,4 @@ public sealed class LayerDependencyContractTests
             || string.Equals(line, $"using {namespacePrefix};", StringComparison.Ordinal));
     }
 
-    private static DirectoryInfo FindRepositoryRoot()
-    {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root.GetFiles("Launcher.sln").Length == 0)
-            root = root.Parent ?? throw new DirectoryNotFoundException("Could not locate repository root.");
-        return root;
-    }
 }

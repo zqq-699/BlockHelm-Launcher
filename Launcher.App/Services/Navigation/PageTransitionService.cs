@@ -96,6 +96,8 @@ public sealed class PageTransitionService
     private readonly Func<IReadOnlyList<string>> resolvePageOrder;
     private readonly TransitionRenderCacheFactory renderCacheFactory;
     private readonly ICompositionFrameSource compositionFrames;
+    private readonly TimeSpan compositionWaitTimeoutValue;
+    private readonly TimeSpan transitionWatchdogTimeoutValue;
     private string? currentPage;
     private int transitionToken;
     private IDisposable? blurRefreshLease;
@@ -149,14 +151,18 @@ public sealed class PageTransitionService
         string? initialPage,
         IReadOnlyList<string>? pageOrder,
         TransitionRenderCacheFactory renderCacheFactory,
-        ICompositionFrameSource? compositionFrames = null)
+        ICompositionFrameSource? compositionFrames = null,
+        TimeSpan? compositionWaitTimeout = null,
+        TimeSpan? transitionWatchdogTimeout = null)
         : this(
             dispatcher,
             resolvePageRoot,
             initialPage,
             () => pageOrder is { Count: > 0 } ? pageOrder : DefaultPageOrder,
             renderCacheFactory,
-            compositionFrames)
+            compositionFrames,
+            compositionWaitTimeout,
+            transitionWatchdogTimeout)
     {
     }
 
@@ -166,7 +172,9 @@ public sealed class PageTransitionService
         string? initialPage,
         Func<IReadOnlyList<string>> resolvePageOrder,
         TransitionRenderCacheFactory renderCacheFactory,
-        ICompositionFrameSource? compositionFrames)
+        ICompositionFrameSource? compositionFrames,
+        TimeSpan? compositionWaitTimeout = null,
+        TimeSpan? transitionWatchdogTimeout = null)
     {
         this.dispatcher = dispatcher;
         UiTransitionGate.AttachDispatcher(dispatcher);
@@ -174,6 +182,12 @@ public sealed class PageTransitionService
         this.resolvePageOrder = resolvePageOrder;
         this.renderCacheFactory = renderCacheFactory;
         this.compositionFrames = compositionFrames ?? CompositionTargetFrameSource.Instance;
+        compositionWaitTimeoutValue = compositionWaitTimeout ?? CompositionWaitTimeout;
+        transitionWatchdogTimeoutValue = transitionWatchdogTimeout ?? TransitionWatchdogTimeout;
+        if (compositionWaitTimeoutValue <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(compositionWaitTimeout));
+        if (transitionWatchdogTimeoutValue <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(transitionWatchdogTimeout));
         currentPage = initialPage;
     }
 
@@ -249,7 +263,7 @@ public sealed class PageTransitionService
 
         var timeout = new DispatcherTimer(DispatcherPriority.Normal, dispatcher)
         {
-            Interval = CompositionWaitTimeout
+            Interval = compositionWaitTimeoutValue
         };
         timeout.Tick += (_, _) =>
         {
@@ -260,7 +274,7 @@ public sealed class PageTransitionService
             // 否则页面会停在几乎不可见的预热状态，闸门也不会 Exit。
             Serilog.Log.Debug(
                 "Page transition warm-up timed out waiting for a composition frame. TimeoutMs={TimeoutMs}",
-                CompositionWaitTimeout.TotalMilliseconds);
+                compositionWaitTimeoutValue.TotalMilliseconds);
             continuation();
         };
         compositionWaitTimeout = timeout;
@@ -298,14 +312,14 @@ public sealed class PageTransitionService
         StopTransitionWatchdog();
         var watchdog = new DispatcherTimer(DispatcherPriority.Normal, dispatcher)
         {
-            Interval = TransitionWatchdogTimeout
+            Interval = transitionWatchdogTimeoutValue
         };
         watchdog.Tick += (_, _) =>
         {
             Serilog.Log.Debug(
                 "Page transition did not finish in time and was force-completed. Page={Page} TimeoutMs={TimeoutMs}",
                 currentPage,
-                TransitionWatchdogTimeout.TotalMilliseconds);
+                transitionWatchdogTimeoutValue.TotalMilliseconds);
             // 与正常收尾同一条路径：恢复透明度与位移，释放渲染资源，并配对 Exit 闸门。
             transitionToken++;
             CancelActiveTransition(requestFinalRefresh: true);

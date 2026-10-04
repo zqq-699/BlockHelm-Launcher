@@ -68,8 +68,9 @@ public sealed class ResourcesProjectInstallViewModelTests
         Assert.Equal(2, messages.Messages.Count(message => message == "downloading"));
 
         installation.Complete("first", CreateSuccessfulModpackResult("first-instance"));
+        await first;
         installation.Fail("second", new InvalidOperationException("failure"));
-        await Task.WhenAll(first, second);
+        await second;
 
         Assert.False(viewModel.IsInstalling);
         Assert.Equal(DownloadTaskState.Completed, tasks.Tasks.Single(task => task.Title == "Version first").State);
@@ -102,8 +103,9 @@ public sealed class ResourcesProjectInstallViewModelTests
         Assert.All(tasks.Tasks, task => Assert.Equal(DownloadTaskState.Running, task.State));
 
         installation.Complete("first", new ResourceProjectInstallationResult());
+        await first;
         installation.Complete("second", new ResourceProjectInstallationResult());
-        await Task.WhenAll(first, second);
+        await second;
 
         Assert.False(viewModel.IsInstalling);
         Assert.All(tasks.Tasks, task => Assert.Equal(DownloadTaskState.Completed, task.State));
@@ -167,6 +169,7 @@ public sealed class ResourcesProjectInstallViewModelTests
 
         Assert.Equal(2, tasks.Tasks.Count);
         installation.Complete("same", new ResourceProjectInstallationResult());
+        await Task.WhenAny(first, second);
         installation.Complete("same", new ResourceProjectInstallationResult());
         await Task.WhenAll(first, second);
     }

@@ -229,13 +229,11 @@ public sealed class LocalModpackPackageServiceTests : TestTempDirectory
 
     private sealed class FailingCurseForgeResolutionHandler : HttpMessageHandler
     {
-        protected override async Task<HttpResponseMessage> SendAsync(
+        protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            if (request.RequestUri!.AbsolutePath.Contains("/mods/1/", StringComparison.Ordinal))
-                await Task.Delay(80, cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest));
         }
     }
 

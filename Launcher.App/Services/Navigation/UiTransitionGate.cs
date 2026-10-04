@@ -36,6 +36,7 @@ internal static class UiTransitionGate
     private static Dispatcher? uiDispatcher;
     // 兜底看门狗，只在队列非空时运行。
     private static DispatcherTimer? deadlineWatchdog;
+    private static Func<DateTime> utcNow = GetUtcNow;
 
     /// <summary>由过渡服务在构造时登记 UI 线程 Dispatcher。</summary>
     internal static void AttachDispatcher(Dispatcher dispatcher)
@@ -101,7 +102,7 @@ internal static class UiTransitionGate
             return;
         }
 
-        var deferred = new DeferredAction(action, DateTime.UtcNow + MaximumDeferral);
+        var deferred = new DeferredAction(action, utcNow() + MaximumDeferral);
         if (!IsTransitionActive)
         {
             // 排队只是"稍后执行"，轮到它时过渡可能已经开始——页面 Visibility 绑定就先于
@@ -109,7 +110,7 @@ internal static class UiTransitionGate
             dispatcher.BeginInvoke(
                 () =>
                 {
-                    if (IsTransitionActive && DateTime.UtcNow < deferred.Deadline)
+                    if (IsTransitionActive && utcNow() < deferred.Deadline)
                         Defer(deferred);
                     else
                         deferred.Action();
@@ -127,10 +128,10 @@ internal static class UiTransitionGate
     /// </summary>
     internal static async Task WaitForIdleAsync(CancellationToken cancellationToken = default)
     {
-        var deadline = DateTime.UtcNow + MaximumDeferral;
+        var deadline = utcNow() + MaximumDeferral;
         while (IsTransitionActive)
         {
-            var remaining = deadline - DateTime.UtcNow;
+            var remaining = deadline - utcNow();
             if (remaining <= TimeSpan.Zero)
                 return;
 
@@ -151,13 +152,20 @@ internal static class UiTransitionGate
     }
 
     /// <summary>测试用：把闸门恢复到初始状态，并指定要使用的 Dispatcher。</summary>
-    internal static void ResetForTesting(Dispatcher? dispatcher = null)
+    internal static void ResetForTesting(
+        Dispatcher? dispatcher = null,
+        Func<DateTime>? utcNowProvider = null)
     {
         activeTransitionCount = 0;
         DeferredActions.Clear();
         StopDeadlineWatchdog();
         uiDispatcher = dispatcher;
+        utcNow = utcNowProvider ?? GetUtcNow;
     }
+
+    internal static void ReleaseExpiredActionsForTesting() => ReleaseExpiredActions();
+
+    private static DateTime GetUtcNow() => DateTime.UtcNow;
 
     /// <summary>
     /// 把工作挂进队列，并确保看门狗在跑。
@@ -201,7 +209,7 @@ internal static class UiTransitionGate
     /// <summary>把已经过了截止时间的工作放出去，不管过渡是否还在进行。</summary>
     private static void ReleaseExpiredActions()
     {
-        var now = DateTime.UtcNow;
+        var now = utcNow();
         var expired = DeferredActions.Where(deferred => now >= deferred.Deadline).ToArray();
         DeferredActions.RemoveAll(deferred => now >= deferred.Deadline);
         if (DeferredActions.Count == 0)
@@ -244,7 +252,7 @@ internal static class UiTransitionGate
             dispatcher.BeginInvoke(
                 () =>
                 {
-                    if (IsTransitionActive && DateTime.UtcNow < deferred.Deadline)
+                    if (IsTransitionActive && utcNow() < deferred.Deadline)
                         Defer(deferred);
                     else
                         deferred.Action();

@@ -29,14 +29,31 @@ internal static class AtomicJsonFileWriter
     private const int MaxMoveAttempts = 5;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(150);
 
-    public static async Task WriteAsync<T>(
+    public static Task WriteAsync<T>(
         string destinationPath,
         T value,
         JsonSerializerOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        WriteAsync(
+            destinationPath,
+            value,
+            options,
+            cancellationToken,
+            MaxMoveAttempts,
+            token => Task.Delay(RetryDelay, token));
+
+    internal static async Task WriteAsync<T>(
+        string destinationPath,
+        T value,
+        JsonSerializerOptions options,
+        CancellationToken cancellationToken,
+        int maxMoveAttempts,
+        Func<CancellationToken, Task> retryAsync)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxMoveAttempts, 1);
+        ArgumentNullException.ThrowIfNull(retryAsync);
         cancellationToken.ThrowIfCancellationRequested();
 
         var fullDestinationPath = Path.GetFullPath(destinationPath);
@@ -64,7 +81,12 @@ internal static class AtomicJsonFileWriter
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            await MoveWithRetryAsync(temporaryPath, fullDestinationPath, cancellationToken)
+            await MoveWithRetryAsync(
+                    temporaryPath,
+                    fullDestinationPath,
+                    maxMoveAttempts,
+                    retryAsync,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
@@ -76,6 +98,8 @@ internal static class AtomicJsonFileWriter
     private static async Task MoveWithRetryAsync(
         string source,
         string destination,
+        int maxMoveAttempts,
+        Func<CancellationToken, Task> retryAsync,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; ; attempt++)
@@ -87,10 +111,10 @@ internal static class AtomicJsonFileWriter
                 return;
             }
             catch (Exception exception) when (
-                attempt < MaxMoveAttempts
+                attempt < maxMoveAttempts
                 && exception is IOException or UnauthorizedAccessException)
             {
-                await Task.Delay(RetryDelay, cancellationToken).ConfigureAwait(false);
+                await retryAsync(cancellationToken).ConfigureAwait(false);
             }
         }
     }
