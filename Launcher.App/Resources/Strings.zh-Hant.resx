@@ -894,6 +894,9 @@
   <data name="Settings_JavaListLabel" xml:space="preserve">
     <value>Java 清單</value>
   </data>
+  <data name="Settings_JavaSearchButton" xml:space="preserve">
+    <value>自動搜尋</value>
+  </data>
   <data name="Settings_JavaListLoading" xml:space="preserve">
     <value>正在掃描本機 Java...</value>
   </data>

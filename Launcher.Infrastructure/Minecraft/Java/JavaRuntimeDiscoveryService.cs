@@ -39,25 +39,80 @@ public sealed partial class JavaRuntimeDiscoveryService : IJavaRuntimeDiscoveryS
         string? minecraftDirectory,
         CancellationToken cancellationToken = default)
     {
-        // 候选探测并行执行，最终按规范路径和运行时身份折叠同一安装的多个入口。
-        return await Task.Run(async () =>
+        await fullScanLock.WaitAsync(cancellationToken);
+        try
         {
-            var candidates = CollectCandidatePaths(minecraftDirectory).ToList();
+            if (!await HasCompletedFullScanAsync(cancellationToken))
+                return await SearchAndRememberAsync(minecraftDirectory, cancellationToken);
+
+            var candidates = await CollectRecordedCandidatesAsync(cancellationToken);
             candidates.AddRange(await CollectImportedCandidatesAsync(cancellationToken));
-            var distinctCandidates = CollapseDuplicateCandidates(candidates);
-            var runtimes = new List<JavaRuntimeInfo>();
+            return await ProbeCandidatesAsync(candidates, cancellationToken);
+        }
+        finally
+        {
+            fullScanLock.Release();
+        }
+    }
 
-            foreach (var candidate in distinctCandidates)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                runtimes.Add(await CreateRuntimeInfoAsync(candidate, cancellationToken));
-            }
+    public async Task<IReadOnlyList<JavaRuntimeInfo>> SearchAllAsync(
+        string? minecraftDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        await fullScanLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await SearchAndRememberAsync(minecraftDirectory, cancellationToken);
+        }
+        finally
+        {
+            fullScanLock.Release();
+        }
+    }
 
-            return (IReadOnlyList<JavaRuntimeInfo>)CollapseDuplicateRuntimes(runtimes)
-                .OrderByDescending(runtime => runtime.MajorVersion ?? 0)
-                .ThenBy(runtime => runtime.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+    private async Task<IReadOnlyList<JavaRuntimeInfo>> SearchAndRememberAsync(
+        string? minecraftDirectory,
+        CancellationToken cancellationToken)
+    {
+        var candidates = await Task.Run(() =>
+        {
+            var found = configuredCandidateCollector(minecraftDirectory).ToList();
+            found.AddRange(CollectLocalDriveCandidates(localDriveRootsProvider(), cancellationToken));
+            return found;
         }, cancellationToken);
+
+        var runtimes = await ProbeCandidatesAsync(candidates, cancellationToken);
+        await RememberDiscoveredExecutablesAsync(
+            runtimes.Select(runtime => runtime.ExecutablePath).ToList(), cancellationToken);
+
+        var imported = await CollectImportedCandidatesAsync(cancellationToken);
+        if (imported.Count == 0)
+            return runtimes;
+
+        var importedRuntimes = await ProbeCandidatesAsync(imported, cancellationToken);
+        return CollapseDuplicateRuntimes([.. runtimes, .. importedRuntimes])
+            .OrderByDescending(runtime => runtime.MajorVersion ?? 0)
+            .ThenBy(runtime => runtime.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static async Task<IReadOnlyList<JavaRuntimeInfo>> ProbeCandidatesAsync(
+        IReadOnlyList<JavaRuntimeCandidate> candidates,
+        CancellationToken cancellationToken)
+    {
+        var runtimes = new List<JavaRuntimeInfo>();
+        foreach (var candidate in CollapseDuplicateCandidates(candidates))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var runtime = await CreateRuntimeInfoAsync(candidate, cancellationToken);
+            if (runtime.MajorVersion is not null)
+                runtimes.Add(runtime);
+        }
+
+        return CollapseDuplicateRuntimes(runtimes)
+            .OrderByDescending(runtime => runtime.MajorVersion ?? 0)
+            .ThenBy(runtime => runtime.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public async Task<JavaRuntimeInfo> DiscoverExecutableAsync(
@@ -70,12 +125,16 @@ public sealed partial class JavaRuntimeDiscoveryService : IJavaRuntimeDiscoveryS
             if (!File.Exists(normalizedPath))
                 throw new FileNotFoundException("Java executable was not found.", normalizedPath);
 
-            return await CreateRuntimeInfoAsync(
+            var runtime = await CreateRuntimeInfoAsync(
                 new JavaRuntimeCandidate(
                     normalizedPath,
                     "ManualImport",
                     NormalizePath(ResolveJavaExecutableIdentityPath(normalizedPath))),
                 cancellationToken);
+            if (runtime.MajorVersion is null)
+                throw new InvalidOperationException("Java executable did not report a usable version.");
+
+            return runtime;
         }, cancellationToken);
     }
 

@@ -27,6 +27,10 @@ public interface IJavaRuntimeDiscoveryService
         string? minecraftDirectory,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<JavaRuntimeInfo>> SearchAllAsync(
+        string? minecraftDirectory,
+        CancellationToken cancellationToken = default);
+
     Task<JavaRuntimeInfo> DiscoverExecutableAsync(
         string executablePath,
         CancellationToken cancellationToken = default);

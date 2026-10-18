@@ -493,6 +493,7 @@ public static class Strings
     public static string Settings_JavaSelectionAuto => Get(nameof(Settings_JavaSelectionAuto));
     public static string Settings_JavaSelectionManual => Get(nameof(Settings_JavaSelectionManual));
     public static string Settings_JavaListLabel => Get(nameof(Settings_JavaListLabel));
+    public static string Settings_JavaSearchButton => Get(nameof(Settings_JavaSearchButton));
     public static string Settings_JavaListLoading => Get(nameof(Settings_JavaListLoading));
     public static string Settings_JavaListEmpty => Get(nameof(Settings_JavaListEmpty));
     public static string Settings_JavaVersionUnknown => Get(nameof(Settings_JavaVersionUnknown));

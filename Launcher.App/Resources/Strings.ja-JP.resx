@@ -894,6 +894,9 @@
   <data name="Settings_JavaListLabel" xml:space="preserve">
     <value>Java リスト</value>
   </data>
+  <data name="Settings_JavaSearchButton" xml:space="preserve">
+    <value>Java を検索</value>
+  </data>
   <data name="Settings_JavaListLoading" xml:space="preserve">
     <value>この PC の Java をスキャン中...</value>
   </data>

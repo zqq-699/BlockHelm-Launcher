@@ -78,7 +78,7 @@
 
                         <Button Grid.Column="1"
                                 Margin="0,0,10,0"
-                                Content="{x:Static res:Strings.Refresh_Button}"
+                                Content="{x:Static res:Strings.Settings_JavaSearchButton}"
                                 Command="{Binding RefreshJavaRuntimesCommand}"
                                 Style="{StaticResource LauncherDialogButtonStyle}" />
                         <Button Grid.Column="2"

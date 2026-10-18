@@ -27,18 +27,32 @@ public sealed partial class JavaRuntimeDiscoveryService
     };
 
     private readonly SemaphoreSlim importedRuntimeCatalogLock = new(1, 1);
+    private readonly SemaphoreSlim fullScanLock = new(1, 1);
     private readonly string importedRuntimeCatalogPath;
     private readonly ILogger<JavaRuntimeDiscoveryService> logger;
+    private readonly Func<string?, IReadOnlyList<JavaRuntimeCandidate>> configuredCandidateCollector;
+    private readonly Func<IReadOnlyList<string>> localDriveRootsProvider;
 
     public JavaRuntimeDiscoveryService(
         LauncherPathProvider? pathProvider = null,
         ILogger<JavaRuntimeDiscoveryService>? logger = null)
+        : this(pathProvider, logger, directory => CollectCandidatePaths(directory), GetLocalDriveRoots)
+    {
+    }
+
+    internal JavaRuntimeDiscoveryService(
+        LauncherPathProvider? pathProvider,
+        ILogger<JavaRuntimeDiscoveryService>? logger,
+        Func<string?, IReadOnlyList<JavaRuntimeCandidate>> configuredCandidateCollector,
+        Func<IReadOnlyList<string>> localDriveRootsProvider)
     {
         var resolvedPathProvider = pathProvider ?? new LauncherPathProvider();
         importedRuntimeCatalogPath = Path.Combine(
             resolvedPathProvider.DefaultDataDirectory,
             ImportedRuntimeCatalogFileName);
         this.logger = logger ?? NullLogger<JavaRuntimeDiscoveryService>.Instance;
+        this.configuredCandidateCollector = configuredCandidateCollector;
+        this.localDriveRootsProvider = localDriveRootsProvider;
     }
 
     public async Task<JavaRuntimeInfo> ImportExecutableAsync(
@@ -48,6 +62,64 @@ public sealed partial class JavaRuntimeDiscoveryService
         var runtime = await DiscoverExecutableAsync(executablePath, cancellationToken);
         await RememberImportedExecutableAsync(runtime.ExecutablePath, cancellationToken);
         return runtime;
+    }
+
+    private async Task<bool> HasCompletedFullScanAsync(CancellationToken cancellationToken)
+    {
+        await importedRuntimeCatalogLock.WaitAsync(cancellationToken);
+        try
+        {
+            return (await LoadCatalogCoreAsync(cancellationToken)).FullScanCompleted;
+        }
+        finally
+        {
+            importedRuntimeCatalogLock.Release();
+        }
+    }
+
+    private async Task<List<JavaRuntimeCandidate>> CollectRecordedCandidatesAsync(
+        CancellationToken cancellationToken)
+    {
+        List<string> paths;
+        await importedRuntimeCatalogLock.WaitAsync(cancellationToken);
+        try
+        {
+            paths = (await LoadCatalogCoreAsync(cancellationToken)).DiscoveredExecutablePaths ?? [];
+        }
+        finally
+        {
+            importedRuntimeCatalogLock.Release();
+        }
+
+        return paths
+            .Where(File.Exists)
+            .Select(path => new JavaRuntimeCandidate(
+                path, "RecordedDiscovery", NormalizePath(ResolveJavaExecutableIdentityPath(path))))
+            .ToList();
+    }
+
+    internal async Task RememberDiscoveredExecutablesAsync(
+        IReadOnlyList<string> executablePaths,
+        CancellationToken cancellationToken)
+    {
+        await importedRuntimeCatalogLock.WaitAsync(cancellationToken);
+        try
+        {
+            var catalog = await LoadCatalogCoreAsync(cancellationToken);
+            catalog.DiscoveredExecutablePaths = executablePaths
+                .Select(NormalizePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            catalog.FullScanCompleted = true;
+            await SaveCatalogCoreAsync(catalog, cancellationToken);
+            logger.LogInformation(
+                "Completed local Java search. DiscoveredRuntimeCount={DiscoveredRuntimeCount}",
+                catalog.DiscoveredExecutablePaths.Count);
+        }
+        finally
+        {
+            importedRuntimeCatalogLock.Release();
+        }
     }
 
     internal async Task<IReadOnlyList<JavaRuntimeCandidate>> CollectImportedCandidatesAsync(
@@ -168,8 +240,19 @@ public sealed partial class JavaRuntimeDiscoveryService
     private async Task<List<string>> LoadImportedExecutablePathsCoreAsync(
         CancellationToken cancellationToken)
     {
+        var catalog = await LoadCatalogCoreAsync(cancellationToken);
+        return (catalog.ExecutablePaths ?? [])
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private async Task<ImportedJavaRuntimeCatalog> LoadCatalogCoreAsync(
+        CancellationToken cancellationToken)
+    {
         if (!File.Exists(importedRuntimeCatalogPath))
-            return [];
+            return new ImportedJavaRuntimeCatalog();
 
         try
         {
@@ -184,11 +267,7 @@ public sealed partial class JavaRuntimeDiscoveryService
                 stream,
                 ImportedRuntimeCatalogJsonOptions,
                 cancellationToken);
-            return (catalog?.ExecutablePaths ?? [])
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Select(NormalizePath)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return catalog ?? new ImportedJavaRuntimeCatalog();
         }
         catch (OperationCanceledException)
         {
@@ -203,26 +282,33 @@ public sealed partial class JavaRuntimeDiscoveryService
                 exception,
                 "Failed to load the imported Java runtime catalog. CatalogPath={CatalogPath}",
                 importedRuntimeCatalogPath);
-            return [];
+            return new ImportedJavaRuntimeCatalog();
         }
     }
 
-    private Task SaveImportedExecutablePathsCoreAsync(
+    private async Task SaveImportedExecutablePathsCoreAsync(
         IReadOnlyList<string> executablePaths,
         CancellationToken cancellationToken)
     {
+        var catalog = await LoadCatalogCoreAsync(cancellationToken);
+        catalog.ExecutablePaths = executablePaths.ToList();
+        await SaveCatalogCoreAsync(catalog, cancellationToken);
+    }
+
+    private Task SaveCatalogCoreAsync(
+        ImportedJavaRuntimeCatalog catalog,
+        CancellationToken cancellationToken)
+    {
         return AtomicJsonFileWriter.WriteAsync(
-            importedRuntimeCatalogPath,
-            new ImportedJavaRuntimeCatalog
-            {
-                ExecutablePaths = executablePaths.ToList()
-            },
-            ImportedRuntimeCatalogJsonOptions,
-            cancellationToken);
+            importedRuntimeCatalogPath, catalog, ImportedRuntimeCatalogJsonOptions, cancellationToken);
     }
 
     private sealed class ImportedJavaRuntimeCatalog
     {
         public List<string> ExecutablePaths { get; set; } = [];
+
+        public List<string> DiscoveredExecutablePaths { get; set; } = [];
+
+        public bool FullScanCompleted { get; set; }
     }
 }

@@ -118,15 +118,15 @@ public sealed partial class JavaSettingsEditorViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRefreshJavaRuntimes))]
     public async Task RefreshJavaRuntimesAsync()
     {
-        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: false);
+        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: false, forceSearch: true);
     }
 
     public async Task RefreshJavaRuntimesForDisplayAsync()
     {
-        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: true);
+        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: true, forceSearch: false);
     }
 
-    private async Task RefreshJavaRuntimesCoreAsync(bool allowWhenDisabled)
+    private async Task RefreshJavaRuntimesCoreAsync(bool allowWhenDisabled, bool forceSearch)
     {
         // 手动按钮遵守 CanExecute，展示页面的后台刷新可在禁用状态下预热列表。
         if (IsJavaRuntimeScanRunning || !allowWhenDisabled && !IsEditorEnabled)
@@ -144,9 +144,11 @@ public sealed partial class JavaSettingsEditorViewModel : ObservableObject
         try
         {
             // 发现完成后用路径协调旧选择，避免重建列表导致 ComboBox 跳到首项。
-            var discoveredRuntimes = await javaRuntimeDiscoveryService.DiscoverAsync(
-                minecraftDirectoryProvider(),
-                cancellationTokenSource.Token);
+            var discoveredRuntimes = forceSearch
+                ? await javaRuntimeDiscoveryService.SearchAllAsync(
+                    minecraftDirectoryProvider(), cancellationTokenSource.Token)
+                : await javaRuntimeDiscoveryService.DiscoverAsync(
+                    minecraftDirectoryProvider(), cancellationTokenSource.Token);
 
             JavaRuntimes.Clear();
             foreach (var runtime in discoveredRuntimes)

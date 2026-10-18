@@ -306,6 +306,7 @@
   <data name="Settings_JavaSelectionAuto" xml:space="preserve"><value>自动选择</value></data>
   <data name="Settings_JavaSelectionManual" xml:space="preserve"><value>手动选择</value></data>
   <data name="Settings_JavaListLabel" xml:space="preserve"><value>Java 列表</value></data>
+  <data name="Settings_JavaSearchButton" xml:space="preserve"><value>自动搜索</value></data>
   <data name="Settings_JavaListLoading" xml:space="preserve"><value>正在扫描本机 Java...</value></data>
   <data name="Settings_JavaListEmpty" xml:space="preserve"><value>没有找到本机 Java。</value></data>
   <data name="Settings_JavaVersionUnknown" xml:space="preserve"><value>未知版本</value></data>

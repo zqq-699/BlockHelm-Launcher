@@ -82,6 +82,9 @@ private static async Task<JavaRuntimeInfo> CreateRuntimeInfoAsync(
 
             var output = await outputTask;
             var error = await errorTask;
+            if (process.ExitCode != 0)
+                return new JavaVersionProbeResult(null, null, UnknownArchitecture);
+
             return ParseVersionOutput(string.Concat(error, Environment.NewLine, output));
         }
         catch (OperationCanceledException)
