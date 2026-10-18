@@ -894,6 +894,9 @@
   <data name="Settings_JavaListLabel" xml:space="preserve">
     <value>Java List</value>
   </data>
+  <data name="Settings_JavaDeepSearchButton" xml:space="preserve">
+    <value>Deep Search</value>
+  </data>
   <data name="Settings_JavaSearchButton" xml:space="preserve">
     <value>Search for Java</value>
   </data>

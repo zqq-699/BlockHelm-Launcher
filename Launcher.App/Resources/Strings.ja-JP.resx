@@ -894,6 +894,9 @@
   <data name="Settings_JavaListLabel" xml:space="preserve">
     <value>Java リスト</value>
   </data>
+  <data name="Settings_JavaDeepSearchButton" xml:space="preserve">
+    <value>詳細検索</value>
+  </data>
   <data name="Settings_JavaSearchButton" xml:space="preserve">
     <value>Java を検索</value>
   </data>

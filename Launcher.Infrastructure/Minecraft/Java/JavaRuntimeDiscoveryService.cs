@@ -39,34 +39,35 @@ public sealed partial class JavaRuntimeDiscoveryService : IJavaRuntimeDiscoveryS
         string? minecraftDirectory,
         CancellationToken cancellationToken = default)
     {
-        await fullScanLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (!await HasCompletedFullScanAsync(cancellationToken))
-                return await SearchAndRememberAsync(minecraftDirectory, cancellationToken);
+        var candidates = await CollectDefaultCandidatesAsync(minecraftDirectory, cancellationToken);
+        return await ProbeCandidatesAsync(candidates, cancellationToken);
+    }
 
-            var candidates = await CollectRecordedCandidatesAsync(cancellationToken);
-            candidates.AddRange(await CollectImportedCandidatesAsync(cancellationToken));
-            return await ProbeCandidatesAsync(candidates, cancellationToken);
-        }
-        finally
-        {
-            fullScanLock.Release();
-        }
+    internal async Task<IReadOnlyList<JavaRuntimeCandidate>> CollectDefaultCandidatesAsync(
+        string? minecraftDirectory,
+        CancellationToken cancellationToken)
+    {
+        // 普通发现保持轻量：刷新明确配置与常见目录，并复用已记录的深搜及手动导入结果。
+        var candidates = await Task.Run(
+            () => configuredCandidateCollector(minecraftDirectory).ToList(),
+            cancellationToken);
+        candidates.AddRange(await CollectRecordedCandidatesAsync(cancellationToken));
+        candidates.AddRange(await CollectImportedCandidatesAsync(cancellationToken));
+        return CollapseDuplicateCandidates(candidates);
     }
 
     public async Task<IReadOnlyList<JavaRuntimeInfo>> SearchAllAsync(
         string? minecraftDirectory,
         CancellationToken cancellationToken = default)
     {
-        await fullScanLock.WaitAsync(cancellationToken);
+        await deepSearchLock.WaitAsync(cancellationToken);
         try
         {
             return await SearchAndRememberAsync(minecraftDirectory, cancellationToken);
         }
         finally
         {
-            fullScanLock.Release();
+            deepSearchLock.Release();
         }
     }
 

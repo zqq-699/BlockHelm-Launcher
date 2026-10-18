@@ -34,7 +34,64 @@ public sealed class JavaRuntimeDiscoveryServiceTests : TestTempDirectory
     }
 
     [Fact]
-    public async Task FirstSearchIsRecordedAndOnlyExplicitSearchRepeatsIt()
+    public async Task DefaultDiscoveryRefreshesConfiguredAndRecordedCandidatesWithoutScanningLocalDrives()
+    {
+        var launcherDirectory = Path.Combine(TempRoot, "launcher-default");
+        var configuredJava = Path.Combine(TempRoot, "configured", "bin", "java.exe");
+        var recordedJava = Path.Combine(TempRoot, "recorded", "bin", "java.exe");
+        var manualJava = Path.Combine(TempRoot, "manual-default", "bin", "java.exe");
+        foreach (var executablePath in new[] { configuredJava, recordedJava, manualJava })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(executablePath)!);
+            File.WriteAllText(executablePath, string.Empty);
+        }
+
+        var catalogPath = Path.Combine(launcherDirectory, "BHL", "java-runtimes.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(catalogPath)!);
+        File.WriteAllText(catalogPath, JsonSerializer.Serialize(new
+        {
+            ExecutablePaths = new[] { manualJava },
+            DiscoveredExecutablePaths = new[] { recordedJava },
+            FullScanCompleted = true
+        }));
+
+        var configuredSearchCount = 0;
+        var localDriveSearchCount = 0;
+        var service = new JavaRuntimeDiscoveryService(
+            new LauncherPathProvider(launcherDirectory),
+            null,
+            _ =>
+            {
+                configuredSearchCount++;
+                return
+                [
+                    new JavaRuntimeCandidate(configuredJava, "JAVA_HOME", configuredJava)
+                ];
+            },
+            () =>
+            {
+                localDriveSearchCount++;
+                return [];
+            });
+
+        var firstCandidates = await service.CollectDefaultCandidatesAsync(null, CancellationToken.None);
+        var secondCandidates = await service.CollectDefaultCandidatesAsync(null, CancellationToken.None);
+
+        Assert.Equal(2, configuredSearchCount);
+        Assert.Equal(0, localDriveSearchCount);
+        Assert.Equal(
+            new[] { configuredJava, manualJava, recordedJava }.Order(StringComparer.OrdinalIgnoreCase),
+            firstCandidates.Select(candidate => candidate.ExecutablePath)
+                .Order(StringComparer.OrdinalIgnoreCase));
+        Assert.Equal(
+            firstCandidates.Select(candidate => candidate.ExecutablePath)
+                .Order(StringComparer.OrdinalIgnoreCase),
+            secondCandidates.Select(candidate => candidate.ExecutablePath)
+                .Order(StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task OnlyExplicitSearchScansLocalDrivesAndRecordsCompletion()
     {
         var launcherDirectory = Path.Combine(TempRoot, "launcher");
         var manualJava = Path.Combine(TempRoot, "manual", "bin", "java.exe");
@@ -48,6 +105,7 @@ public sealed class JavaRuntimeDiscoveryServiceTests : TestTempDirectory
         }));
 
         var configuredSearchCount = 0;
+        var localDriveSearchCount = 0;
         JavaRuntimeDiscoveryService CreateService() => new(
             new LauncherPathProvider(launcherDirectory),
             null,
@@ -56,18 +114,25 @@ public sealed class JavaRuntimeDiscoveryServiceTests : TestTempDirectory
                 configuredSearchCount++;
                 return [];
             },
-            () => []);
+            () =>
+            {
+                localDriveSearchCount++;
+                return [];
+            });
 
         var firstService = CreateService();
         await firstService.DiscoverAsync(null);
         Assert.Equal(1, configuredSearchCount);
+        Assert.Equal(0, localDriveSearchCount);
 
         var nextLaunchService = CreateService();
         await nextLaunchService.DiscoverAsync(null);
-        Assert.Equal(1, configuredSearchCount);
+        Assert.Equal(2, configuredSearchCount);
+        Assert.Equal(0, localDriveSearchCount);
 
         await nextLaunchService.SearchAllAsync(null);
-        Assert.Equal(2, configuredSearchCount);
+        Assert.Equal(3, configuredSearchCount);
+        Assert.Equal(1, localDriveSearchCount);
 
         using var catalog = JsonDocument.Parse(File.ReadAllText(catalogPath));
         Assert.True(catalog.RootElement.GetProperty("FullScanCompleted").GetBoolean());

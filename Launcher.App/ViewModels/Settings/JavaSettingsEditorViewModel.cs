@@ -118,15 +118,21 @@ public sealed partial class JavaSettingsEditorViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRefreshJavaRuntimes))]
     public async Task RefreshJavaRuntimesAsync()
     {
-        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: false, forceSearch: true);
+        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: false, deepSearch: false);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRefreshJavaRuntimes))]
+    public async Task DeepSearchJavaRuntimesAsync()
+    {
+        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: false, deepSearch: true);
     }
 
     public async Task RefreshJavaRuntimesForDisplayAsync()
     {
-        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: true, forceSearch: false);
+        await RefreshJavaRuntimesCoreAsync(allowWhenDisabled: true, deepSearch: false);
     }
 
-    private async Task RefreshJavaRuntimesCoreAsync(bool allowWhenDisabled, bool forceSearch)
+    private async Task RefreshJavaRuntimesCoreAsync(bool allowWhenDisabled, bool deepSearch)
     {
         // 手动按钮遵守 CanExecute，展示页面的后台刷新可在禁用状态下预热列表。
         if (IsJavaRuntimeScanRunning || !allowWhenDisabled && !IsEditorEnabled)
@@ -144,7 +150,7 @@ public sealed partial class JavaSettingsEditorViewModel : ObservableObject
         try
         {
             // 发现完成后用路径协调旧选择，避免重建列表导致 ComboBox 跳到首项。
-            var discoveredRuntimes = forceSearch
+            var discoveredRuntimes = deepSearch
                 ? await javaRuntimeDiscoveryService.SearchAllAsync(
                     minecraftDirectoryProvider(), cancellationTokenSource.Token)
                 : await javaRuntimeDiscoveryService.DiscoverAsync(
@@ -304,6 +310,7 @@ public sealed partial class JavaSettingsEditorViewModel : ObservableObject
     partial void OnIsJavaRuntimeScanRunningChanged(bool value)
     {
         RefreshJavaRuntimesCommand.NotifyCanExecuteChanged();
+        DeepSearchJavaRuntimesCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnJavaRuntimeListMessageChanged(string value)
@@ -314,6 +321,7 @@ public sealed partial class JavaSettingsEditorViewModel : ObservableObject
     partial void OnIsEditorEnabledChanged(bool value)
     {
         RefreshJavaRuntimesCommand.NotifyCanExecuteChanged();
+        DeepSearchJavaRuntimesCommand.NotifyCanExecuteChanged();
         ImportJavaRuntimeCommand.NotifyCanExecuteChanged();
     }
 

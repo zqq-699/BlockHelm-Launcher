@@ -98,6 +98,8 @@ public sealed partial class InstanceJavaSettingsViewModel : GameSettingsDetailsS
 
     public IAsyncRelayCommand RefreshInstanceJavaRuntimesCommand => InstanceJavaSettings.RefreshJavaRuntimesCommand;
 
+    public IAsyncRelayCommand DeepSearchInstanceJavaRuntimesCommand => InstanceJavaSettings.DeepSearchJavaRuntimesCommand;
+
     public IAsyncRelayCommand ImportInstanceJavaRuntimeCommand => InstanceJavaSettings.ImportJavaRuntimeCommand;
 
     public void PrimeFromSettings(LauncherSettings launcherSettings)

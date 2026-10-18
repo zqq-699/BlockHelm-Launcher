@@ -79,6 +79,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Orientation="Horizontal"
@@ -96,10 +97,15 @@
 
                         <Button Grid.Column="1"
                                 Margin="0,0,10,0"
+                                Content="{x:Static res:Strings.Settings_JavaDeepSearchButton}"
+                                Command="{Binding DeepSearchInstanceJavaRuntimesCommand}"
+                                Style="{StaticResource LauncherDialogButtonStyle}" />
+                        <Button Grid.Column="2"
+                                Margin="0,0,10,0"
                                 Content="{x:Static res:Strings.Settings_JavaSearchButton}"
                                 Command="{Binding RefreshInstanceJavaRuntimesCommand}"
                                 Style="{StaticResource LauncherDialogButtonStyle}" />
-                        <Button Grid.Column="2"
+                        <Button Grid.Column="3"
                                 Content="{x:Static res:Strings.ManualImport_Button}"
                                 Command="{Binding ImportInstanceJavaRuntimeCommand}"
                                 Style="{StaticResource LauncherPrimaryDialogButtonStyle}" />

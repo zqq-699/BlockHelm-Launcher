@@ -27,7 +27,7 @@ public sealed partial class JavaRuntimeDiscoveryService
     };
 
     private readonly SemaphoreSlim importedRuntimeCatalogLock = new(1, 1);
-    private readonly SemaphoreSlim fullScanLock = new(1, 1);
+    private readonly SemaphoreSlim deepSearchLock = new(1, 1);
     private readonly string importedRuntimeCatalogPath;
     private readonly ILogger<JavaRuntimeDiscoveryService> logger;
     private readonly Func<string?, IReadOnlyList<JavaRuntimeCandidate>> configuredCandidateCollector;
@@ -62,19 +62,6 @@ public sealed partial class JavaRuntimeDiscoveryService
         var runtime = await DiscoverExecutableAsync(executablePath, cancellationToken);
         await RememberImportedExecutableAsync(runtime.ExecutablePath, cancellationToken);
         return runtime;
-    }
-
-    private async Task<bool> HasCompletedFullScanAsync(CancellationToken cancellationToken)
-    {
-        await importedRuntimeCatalogLock.WaitAsync(cancellationToken);
-        try
-        {
-            return (await LoadCatalogCoreAsync(cancellationToken)).FullScanCompleted;
-        }
-        finally
-        {
-            importedRuntimeCatalogLock.Release();
-        }
     }
 
     private async Task<List<JavaRuntimeCandidate>> CollectRecordedCandidatesAsync(
