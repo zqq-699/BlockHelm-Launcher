@@ -33,6 +33,19 @@ namespace Launcher.App.ViewModels.GameSettings;
 public sealed partial class InstanceResourcePackManagementSettingsViewModel
 {
     [RelayCommand]
+    private void InstallOnlineResourcePack()
+    {
+        if (selectedInstance is null)
+            return;
+
+        logger.LogInformation(
+            "Online resource pack install requested from instance resource pack management. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}",
+            selectedInstance.Id,
+            selectedInstance.MinecraftVersion);
+        OnlineResourcePackInstallRequested?.Invoke(selectedInstance);
+    }
+
+    [RelayCommand]
     private void OpenResourceDetails(ResourcePackManagementItemViewModel? resourcePack)
     {
         if (resourcePack?.ProjectReference is { } reference)

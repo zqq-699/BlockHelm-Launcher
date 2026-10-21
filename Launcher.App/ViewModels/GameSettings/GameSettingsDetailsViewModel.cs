@@ -119,6 +119,7 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
             logger: loggerFactory?.CreateLogger<InstanceSaveManagementSettingsViewModel>());
         SaveManagement.DeleteSavesRequested += SaveManagement_DeleteSavesRequested;
         SaveManagement.SaveImportFailedRequested += SaveManagement_SaveImportFailedRequested;
+        SaveManagement.OnlineSaveInstallRequested += SaveManagement_OnlineSaveInstallRequested;
         ResourcePackManagement = new InstanceResourcePackManagementSettingsViewModel(
             this,
             localResourcePacksViewModel,
@@ -129,6 +130,7 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
             logger: loggerFactory?.CreateLogger<InstanceResourcePackManagementSettingsViewModel>());
         ResourcePackManagement.DeleteResourcePacksRequested += ResourcePackManagement_DeleteResourcePacksRequested;
         ResourcePackManagement.ResourcePackImportFailedRequested += ResourcePackManagement_ResourcePackImportFailedRequested;
+        ResourcePackManagement.OnlineResourcePackInstallRequested += ResourcePackManagement_OnlineResourcePackInstallRequested;
         ShaderPackManagement = new InstanceShaderPackManagementSettingsViewModel(
             this,
             localShaderPacksViewModel,
@@ -139,6 +141,7 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
             logger: loggerFactory?.CreateLogger<InstanceShaderPackManagementSettingsViewModel>());
         ShaderPackManagement.DeleteShaderPacksRequested += ShaderPackManagement_DeleteShaderPacksRequested;
         ShaderPackManagement.ShaderPackImportFailedRequested += ShaderPackManagement_ShaderPackImportFailedRequested;
+        ShaderPackManagement.OnlineShaderPackInstallRequested += ShaderPackManagement_OnlineShaderPackInstallRequested;
         Backup = new InstanceBackupSettingsViewModel(
             this,
             instanceService,
@@ -166,7 +169,7 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
     public event Action<ModDeleteRequest>? DeleteModsRequested;
     public event Action<SaveDeleteRequest>? DeleteSavesRequested;
     public event Action<ModImportConflictRequest>? ImportModConflictRequested;
-    public event Action<GameInstance>? OnlineModInstallRequested;
+    public event Action<GameInstance, ResourceProjectKind>? OnlineResourceInstallRequested;
     public event Action<SaveImportFailureRequest>? SaveImportFailedRequested;
     public event Action<ResourcePackDeleteRequest>? DeleteResourcePacksRequested;
     public event Action<ResourcePackImportFailureRequest>? ResourcePackImportFailedRequested;

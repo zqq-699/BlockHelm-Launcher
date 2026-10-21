@@ -52,6 +52,10 @@
                                     Content="{x:Static res:Strings.GameSettings_ResourcePackManagementLocalImportButton}"
                                     Command="{Binding DataContext.ImportLocalResourcePackCommand, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceResourcePackManagementSettingsView}}}"
                                     Style="{StaticResource LauncherDialogButtonStyle}" />
+                            <Button Margin="0,0,8,4"
+                                    Content="{x:Static res:Strings.GameSettings_ModManagementOnlineInstallButton}"
+                                    Command="{Binding DataContext.InstallOnlineResourcePackCommand, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceResourcePackManagementSettingsView}}}"
+                                    Style="{StaticResource LauncherDialogButtonStyle}" />
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>

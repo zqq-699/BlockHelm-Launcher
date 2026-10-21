@@ -386,22 +386,37 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
             ResourceProjectKind.Mod => "mods",
             ResourceProjectKind.ResourcePack => "resource_packs",
             ResourceProjectKind.ShaderPack => "shader_packs",
+            ResourceProjectKind.World => "worlds",
             _ => string.Empty
         };
         return Sections.FirstOrDefault(item => item.Id == sectionId);
     }
 
-    public async Task OpenModsForInstanceAsync(GameInstance instance)
+    public Task OpenModsForInstanceAsync(GameInstance instance) =>
+        OpenOnlineProjectsForInstanceAsync(instance, ResourceProjectKind.Mod);
+
+    public async Task OpenOnlineProjectsForInstanceAsync(GameInstance instance, ResourceProjectKind kind)
     {
-        // 从实例设置跳转时先选 Mod 分区，再应用实例版本与 Loader 筛选，避免短暂展示不兼容结果。
-        var modsSection = Sections.FirstOrDefault(section => section.Id == "mods") ?? Sections[0];
-        SelectSection(modsSection, logSelection: false);
+        var section = ResolveProjectSection(kind)
+            ?? throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported online resource project kind.");
+        var projectPage = kind switch
+        {
+            ResourceProjectKind.Mod => ModPage,
+            ResourceProjectKind.ResourcePack => ResourcePacksPage,
+            ResourceProjectKind.ShaderPack => ShaderPacksPage,
+            ResourceProjectKind.World => WorldsPage,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported online resource project kind.")
+        };
+
+        // 从实例设置跳转时先切换到对应分区，再应用实例版本与 Loader 筛选，避免短暂展示不兼容结果。
+        SelectSection(section, logSelection: false);
         logger?.LogDebug(
-            "Opening resources mod section from instance. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}, Loader={Loader}",
+            "Opening online resource section from instance. Kind={Kind}, InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}, Loader={Loader}",
+            kind,
             instance.Id,
             instance.MinecraftVersion,
             instance.Loader);
-        await ModPage.ApplyInstanceFiltersAsync(instance);
+        await projectPage.ApplyInstanceFiltersAsync(instance);
     }
 
     [RelayCommand]

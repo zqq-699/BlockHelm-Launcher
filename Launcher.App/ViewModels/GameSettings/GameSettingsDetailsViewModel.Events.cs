@@ -42,7 +42,22 @@ private void Persistence_InstanceSaved(GameInstance instance)
 
     private void ModManagement_OnlineModInstallRequested(GameInstance instance)
     {
-        OnlineModInstallRequested?.Invoke(instance);
+        OnlineResourceInstallRequested?.Invoke(instance, ResourceProjectKind.Mod);
+    }
+
+    private void SaveManagement_OnlineSaveInstallRequested(GameInstance instance)
+    {
+        OnlineResourceInstallRequested?.Invoke(instance, ResourceProjectKind.World);
+    }
+
+    private void ResourcePackManagement_OnlineResourcePackInstallRequested(GameInstance instance)
+    {
+        OnlineResourceInstallRequested?.Invoke(instance, ResourceProjectKind.ResourcePack);
+    }
+
+    private void ShaderPackManagement_OnlineShaderPackInstallRequested(GameInstance instance)
+    {
+        OnlineResourceInstallRequested?.Invoke(instance, ResourceProjectKind.ShaderPack);
     }
 
     private void ModManagement_DeleteModsRequested(ModDeleteRequest request)

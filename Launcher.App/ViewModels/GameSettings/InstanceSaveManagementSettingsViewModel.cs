@@ -112,6 +112,7 @@ public sealed partial class InstanceSaveManagementSettingsViewModel : GameSettin
 
     public event Action<SaveDeleteRequest>? DeleteSavesRequested;
     public event Action<SaveImportFailureRequest>? SaveImportFailedRequested;
+    public event Action<GameInstance>? OnlineSaveInstallRequested;
 
     public override bool UsesFullViewportLayout => true;
 

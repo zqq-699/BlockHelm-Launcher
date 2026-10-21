@@ -33,6 +33,19 @@ namespace Launcher.App.ViewModels.GameSettings;
 public sealed partial class InstanceShaderPackManagementSettingsViewModel
 {
     [RelayCommand]
+    private void InstallOnlineShaderPack()
+    {
+        if (selectedInstance is null)
+            return;
+
+        logger.LogInformation(
+            "Online shader pack install requested from instance shader pack management. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}",
+            selectedInstance.Id,
+            selectedInstance.MinecraftVersion);
+        OnlineShaderPackInstallRequested?.Invoke(selectedInstance);
+    }
+
+    [RelayCommand]
     private void OpenResourceDetails(ShaderPackManagementItemViewModel? shaderPack)
     {
         if (shaderPack?.ProjectReference is { } reference)

@@ -87,7 +87,7 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
         Details.SaveImportFailedRequested += Dialogs.OpenSaveImportFailure;
         Details.ResourcePackImportFailedRequested += Dialogs.OpenResourcePackImportFailure;
         Details.ShaderPackImportFailedRequested += Dialogs.OpenShaderPackImportFailure;
-        Details.OnlineModInstallRequested += Details_OnlineModInstallRequested;
+        Details.OnlineResourceInstallRequested += Details_OnlineResourceInstallRequested;
         Details.ModUpdateConfirmationRequested += Dialogs.OpenModUpdate;
         Details.ModBulkUpdateConfirmationRequested += Dialogs.OpenModBulkUpdate;
         Details.ModManagement.ResourceDetailsRequested += reference => ResourceProjectDetailsRequested?.Invoke(reference);
@@ -107,7 +107,7 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
 
     public event Action<GameSettingsInstancesChangedEventArgs>? InstancesChanged;
 
-    public event Action<GameInstance>? OnlineModInstallRequested;
+    public event Action<GameInstance, ResourceProjectKind>? OnlineResourceInstallRequested;
 
     public event Action? LocalImportRequested;
 
@@ -482,7 +482,8 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
         InstancesChanged?.Invoke(GameSettingsInstancesChangedEventArgs.Updated(instance));
     }
 
-    private void Details_OnlineModInstallRequested(GameInstance instance) => OnlineModInstallRequested?.Invoke(instance);
+    private void Details_OnlineResourceInstallRequested(GameInstance instance, ResourceProjectKind kind) =>
+        OnlineResourceInstallRequested?.Invoke(instance, kind);
 
     private void Details_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

@@ -32,6 +32,19 @@ namespace Launcher.App.ViewModels.GameSettings;
 
 public sealed partial class InstanceSaveManagementSettingsViewModel
 {
+    [RelayCommand]
+    private void InstallOnlineSave()
+    {
+        if (selectedInstance is null)
+            return;
+
+        logger.LogInformation(
+            "Online save install requested from instance save management. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}",
+            selectedInstance.Id,
+            selectedInstance.MinecraftVersion);
+        OnlineSaveInstallRequested?.Invoke(selectedInstance);
+    }
+
 [RelayCommand]
     private void OpenSaveFolder()
     {

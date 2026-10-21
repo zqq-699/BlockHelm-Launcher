@@ -105,7 +105,7 @@ public sealed class LauncherSessionCoordinator : IDisposable
         resourcesPage.ModpackManualDownloadsRequested += ResourcesPage_ModpackManualDownloadsRequested;
         gameManagement.PropertyChanged += GameManagement_PropertyChanged;
         gameSettingsPage.LaunchInstanceRequested += GameSettingsPage_LaunchInstanceRequested;
-        gameSettingsPage.OnlineModInstallRequested += GameSettingsPage_OnlineModInstallRequested;
+        gameSettingsPage.OnlineResourceInstallRequested += GameSettingsPage_OnlineResourceInstallRequested;
         gameSettingsPage.InstancesChanged += GameSettingsPage_InstancesChanged;
         gameSettingsPage.InstanceListActivated += GameSettingsPage_InstanceListActivated;
         settingsPage.LaunchDefaultsChanged += SettingsPage_LaunchDefaultsChanged;
@@ -241,7 +241,7 @@ public sealed class LauncherSessionCoordinator : IDisposable
         resourcesPage.ModpackManualDownloadsRequested -= ResourcesPage_ModpackManualDownloadsRequested;
         gameManagement.PropertyChanged -= GameManagement_PropertyChanged;
         gameSettingsPage.LaunchInstanceRequested -= GameSettingsPage_LaunchInstanceRequested;
-        gameSettingsPage.OnlineModInstallRequested -= GameSettingsPage_OnlineModInstallRequested;
+        gameSettingsPage.OnlineResourceInstallRequested -= GameSettingsPage_OnlineResourceInstallRequested;
         gameSettingsPage.InstancesChanged -= GameSettingsPage_InstancesChanged;
         gameSettingsPage.InstanceListActivated -= GameSettingsPage_InstanceListActivated;
         settingsPage.LaunchDefaultsChanged -= SettingsPage_LaunchDefaultsChanged;
@@ -352,9 +352,11 @@ public sealed class LauncherSessionCoordinator : IDisposable
         }
     }
 
-    private void GameSettingsPage_OnlineModInstallRequested(GameInstance instance)
+    private void GameSettingsPage_OnlineResourceInstallRequested(GameInstance instance, ResourceProjectKind kind)
     {
-        Observe(OpenResourcesModsForInstanceAsync(instance), "open online resources for an instance");
+        Observe(
+            OpenOnlineResourcesForInstanceAsync(instance, kind),
+            $"open online {kind} resources for an instance");
     }
 
     private void GameSettingsPage_InstanceListActivated()
@@ -363,10 +365,10 @@ public sealed class LauncherSessionCoordinator : IDisposable
             SynchronizeGameSettingsInstances();
     }
 
-    private async Task OpenResourcesModsForInstanceAsync(GameInstance instance)
+    private async Task OpenOnlineResourcesForInstanceAsync(GameInstance instance, ResourceProjectKind kind)
     {
         NavigationRequested?.Invoke(NavigationCatalog.ResourcesPage);
-        await resourcesPage.OpenModsForInstanceAsync(instance);
+        await resourcesPage.OpenOnlineProjectsForInstanceAsync(instance, kind);
     }
 
     private void GameSettingsPage_InstancesChanged(GameSettingsInstancesChangedEventArgs args)

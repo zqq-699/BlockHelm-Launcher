@@ -114,6 +114,7 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel : Game
     public event Action<ShaderPackDeleteRequest>? DeleteShaderPacksRequested;
     public event Action<ShaderPackImportFailureRequest>? ShaderPackImportFailedRequested;
     public event Action<ResourceProjectReference>? ResourceDetailsRequested;
+    public event Action<GameInstance>? OnlineShaderPackInstallRequested;
 
     public override bool UsesFullViewportLayout => true;
 

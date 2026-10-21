@@ -52,6 +52,10 @@
                                     Content="{x:Static res:Strings.GameSettings_ShaderPackManagementLocalImportButton}"
                                     Command="{Binding DataContext.ImportLocalShaderPackCommand, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceShaderPackManagementSettingsView}}}"
                                     Style="{StaticResource LauncherDialogButtonStyle}" />
+                            <Button Margin="0,0,8,4"
+                                    Content="{x:Static res:Strings.GameSettings_ModManagementOnlineInstallButton}"
+                                    Command="{Binding DataContext.InstallOnlineShaderPackCommand, RelativeSource={RelativeSource AncestorType={x:Type views:InstanceShaderPackManagementSettingsView}}}"
+                                    Style="{StaticResource LauncherDialogButtonStyle}" />
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>

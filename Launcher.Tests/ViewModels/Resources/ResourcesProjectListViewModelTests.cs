@@ -26,6 +26,34 @@ namespace Launcher.Tests.ViewModels.Resources;
 
 public sealed class ResourcesProjectListViewModelTests
 {
+    [Theory]
+    [InlineData(ResourceProjectKind.Mod, "mods")]
+    [InlineData(ResourceProjectKind.ResourcePack, "resource_packs")]
+    [InlineData(ResourceProjectKind.ShaderPack, "shader_packs")]
+    [InlineData(ResourceProjectKind.World, "worlds")]
+    public async Task InstanceOnlineInstallOpensMatchingSectionWithInstanceVersionFilter(
+        ResourceProjectKind kind,
+        string expectedSectionId)
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(new ResourceCatalogSearchResult()));
+        var versions = new StubGameVersionService(
+            [new MinecraftVersionInfo("1.21.1", "release", false)]);
+        var resources = new ResourcesPageViewModel(service, gameVersionService: versions);
+        var instance = new GameInstance
+        {
+            Id = "instance",
+            MinecraftVersion = "1.21.1",
+            Loader = LoaderKind.Fabric
+        };
+
+        await resources.OpenOnlineProjectsForInstanceAsync(instance, kind);
+
+        Assert.Equal(expectedSectionId, resources.SelectedSection?.Id);
+        Assert.Equal(kind, service.LastRequest?.Kind);
+        Assert.Equal(instance.MinecraftVersion, service.LastRequest?.MinecraftVersion);
+    }
+
     [Fact]
     public void McmodRelatedWebsiteUsesExistingExternalLinkCommand()
     {
@@ -366,11 +394,14 @@ public sealed class ResourcesProjectListViewModelTests
 
         public int CallCount { get; private set; }
 
+        public ResourceCatalogSearchRequest? LastRequest { get; private set; }
+
         public Task<ResourceCatalogSearchResult> SearchModsAsync(
             ResourceCatalogSearchRequest request,
             CancellationToken cancellationToken = default)
         {
             CallCount++;
+            LastRequest = request;
             return responses.Dequeue()();
         }
 
@@ -402,6 +433,15 @@ public sealed class ResourcesProjectListViewModelTests
             GameInstance instance,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class StubGameVersionService(IReadOnlyList<MinecraftVersionInfo> versions) : IGameVersionService
+    {
+        public Task<IReadOnlyList<MinecraftVersionInfo>> GetVersionsAsync(
+            DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
+            CancellationToken cancellationToken = default,
+            int downloadSpeedLimitMbPerSecond = 0) =>
+            Task.FromResult(versions);
     }
 
     private sealed class RecordingExternalLinkService : IExternalLinkService
