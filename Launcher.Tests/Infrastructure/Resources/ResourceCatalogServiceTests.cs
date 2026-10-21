@@ -17,6 +17,58 @@ namespace Launcher.Tests.Infrastructure.Resources;
 public sealed class ResourceCatalogServiceTests : TestTempDirectory
 {
     [Fact]
+    public async Task ModrinthDataPackSearchUsesDataPackProjectType()
+    {
+        var handler = new StubHandler(_ => Json(
+            """{"hits":[{"project_id":"pack","slug":"pack","title":"Pack","description":"","downloads":1,"project_type":"mod","categories":["datapack"]}]}"""));
+        var service = CreateService(handler);
+
+        var result = await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.DataPack,
+            Source = ResourceProjectSource.Modrinth
+        });
+
+        Assert.Equal(ResourceProjectKind.DataPack, Assert.Single(result.Projects).Kind);
+        Assert.Contains("project_type%3Adatapack", Assert.Single(handler.Requests).Query);
+    }
+
+    [Fact]
+    public async Task ModrinthDataPackVersionsExcludeModArtifacts()
+    {
+        var handler = new StubHandler(_ => Json(
+            """[{"id":"data","files":[{"filename":"pack.zip","url":"https://download.test/pack.zip"}],"loaders":["datapack"]},{"id":"fabric","files":[{"filename":"pack.jar","url":"https://download.test/pack.jar"}],"loaders":["fabric"]}]"""));
+        var service = CreateService(handler);
+
+        var result = await service.GetProjectVersionsAsync(new ResourceProjectVersionsRequest
+        {
+            Kind = ResourceProjectKind.DataPack,
+            Source = ResourceProjectSource.Modrinth,
+            ProjectId = "pack",
+            IncludeAllVersions = true
+        });
+
+        var version = Assert.Single(result.Versions);
+        Assert.Equal("data", version.VersionId);
+        Assert.Equal("pack.zip", version.FileName);
+    }
+
+    [Fact]
+    public async Task CurseForgeDataPackSearchUsesDataPackClass()
+    {
+        var handler = new StubHandler(_ => Json("""{"data":[],"pagination":{"totalCount":0}}"""));
+        var service = CreateService(handler, "key");
+
+        await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.DataPack,
+            Source = ResourceProjectSource.CurseForge
+        });
+
+        Assert.Contains("classId=6945", Assert.Single(handler.Requests).Query);
+    }
+
+    [Fact]
     public async Task SearchStartsAllSelectedProvidersConcurrently()
     {
         var handler = new ConcurrentProviderSearchHandler();

@@ -68,6 +68,7 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         [
             new ResourcesSectionItem { Id = "mods", Title = Strings.Resources_SectionMods, IconKey = "instance_setting_page/mod" },
             new ResourcesSectionItem { Id = "resource_packs", Title = Strings.Resources_SectionResourcePacks, IconKey = "main_menu_library" },
+            new ResourcesSectionItem { Id = "data_packs", Title = Strings.Resources_SectionDataPacks, IconKey = "datapack" },
             new ResourcesSectionItem { Id = "shader_packs", Title = Strings.Resources_SectionShaderPacks, IconKey = "instance_setting_page/shader" },
             new ResourcesSectionItem { Id = "worlds", Title = Strings.Resources_SectionWorlds, IconKey = "world" },
             new ResourcesSectionItem { Id = "modpacks", Title = Strings.Resources_SectionModpacks, IconKey = "modpack" }
@@ -103,6 +104,21 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
             resourceDependencyPlanningService);
         ResourcePacksPage.PropertyChanged += OnlineProjectPage_PropertyChanged;
         SubscribeOnlinePageChildren(ResourcePacksPage);
+        DataPacksPage = new ResourcesDataPacksPageViewModel(
+            this,
+            resourceCatalogService,
+            logger,
+            uiDispatcher,
+            gameVersionService,
+            getInstanceCatalogSnapshot,
+            statusService,
+            filePickerService,
+            floatingMessageService,
+            downloadTasksPage,
+            resourceProjectInstallationService,
+            resourceDependencyPlanningService);
+        DataPacksPage.PropertyChanged += OnlineProjectPage_PropertyChanged;
+        SubscribeOnlinePageChildren(DataPacksPage);
         ShaderPacksPage = new ResourcesShaderPacksPageViewModel(
             this,
             resourceCatalogService,
@@ -230,6 +246,8 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
     public ResourcesModPageViewModel ModPage { get; }
 
     public ResourcesResourcePacksPageViewModel ResourcePacksPage { get; }
+
+    public ResourcesDataPacksPageViewModel DataPacksPage { get; }
 
     public ResourcesShaderPacksPageViewModel ShaderPacksPage { get; }
 
@@ -385,6 +403,7 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         {
             ResourceProjectKind.Mod => "mods",
             ResourceProjectKind.ResourcePack => "resource_packs",
+            ResourceProjectKind.DataPack => "data_packs",
             ResourceProjectKind.ShaderPack => "shader_packs",
             ResourceProjectKind.World => "worlds",
             _ => string.Empty
@@ -403,6 +422,7 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         {
             ResourceProjectKind.Mod => ModPage,
             ResourceProjectKind.ResourcePack => ResourcePacksPage,
+            ResourceProjectKind.DataPack => DataPacksPage,
             ResourceProjectKind.ShaderPack => ShaderPacksPage,
             ResourceProjectKind.World => WorldsPage,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported online resource project kind.")
@@ -441,6 +461,7 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         {
             "mods" => ModPage,
             "resource_packs" => ResourcePacksPage,
+            "data_packs" => DataPacksPage,
             "shader_packs" => ShaderPacksPage,
             "worlds" => WorldsPage,
             "modpacks" => ModpacksPage,
@@ -452,6 +473,8 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
             ModPage.ResetToProjectList();
         if (section.Id != "resource_packs")
             ResourcePacksPage.ResetToProjectList();
+        if (section.Id != "data_packs")
+            DataPacksPage.ResetToProjectList();
         if (section.Id != "shader_packs")
             ShaderPacksPage.ResetToProjectList();
         if (section.Id != "worlds")

@@ -23,6 +23,7 @@ public enum ResourceProjectKind
 {
     Mod,
     ResourcePack,
+    DataPack,
     ShaderPack,
     World,
     Modpack

@@ -329,6 +329,11 @@ internal async Task InstallAsync(
         var instance = context.Target.Instance;
         if (instance is null)
             return;
+        if (options.Kind is ResourceProjectKind.DataPack)
+        {
+            await DownloadDataPackForInstanceAsync(context, instance).ConfigureAwait(false);
+            return;
+        }
         var installDirectory = await installationService!
             .EnsureInstanceContentDirectoryAsync(options.Kind, instance);
         string? destinationPath = null;
@@ -397,6 +402,53 @@ internal async Task InstallAsync(
         if (context.Session.CompleteCancellation())
             return;
         var message = string.Format(options.InstalledFormat, context.Project?.Title ?? context.Item.Title);
+        context.Session.Complete(message);
+        reportStatus(message);
+    }
+
+    private async Task DownloadDataPackForInstanceAsync(
+        InstallOperationContext context,
+        GameInstance instance)
+    {
+        var destinationPath = filePickerService?.PickResourceProjectDestination(
+            options.DownloadDirectoryPickerTitle,
+            ResolveFileName(context.Item),
+            instance.InstanceDirectory);
+        if (string.IsNullOrWhiteSpace(destinationPath))
+            return;
+
+        destinationPath = NormalizeTargetPath(destinationPath);
+        var targetDirectory = Path.GetDirectoryName(destinationPath);
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+            return;
+        if (!TryBeginInstall(
+                context,
+                nameof(ResourceProjectInstallationTargetKind.LocalDirectory),
+                destinationPath))
+        {
+            ReportDuplicateInstall(context);
+            return;
+        }
+
+        BeginSession(context, context.Target.Title);
+        var request = new ResourceProjectInstallationRequest(
+            context.Item.Version,
+            ResourceProjectInstallationTargetKind.LocalDirectory,
+            TargetDirectory: targetDirectory,
+            DestinationPath: destinationPath);
+        var preparation = await installationService!.PrepareAsync(
+            request,
+            context.Session!.CancellationToken).ConfigureAwait(false);
+        request = request with { ExpectedDestinationState = preparation.DestinationState };
+
+        BeginUserFeedback(context.Item);
+        context.Session.BeginPrimaryDownload(hasDependencies: false);
+        await installationService.ExecuteAsync(request, context.Session.Progress, context.Session.CancellationToken)
+            .ConfigureAwait(false);
+        if (context.Session.CompleteCancellation())
+            return;
+
+        var message = string.Format(options.DownloadedFormat, ResolveFileName(context.Item));
         context.Session.Complete(message);
         reportStatus(message);
     }

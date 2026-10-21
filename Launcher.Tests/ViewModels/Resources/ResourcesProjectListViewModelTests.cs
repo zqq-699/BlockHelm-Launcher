@@ -72,6 +72,7 @@ public sealed class ResourcesProjectListViewModelTests
     [Theory]
     [InlineData(ResourceProjectKind.Mod, "mods")]
     [InlineData(ResourceProjectKind.ResourcePack, "resource_packs")]
+    [InlineData(ResourceProjectKind.DataPack, "data_packs")]
     [InlineData(ResourceProjectKind.ShaderPack, "shader_packs")]
     [InlineData(ResourceProjectKind.World, "worlds")]
     public async Task InstanceOnlineInstallOpensMatchingSectionWithInstanceVersionFilter(

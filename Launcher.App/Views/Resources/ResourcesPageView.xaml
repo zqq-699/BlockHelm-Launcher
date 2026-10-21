@@ -58,6 +58,10 @@
             <views:ResourcesModPageView />
         </DataTemplate>
 
+        <DataTemplate DataType="{x:Type resources:ResourcesDataPacksPageViewModel}">
+            <views:ResourcesModPageView />
+        </DataTemplate>
+
         <DataTemplate DataType="{x:Type resources:ResourcesShaderPacksPageViewModel}">
             <views:ResourcesModPageView />
         </DataTemplate>

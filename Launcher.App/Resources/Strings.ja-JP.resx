@@ -3822,4 +3822,33 @@
   <data name="Status_ModBulkUpdatePartialFormat" xml:space="preserve"><value>一括更新が一部完了しました：成功 {0} 個、失敗 {1} 個、確認不可 {2} 個。最初の失敗：{3}</value></data>
   <data name="Status_ModBulkUpdateCompletedFormat" xml:space="preserve"><value>{0} 個の Mod の更新が完了しました。</value></data>
   <data name="Status_ModBulkUpdateFailed" xml:space="preserve"><value>一括更新に失敗しました。完了した更新は保持され、残りの元ファイルは保護されています。</value></data>
+  <data name="Resources_SectionDataPacks" xml:space="preserve"><value>データパック</value></data>
+  <data name="Resources_DataPackDownloadFileExistsMessageFormat" xml:space="preserve"><value>ダウンロード先に同名のファイルがあります: {0}</value></data>
+  <data name="Resources_DataPackFilterAllLoaders" xml:space="preserve"><value>すべてのプラットフォーム</value></data>
+  <data name="Resources_DataPackProjectsLoading" xml:space="preserve"><value>データパックを読み込んでいます...</value></data>
+  <data name="Resources_DataPackProjectsEmpty" xml:space="preserve"><value>一致するデータパックがありません</value></data>
+  <data name="Resources_DataPackProjectsLoadError" xml:space="preserve"><value>データパックを読み込めませんでした。後でもう一度お試しください。</value></data>
+  <data name="Resources_DataPackProjectsLoadingMore" xml:space="preserve"><value>さらにデータパックを読み込んでいます...</value></data>
+  <data name="Resources_DataPackProjectsNoMore" xml:space="preserve"><value>これ以上データパックはありません</value></data>
+  <data name="Resources_DataPackProjectsLoadMoreError" xml:space="preserve"><value>追加のデータパックを読み込めませんでした。</value></data>
+  <data name="Resources_DataPackCurseForgeMissingApiKey" xml:space="preserve"><value>CurseForge API キーが設定されていないため、他の提供元のみ表示しています。</value></data>
+  <data name="Resources_DataPackDetailsInfoSection" xml:space="preserve"><value>データパック情報</value></data>
+  <data name="Resources_DataPackInstallTargetSection" xml:space="preserve"><value>ゲームインスタンスを選択</value></data>
+  <data name="Resources_DataPackInstallTargetLocal" xml:space="preserve"><value>ローカルにダウンロード</value></data>
+  <data name="Resources_DataPackInstallTargetsLoading" xml:space="preserve"><value>ゲームインスタンスを読み込んでいます...</value></data>
+  <data name="Resources_DataPackInstallTargetsLoadError" xml:space="preserve"><value>ゲームインスタンスを読み込めませんでした。</value></data>
+  <data name="Resources_DataPackVersionsLoading" xml:space="preserve"><value>利用可能なデータパックのバージョンを読み込んでいます...</value></data>
+  <data name="Resources_DataPackVersionsEmpty" xml:space="preserve"><value>このインスタンスで利用できるデータパックのバージョンはありません</value></data>
+  <data name="Resources_DataPackVersionsEmptyLocal" xml:space="preserve"><value>ダウンロード可能なデータパックのバージョンはありません</value></data>
+  <data name="Resources_DataPackVersionsFilterEmpty" xml:space="preserve"><value>フィルターに一致するデータパックのバージョンはありません</value></data>
+  <data name="Resources_DataPackVersionsLoadError" xml:space="preserve"><value>データパックのバージョンを読み込めませんでした。</value></data>
+  <data name="Resources_DataPackVersionsLoadingMore" xml:space="preserve"><value>さらにデータパックのバージョンを読み込んでいます...</value></data>
+  <data name="Resources_DataPackVersionsNoMore" xml:space="preserve"><value>これ以上データパックのバージョンはありません</value></data>
+  <data name="Resources_DataPackVersionsLoadMoreError" xml:space="preserve"><value>追加のデータパックのバージョンを読み込めませんでした。</value></data>
+  <data name="Resources_DataPackVersionsAllTitle" xml:space="preserve"><value>すべてのデータパックのバージョン</value></data>
+  <data name="FilePicker_DataPackDownloadDirectoryTitle" xml:space="preserve"><value>データパックの保存先を選択</value></data>
+  <data name="Status_DataPackDownloading" xml:space="preserve"><value>データパックをダウンロードしています...</value></data>
+  <data name="Status_DataPackDownloadingFormat" xml:space="preserve"><value>{0} をダウンロードしています</value></data>
+  <data name="Status_DataPackDownloadedFormat" xml:space="preserve"><value>データパックをダウンロードしました: {0}</value></data>
+  <data name="Status_DataPackDownloadFailed" xml:space="preserve"><value>データパックのダウンロードに失敗しました。</value></data>
 </root>

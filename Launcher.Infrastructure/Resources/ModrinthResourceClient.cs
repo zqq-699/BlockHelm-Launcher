@@ -129,6 +129,15 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
         }
 
         var versions = await httpClient.GetFromJsonAsync<List<ModrinthVersion>>(url, cancellationToken).ConfigureAwait(false) ?? [];
+        if (request.Kind is ResourceProjectKind.DataPack)
+        {
+            // Modrinth exposes data packs as a synthetic project type while the underlying project may also
+            // publish mod-loader artifacts. Only data-pack versions are safe to offer for this page.
+            versions = versions
+                .Where(version => version.Loaders.Any(loader =>
+                    string.Equals(loader, "datapack", StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
         var currentIds = CreateCurrentIds(request.ProjectId, request.Slug, projectId);
         var dependencies = request.Kind is ResourceProjectKind.Mod && request.IncludeDependencies
             ? await LoadDependencyProjectsAsync(CollectRequiredProjectIds(versions, currentIds), cancellationToken).ConfigureAwait(false)
@@ -307,6 +316,7 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
     private static string MapProjectType(ResourceProjectKind kind) => kind switch
     {
         ResourceProjectKind.ResourcePack => "resourcepack",
+        ResourceProjectKind.DataPack => "datapack",
         ResourceProjectKind.ShaderPack => "shader",
         ResourceProjectKind.World => "world",
         ResourceProjectKind.Modpack => "modpack",

@@ -40,6 +40,7 @@ internal sealed class CurseForgeResourceClient(
     private const int MinecraftGameId = 432;
     private const int ModsClassId = 6;
     private const int ResourcePacksClassId = 12;
+    private const int DataPacksClassId = 6945;
     private const int WorldsClassId = 17;
     private const int ModpacksClassId = 4471;
     private const int ShaderPacksClassId = 6552;
@@ -481,6 +482,7 @@ internal sealed class CurseForgeResourceClient(
     private static int MapClassId(ResourceProjectKind kind) => kind switch
     {
         ResourceProjectKind.ResourcePack => ResourcePacksClassId,
+        ResourceProjectKind.DataPack => DataPacksClassId,
         ResourceProjectKind.ShaderPack => ShaderPacksClassId,
         ResourceProjectKind.World => WorldsClassId,
         ResourceProjectKind.Modpack => ModpacksClassId,
@@ -490,6 +492,7 @@ internal sealed class CurseForgeResourceClient(
     private static string MapWebsitePath(ResourceProjectKind kind) => kind switch
     {
         ResourceProjectKind.ResourcePack => "texture-packs",
+        ResourceProjectKind.DataPack => "data-packs",
         ResourceProjectKind.ShaderPack => "shaders",
         ResourceProjectKind.World => "worlds",
         ResourceProjectKind.Modpack => "modpacks",

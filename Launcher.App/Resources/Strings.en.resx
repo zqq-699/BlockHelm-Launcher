@@ -3822,4 +3822,33 @@ The current game folder will be backed up first.</value>
   <data name="Status_ModBulkUpdatePartialFormat" xml:space="preserve"><value>Bulk update partially completed: {0} succeeded, {1} failed, and {2} could not be checked. First failure: {3}</value></data>
   <data name="Status_ModBulkUpdateCompletedFormat" xml:space="preserve"><value>{0} mods updated.</value></data>
   <data name="Status_ModBulkUpdateFailed" xml:space="preserve"><value>The bulk update failed. Completed updates were kept and the remaining original files were preserved.</value></data>
+  <data name="Resources_SectionDataPacks" xml:space="preserve"><value>Data Packs</value></data>
+  <data name="Resources_DataPackDownloadFileExistsMessageFormat" xml:space="preserve"><value>A file with the same name already exists at the download location: {0}</value></data>
+  <data name="Resources_DataPackFilterAllLoaders" xml:space="preserve"><value>All platforms</value></data>
+  <data name="Resources_DataPackProjectsLoading" xml:space="preserve"><value>Loading data packs...</value></data>
+  <data name="Resources_DataPackProjectsEmpty" xml:space="preserve"><value>No matching data packs found</value></data>
+  <data name="Resources_DataPackProjectsLoadError" xml:space="preserve"><value>Failed to load data packs. Please try again later.</value></data>
+  <data name="Resources_DataPackProjectsLoadingMore" xml:space="preserve"><value>Loading more data packs...</value></data>
+  <data name="Resources_DataPackProjectsNoMore" xml:space="preserve"><value>No more data packs</value></data>
+  <data name="Resources_DataPackProjectsLoadMoreError" xml:space="preserve"><value>Failed to load more data packs. Please try again later.</value></data>
+  <data name="Resources_DataPackCurseForgeMissingApiKey" xml:space="preserve"><value>The CurseForge API key is not configured. Only data packs from other sources are shown.</value></data>
+  <data name="Resources_DataPackDetailsInfoSection" xml:space="preserve"><value>Data pack information</value></data>
+  <data name="Resources_DataPackInstallTargetSection" xml:space="preserve"><value>Choose a game instance</value></data>
+  <data name="Resources_DataPackInstallTargetLocal" xml:space="preserve"><value>Download locally</value></data>
+  <data name="Resources_DataPackInstallTargetsLoading" xml:space="preserve"><value>Loading game instances...</value></data>
+  <data name="Resources_DataPackInstallTargetsLoadError" xml:space="preserve"><value>Failed to load game instances. Please try again later.</value></data>
+  <data name="Resources_DataPackVersionsLoading" xml:space="preserve"><value>Loading available data pack versions...</value></data>
+  <data name="Resources_DataPackVersionsEmpty" xml:space="preserve"><value>No data pack versions are available for this instance</value></data>
+  <data name="Resources_DataPackVersionsEmptyLocal" xml:space="preserve"><value>No data pack versions are available to download</value></data>
+  <data name="Resources_DataPackVersionsFilterEmpty" xml:space="preserve"><value>No data pack versions match the filters</value></data>
+  <data name="Resources_DataPackVersionsLoadError" xml:space="preserve"><value>Failed to load data pack versions. Please try again later.</value></data>
+  <data name="Resources_DataPackVersionsLoadingMore" xml:space="preserve"><value>Loading more data pack versions...</value></data>
+  <data name="Resources_DataPackVersionsNoMore" xml:space="preserve"><value>No more data pack versions</value></data>
+  <data name="Resources_DataPackVersionsLoadMoreError" xml:space="preserve"><value>Failed to load more data pack versions. Please try again later.</value></data>
+  <data name="Resources_DataPackVersionsAllTitle" xml:space="preserve"><value>All data pack versions</value></data>
+  <data name="FilePicker_DataPackDownloadDirectoryTitle" xml:space="preserve"><value>Choose where to save the data pack</value></data>
+  <data name="Status_DataPackDownloading" xml:space="preserve"><value>Downloading data pack...</value></data>
+  <data name="Status_DataPackDownloadingFormat" xml:space="preserve"><value>Downloading {0}</value></data>
+  <data name="Status_DataPackDownloadedFormat" xml:space="preserve"><value>Data pack downloaded: {0}</value></data>
+  <data name="Status_DataPackDownloadFailed" xml:space="preserve"><value>Failed to download the data pack.</value></data>
 </root>

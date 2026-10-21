@@ -1403,4 +1403,33 @@
   <data name="Status_ModBulkUpdatePartialFormat" xml:space="preserve"><value>批量更新部分完成：成功 {0} 个，失败 {1} 个，另有 {2} 个未能检查。首个失败：{3}</value></data>
   <data name="Status_ModBulkUpdateCompletedFormat" xml:space="preserve"><value>{0} 个模组更新完成。</value></data>
   <data name="Status_ModBulkUpdateFailed" xml:space="preserve"><value>批量更新失败，已成功更新的模组会保留，其他原文件未被破坏。</value></data>
+  <data name="Resources_SectionDataPacks" xml:space="preserve"><value>数据包</value></data>
+  <data name="Resources_DataPackDownloadFileExistsMessageFormat" xml:space="preserve"><value>下载位置已存在同名文件：{0}</value></data>
+  <data name="Resources_DataPackFilterAllLoaders" xml:space="preserve"><value>全部平台</value></data>
+  <data name="Resources_DataPackProjectsLoading" xml:space="preserve"><value>正在加载数据包...</value></data>
+  <data name="Resources_DataPackProjectsEmpty" xml:space="preserve"><value>没有找到符合条件的数据包</value></data>
+  <data name="Resources_DataPackProjectsLoadError" xml:space="preserve"><value>加载数据包失败，请稍后重试。</value></data>
+  <data name="Resources_DataPackProjectsLoadingMore" xml:space="preserve"><value>正在加载更多数据包...</value></data>
+  <data name="Resources_DataPackProjectsNoMore" xml:space="preserve"><value>没有更多数据包了</value></data>
+  <data name="Resources_DataPackProjectsLoadMoreError" xml:space="preserve"><value>加载更多数据包失败，请稍后重试。</value></data>
+  <data name="Resources_DataPackCurseForgeMissingApiKey" xml:space="preserve"><value>CurseForge API Key 未配置，当前仅显示其他来源的数据包。</value></data>
+  <data name="Resources_DataPackDetailsInfoSection" xml:space="preserve"><value>数据包信息</value></data>
+  <data name="Resources_DataPackInstallTargetSection" xml:space="preserve"><value>选择游戏实例</value></data>
+  <data name="Resources_DataPackInstallTargetLocal" xml:space="preserve"><value>仅下载到本地</value></data>
+  <data name="Resources_DataPackInstallTargetsLoading" xml:space="preserve"><value>正在加载游戏实例...</value></data>
+  <data name="Resources_DataPackInstallTargetsLoadError" xml:space="preserve"><value>加载游戏实例失败，请稍后重试。</value></data>
+  <data name="Resources_DataPackVersionsLoading" xml:space="preserve"><value>正在加载可用数据包版本...</value></data>
+  <data name="Resources_DataPackVersionsEmpty" xml:space="preserve"><value>没有适用于此实例的数据包版本</value></data>
+  <data name="Resources_DataPackVersionsEmptyLocal" xml:space="preserve"><value>没有可下载的数据包版本</value></data>
+  <data name="Resources_DataPackVersionsFilterEmpty" xml:space="preserve"><value>没有符合筛选条件的数据包版本</value></data>
+  <data name="Resources_DataPackVersionsLoadError" xml:space="preserve"><value>加载数据包版本失败，请稍后重试。</value></data>
+  <data name="Resources_DataPackVersionsLoadingMore" xml:space="preserve"><value>正在加载更多数据包版本...</value></data>
+  <data name="Resources_DataPackVersionsNoMore" xml:space="preserve"><value>没有更多数据包版本了</value></data>
+  <data name="Resources_DataPackVersionsLoadMoreError" xml:space="preserve"><value>加载更多数据包版本失败，请稍后重试。</value></data>
+  <data name="Resources_DataPackVersionsAllTitle" xml:space="preserve"><value>全部数据包版本</value></data>
+  <data name="FilePicker_DataPackDownloadDirectoryTitle" xml:space="preserve"><value>选择数据包保存位置</value></data>
+  <data name="Status_DataPackDownloading" xml:space="preserve"><value>正在下载数据包...</value></data>
+  <data name="Status_DataPackDownloadingFormat" xml:space="preserve"><value>正在下载 {0}</value></data>
+  <data name="Status_DataPackDownloadedFormat" xml:space="preserve"><value>数据包已下载：{0}</value></data>
+  <data name="Status_DataPackDownloadFailed" xml:space="preserve"><value>数据包下载失败。</value></data>
 </root>

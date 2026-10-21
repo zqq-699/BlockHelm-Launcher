@@ -231,6 +231,38 @@ public sealed class ResourcesProjectInstallViewModelTests
         Assert.Equal(Path.Combine(instance.InstanceDirectory, "mods"), picker.LastInitialDirectory);
     }
 
+    [Fact]
+    public async Task DataPackInstanceSelectionDownloadsToChosenPathFromInstanceRoot()
+    {
+        var instance = new GameInstance
+        {
+            Id = "instance",
+            Name = "Instance",
+            InstanceDirectory = Path.Combine(Path.GetTempPath(), "data-pack-instance")
+        };
+        var destination = Path.Combine(Path.GetTempPath(), "chosen", "renamed-data-pack.zip");
+        var picker = new StubFilePickerService { ResourceDestination = destination };
+        var installation = new RecordingInstallationService();
+        var viewModel = CreateViewModel(
+            installation,
+            new DownloadTasksPageViewModel(TimeSpan.FromMinutes(1)),
+            _ => { },
+            filePickerService: picker,
+            kind: ResourceProjectKind.DataPack);
+
+        await viewModel.InstallAsync(
+            CreateVersionItem(ResourceProjectKind.DataPack),
+            ResourcesModInstallTargetItemViewModel.FromInstance(instance),
+            null);
+
+        var request = Assert.Single(installation.ExecutedRequests);
+        Assert.Equal(ResourceProjectInstallationTargetKind.LocalDirectory, request.TargetKind);
+        Assert.Equal(Path.GetFullPath(destination), request.DestinationPath);
+        Assert.Equal(Path.GetDirectoryName(Path.GetFullPath(destination)), request.TargetDirectory);
+        Assert.Equal(instance.InstanceDirectory, picker.LastInitialDirectory);
+        Assert.Null(installation.EnsuredKind);
+    }
+
     [Theory]
     [InlineData(ResourceProjectKind.Mod, "mods")]
     public async Task ExistingInstanceEnsuresCorrespondingContentDirectoryBeforeContinuing(

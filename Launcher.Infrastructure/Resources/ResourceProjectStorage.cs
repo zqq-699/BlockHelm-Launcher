@@ -98,6 +98,8 @@ internal sealed class ResourceProjectStorage
         {
             ResourceProjectKind.Mod => "mods",
             ResourceProjectKind.ResourcePack => "resourcepacks",
+            ResourceProjectKind.DataPack => throw new InvalidOperationException(
+                "Data packs are downloaded to a user-selected destination instead of an instance content directory."),
             ResourceProjectKind.ShaderPack => "shaderpacks",
             ResourceProjectKind.World => "saves",
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported instance resource kind.")
@@ -888,7 +890,7 @@ internal sealed class ResourceProjectStorage
         return kind switch
         {
             ResourceProjectKind.Modpack => ".mrpack",
-            ResourceProjectKind.ResourcePack or ResourceProjectKind.ShaderPack or ResourceProjectKind.World => ".zip",
+            ResourceProjectKind.ResourcePack or ResourceProjectKind.DataPack or ResourceProjectKind.ShaderPack or ResourceProjectKind.World => ".zip",
             _ => ".jar"
         };
     }
@@ -898,6 +900,8 @@ internal sealed class ResourceProjectStorage
         var directoryName = kind switch
         {
             ResourceProjectKind.ResourcePack => "resourcepacks",
+            ResourceProjectKind.DataPack => throw new InvalidOperationException(
+                "Data packs are downloaded to a user-selected destination instead of an instance content directory."),
             ResourceProjectKind.ShaderPack => "shaderpacks",
             ResourceProjectKind.World => "saves",
             _ => "mods"

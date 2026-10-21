@@ -113,6 +113,20 @@ internal static class ResourceProjectCategoryMapping
             ResourceProjectCategory.VanillaLike,
             ResourceProjectCategory.Audio
         ],
+        ResourceProjectKind.DataPack =>
+        [
+            ResourceProjectCategory.Optimization,
+            ResourceProjectCategory.Utility,
+            ResourceProjectCategory.Adventure,
+            ResourceProjectCategory.Decoration,
+            ResourceProjectCategory.Equipment,
+            ResourceProjectCategory.Technology,
+            ResourceProjectCategory.Magic,
+            ResourceProjectCategory.Mobs,
+            ResourceProjectCategory.WorldGeneration,
+            ResourceProjectCategory.Storage,
+            ResourceProjectCategory.Library
+        ],
         ResourceProjectKind.ShaderPack =>
         [
             ResourceProjectCategory.Cartoon,
