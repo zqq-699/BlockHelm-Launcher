@@ -12,6 +12,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -68,6 +69,67 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
             : null;
     }
 
+    public string? FindSearchTerm(ResourceProjectSource source, string query)
+    {
+        var normalizedQuery = NormalizeChineseSearchText(query);
+        if (normalizedQuery.Length == 0)
+            return null;
+
+        var candidates = indexes.Value.SearchEntries;
+        SearchEntry? best = null;
+        var bestRank = int.MaxValue;
+        var directMatches = new List<string>();
+        foreach (var candidate in candidates)
+        {
+            var term = source switch
+            {
+                ResourceProjectSource.Modrinth => candidate.ModrinthTerm,
+                ResourceProjectSource.CurseForge => candidate.CurseForgeTerm,
+                _ => null
+            };
+            if (string.IsNullOrWhiteSpace(term))
+                continue;
+
+            var rank = GetSearchRank(normalizedQuery, candidate.NormalizedChineseName);
+            if (rank is 1 or 2)
+                directMatches.Add(term);
+            if (rank < bestRank)
+            {
+                bestRank = rank;
+                best = candidate;
+                if (rank == 0)
+                    break;
+            }
+        }
+
+        if (bestRank == int.MaxValue)
+            return null;
+
+        // 宽泛中文词可命中大量模组；共享英文词比任意一条完整模组名更适合平台分页搜索。
+        var sharedKeyword = directMatches.Count >= 3 ? FindSharedKeyword(directMatches) : null;
+        return sharedKeyword ?? (source is ResourceProjectSource.Modrinth
+            ? best!.ModrinthTerm : best!.CurseForgeTerm);
+    }
+
+    private static string? FindSharedKeyword(IReadOnlyList<string> terms)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var term in terms)
+        {
+            var words = Regex.Matches(term, "[A-Za-z]{3,}")
+                .Select(match => match.Value.ToLowerInvariant())
+                .Where(word => word is not ("the" or "and" or "for" or "mod" or "forge" or "fabric"))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+            foreach (var word in words)
+                counts[word] = counts.GetValueOrDefault(word) + 1;
+        }
+
+        var common = counts.OrderByDescending(pair => pair.Value).FirstOrDefault();
+        return common.Value >= Math.Max(3, (terms.Count + 4) / 5)
+            ? common.Key
+            : null;
+    }
+
     private LocalizationIndexes LoadIndexes()
     {
         var stopwatch = Stopwatch.StartNew();
@@ -75,6 +137,7 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
         var curseForgeTitles = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var modrinthMcmodIds = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
         var curseForgeMcmodIds = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+        var searchEntries = new List<SearchEntry>();
         var invalidLineCount = 0;
 
         try
@@ -120,13 +183,20 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
 
                 AddKeys(modrinthTitles, record.ModrinthSlugs, record.ChineseName);
                 AddKeys(curseForgeTitles, record.CurseForgeSlugs, record.ChineseName);
+                var normalizedName = NormalizeChineseSearchText(record.ChineseName);
+                if (normalizedName.Length > 0)
+                    searchEntries.Add(new SearchEntry(
+                        normalizedName,
+                        ResolveSearchTerm(record.EnglishName, record.ModrinthSlugs),
+                        ResolveSearchTerm(record.EnglishName, record.CurseForgeSlugs)));
             }
 
             var result = new LocalizationIndexes(
                 RemoveAmbiguousEntries(modrinthTitles),
                 RemoveAmbiguousEntries(curseForgeTitles),
                 RemoveAmbiguousIds(modrinthMcmodIds),
-                RemoveAmbiguousIds(curseForgeMcmodIds));
+                RemoveAmbiguousIds(curseForgeMcmodIds),
+                searchEntries);
             if (invalidLineCount > 0)
             {
                 logger.LogWarning(
@@ -223,18 +293,84 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
         value.Any(character => character is >= '\u3400' and <= '\u9FFF'
             or >= '\uF900' and <= '\uFAFF');
 
+    private static string NormalizeChineseSearchText(string value) =>
+        new(value.Where(character => !char.IsWhiteSpace(character)).ToArray());
+
+    private static string? ResolveSearchTerm(string? englishName, IReadOnlyList<string>? slugs)
+    {
+        var slug = slugs?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+        return slug is null ? null :
+            !string.IsNullOrWhiteSpace(englishName) ? englishName.Trim() : slug;
+    }
+
+    private static int GetSearchRank(string query, string name)
+    {
+        if (string.Equals(query, name, StringComparison.Ordinal))
+            return 0;
+        if (name.StartsWith(query, StringComparison.Ordinal))
+            return 1;
+        if (name.Contains(query, StringComparison.Ordinal))
+            return 2;
+        if (query.Length < 2)
+            return int.MaxValue;
+
+        var queryIndex = 0;
+        foreach (var character in name)
+        {
+            if (character == query[queryIndex] && ++queryIndex == query.Length)
+                return 3;
+        }
+
+        // 较长查询容忍一个错字；短查询避免误匹配海量无关条目。
+        if (query.Length >= 3 && HasSingleEdit(query, name))
+            return 4;
+        return int.MaxValue;
+    }
+
+    private static bool HasSingleEdit(string query, string name)
+    {
+        if (Math.Abs(query.Length - name.Length) > 1)
+            return false;
+
+        var queryIndex = 0;
+        var nameIndex = 0;
+        var edits = 0;
+        while (queryIndex < query.Length && nameIndex < name.Length)
+        {
+            if (query[queryIndex] == name[nameIndex])
+            {
+                queryIndex++;
+                nameIndex++;
+                continue;
+            }
+
+            if (++edits > 1)
+                return false;
+            if (query.Length <= name.Length)
+                nameIndex++;
+            if (query.Length >= name.Length)
+                queryIndex++;
+        }
+
+        return edits + (queryIndex < query.Length || nameIndex < name.Length ? 1 : 0) <= 1;
+    }
+
     private sealed record LocalizationIndexes(
         IReadOnlyDictionary<string, string> ModrinthTitlesBySlug,
         IReadOnlyDictionary<string, string> CurseForgeTitlesBySlug,
         IReadOnlyDictionary<string, int> ModrinthMcmodIdsBySlug,
-        IReadOnlyDictionary<string, int> CurseForgeMcmodIdsBySlug)
+        IReadOnlyDictionary<string, int> CurseForgeMcmodIdsBySlug,
+        IReadOnlyList<SearchEntry> SearchEntries)
     {
         public static LocalizationIndexes Empty { get; } = new(
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
-            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            []);
     }
+
+    private sealed record SearchEntry(string NormalizedChineseName, string? ModrinthTerm, string? CurseForgeTerm);
 
     private sealed class ModLocalizationRecord
     {

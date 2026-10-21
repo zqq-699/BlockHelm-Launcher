@@ -21,4 +21,5 @@ public interface IModNameLocalizationService
 
     int? FindMcmodIdByProjectSlug(ResourceProjectSource source, string? slug);
 
+    string? FindSearchTerm(ResourceProjectSource source, string query);
 }

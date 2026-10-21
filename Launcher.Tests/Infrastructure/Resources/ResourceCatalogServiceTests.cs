@@ -10,6 +10,7 @@ using System.Text;
 using Launcher.Application.Services;
 using Launcher.Infrastructure.CurseForge;
 using Launcher.Infrastructure.Resources;
+using Launcher.Infrastructure.Resources.ResourceLocalization;
 
 namespace Launcher.Tests.Infrastructure.Resources;
 
@@ -58,6 +59,98 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
         Assert.Equal("Sodium", project.Title);
         Assert.Equal("钠", project.LocalizedTitle);
         Assert.Contains("query=Sodium", Assert.Single(handler.Requests).Query);
+    }
+
+    [Theory]
+    [InlineData("建筑师的调色板")]
+    [InlineData("建筑调色板")]
+    [InlineData("建筑师的调色饭")]
+    public async Task ChineseModSearchUsesMappedEnglishTerm(string query)
+    {
+        var handler = new StubHandler(_ => Json(
+            """{"hits":[{"project_id":"palette","slug":"architects-palette","title":"Architect's Palette","description":"","downloads":1}]}"""));
+        var service = CreateService(handler);
+
+        var result = await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            Query = query,
+            MinecraftVersion = "1.20.1",
+            Loader = LoaderKind.Fabric,
+            Offset = 20
+        });
+
+        Assert.Equal("建筑师的调色板", Assert.Single(result.Projects).LocalizedTitle);
+        var request = Assert.Single(handler.Requests);
+        Assert.Contains("query=Architect%27s%20Palette", request.Query);
+        Assert.Contains("offset=20", request.Query);
+        Assert.Contains("1.20.1", Uri.UnescapeDataString(request.Query));
+        Assert.Contains("fabric", Uri.UnescapeDataString(request.Query));
+    }
+
+    [Fact]
+    public async Task UnknownChineseModSearchFallsBackToOriginalQuery()
+    {
+        var handler = new StubHandler(_ => Json("""{"hits":[]}"""));
+        var service = CreateService(handler);
+
+        await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            Query = "不存在的中文模组名"
+        });
+
+        Assert.Contains("query=%E4%B8%8D", Assert.Single(handler.Requests).Query);
+    }
+
+    [Fact]
+    public async Task SingleChineseCharacterCanResolveExactMappedMod()
+    {
+        var handler = new StubHandler(_ => Json(
+            """{"hits":[{"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"","downloads":1}]}"""));
+        var service = CreateService(handler);
+
+        var result = await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            Query = "钠"
+        });
+
+        Assert.Equal("钠", Assert.Single(result.Projects).LocalizedTitle);
+        Assert.Contains("query=Sodium", Assert.Single(handler.Requests).Query);
+    }
+
+    [Theory]
+    [InlineData("动画", "animation")]
+    [InlineData("进度", "advancements")]
+    [InlineData("更好", "better")]
+    public void BroadChineseSearchUsesSharedEnglishKeyword(string query, string expectedTerm)
+    {
+        var localization = new EmbeddedModNameLocalizationService();
+
+        Assert.Equal(expectedTerm, localization.FindSearchTerm(ResourceProjectSource.CurseForge, query));
+        Assert.Equal(expectedTerm, localization.FindSearchTerm(ResourceProjectSource.Modrinth, query));
+    }
+
+    [Fact]
+    public async Task BroadChineseSearchUsesSharedKeywordForProviderAndPrioritizesChineseMatch()
+    {
+        var handler = new StubHandler(_ => Json(
+            """{"hits":[{"project_id":"unrelated","slug":"unrelated","title":"Animation Helper","description":"","downloads":100},{"project_id":"animations","slug":"not-enough-animations","title":"Not Enough Animations","description":"","downloads":1}]}"""));
+        var service = CreateService(handler);
+
+        var result = await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            Query = "动画"
+        });
+
+        Assert.Contains("query=animation", Assert.Single(handler.Requests).Query);
+        Assert.Equal("更多动画", result.Projects[0].LocalizedTitle);
     }
 
     [Fact]

@@ -187,8 +187,19 @@ public sealed class ResourceCatalogService :
         var curseForgeUnavailable = false;
         var curseForgeApiKeyMissing = false;
 
+        var isChineseModSearch = request.Kind is ResourceProjectKind.Mod
+            && request.Query?.Any(character => character is >= '\u3400' and <= '\u9FFF'
+                or >= '\uF900' and <= '\uFAFF') == true;
         var providerResults = await Task.WhenAll(supportedProviders.Select(provider =>
-            SearchProviderAsync(provider, request, cancellationToken))).ConfigureAwait(false);
+        {
+            var searchTerm = isChineseModSearch
+                ? modNameLocalizationService.FindSearchTerm(provider.Source, request.Query ?? string.Empty)
+                : null;
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+                logger.LogDebug("Resolved Chinese mod search term. Source={Source}", provider.Source);
+            return SearchProviderAsync(provider,
+                searchTerm is null ? request : CopyWithQuery(request, searchTerm), cancellationToken);
+        })).ConfigureAwait(false);
         foreach (var (providerSource, result) in providerResults)
         {
             projects.AddRange(result.Projects);
@@ -206,7 +217,9 @@ public sealed class ResourceCatalogService :
         var searchResult = new ResourceCatalogSearchResult
         {
             Projects = projects
-                .OrderByDescending(project => project.Downloads)
+                .OrderByDescending(project => isChineseModSearch
+                    && project.LocalizedTitle?.Contains(request.Query?.Trim() ?? string.Empty, StringComparison.Ordinal) == true)
+                .ThenByDescending(project => project.Downloads)
                 .ThenBy(project => project.Title, StringComparer.CurrentCultureIgnoreCase)
                 .ToList(),
             IsCurseForgeUnavailable = curseForgeUnavailable,
@@ -226,6 +239,19 @@ public sealed class ResourceCatalogService :
         project.LocalizedTitle = project.Kind is ResourceProjectKind.Mod
             ? modNameLocalizationService.FindByProjectSlug(project.Source, project.Slug, project.Title)
             : null;
+
+    private static ResourceCatalogSearchRequest CopyWithQuery(ResourceCatalogSearchRequest request, string query) => new()
+    {
+        Kind = request.Kind,
+        Query = query,
+        MinecraftVersion = request.MinecraftVersion,
+        MinecraftVersions = request.MinecraftVersions,
+        Loader = request.Loader,
+        Source = request.Source,
+        Category = request.Category,
+        Offset = request.Offset,
+        PageSize = request.PageSize
+    };
 
     private async Task<(ResourceProjectSource Source, ResourceProviderSearchResult Result)> SearchProviderAsync(
         IResourceProviderClient provider,
