@@ -85,7 +85,9 @@ public sealed class LocalModsViewModel : IDisposable
             this.uiDispatcher,
             this.logger,
             projectReferenceSelector: mod => mod.ProjectReference,
-            projectReferenceSetter: static (mod, reference) => mod.ProjectReference = reference);
+            projectReferenceSetter: static (mod, reference) => mod.ProjectReference = reference,
+            localizedNameSelector: mod => mod.LocalizedName,
+            localizedNameSetter: static (mod, name) => mod.LocalizedName = name);
         contentWatcher = new InstanceContentRefreshWatcher(
             instanceDirectoryMonitor,
             InstanceDirectoryKind.Mods,

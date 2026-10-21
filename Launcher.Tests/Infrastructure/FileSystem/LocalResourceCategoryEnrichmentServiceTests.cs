@@ -12,6 +12,7 @@ using System.Text.Json;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure;
+using Launcher.Infrastructure.CurseForge;
 using Launcher.Infrastructure.FileSystem;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -19,6 +20,81 @@ namespace Launcher.Tests.Infrastructure.FileSystem;
 
 public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirectory
 {
+    [Theory]
+    [InlineData("sodium", "钠")]
+    [InlineData("architects-palette-fabric", null)]
+    public async Task LocalModUsesExactOnlineProjectSlugForChineseName(string slug, string? expectedName)
+    {
+        Directory.CreateDirectory(TempRoot);
+        var path = Path.Combine(TempRoot, $"{slug}.jar");
+        var bytes = Encoding.UTF8.GetBytes(slug);
+        File.WriteAllBytes(path, bytes);
+        var sha1 = Convert.ToHexString(SHA1.HashData(bytes)).ToLowerInvariant();
+        var pathProvider = new LauncherPathProvider(TempRoot);
+        var candidate = new LocalResourceCategoryCandidate(path, ResourceProjectKind.Mod);
+
+        using (var client = new HttpClient(new ModrinthMatchHandler(sha1, slug)))
+        {
+            var service = new LocalResourceCategoryEnrichmentService(pathProvider, client);
+            var matched = Assert.Single(await service.ResolveMetadataAsync([candidate])).Value;
+            Assert.Equal(expectedName, matched.LocalizedName);
+            Assert.Equal(ResourceProjectSource.Modrinth, matched.ProjectReference?.Source);
+        }
+
+        using var offlineClient = new HttpClient(new RejectingHandler());
+        var restartedService = new LocalResourceCategoryEnrichmentService(pathProvider, offlineClient);
+        var cached = Assert.Single(await restartedService.ResolveCachedMetadataAsync([candidate])).Value;
+        Assert.Equal(expectedName, cached.LocalizedName);
+    }
+
+    [Fact]
+    public async Task CachedModProjectWithoutSlugIsRefreshedForLocalization()
+    {
+        Directory.CreateDirectory(TempRoot);
+        var path = Path.Combine(TempRoot, "sodium.jar");
+        var bytes = Encoding.UTF8.GetBytes("cached sodium mod");
+        File.WriteAllBytes(path, bytes);
+        var sha1 = Convert.ToHexString(SHA1.HashData(bytes)).ToLowerInvariant();
+        var pathProvider = new LauncherPathProvider(TempRoot);
+        var candidate = new LocalResourceCategoryCandidate(path, ResourceProjectKind.Mod);
+
+        using (var client = new HttpClient(new ModrinthMatchHandler(sha1, "sodium")))
+            await new LocalResourceCategoryEnrichmentService(pathProvider, client)
+                .ResolveMetadataAsync([candidate]);
+
+        var cachePath = Path.Combine(
+            pathProvider.DefaultDataDirectory, "cache", "resources", "local-categories", "index.json");
+        var cacheJson = File.ReadAllText(cachePath);
+        Assert.Contains("\"projectSlug\":\"sodium\"", cacheJson);
+        File.WriteAllText(cachePath, cacheJson.Replace(
+            "\"projectSlug\":\"sodium\"", "\"projectSlug\":null", StringComparison.Ordinal));
+
+        using var refreshedClient = new HttpClient(new ModrinthMatchHandler(sha1, "sodium"));
+        var refreshedService = new LocalResourceCategoryEnrichmentService(pathProvider, refreshedClient);
+        var refreshed = Assert.Single(await refreshedService.ResolveMetadataAsync([candidate])).Value;
+
+        Assert.Equal("钠", refreshed.LocalizedName);
+    }
+
+    [Fact]
+    public async Task CurseForgeFileMatchUsesSameProjectSlugLocalization()
+    {
+        Directory.CreateDirectory(TempRoot);
+        var path = Path.Combine(TempRoot, "curseforge-sodium.jar");
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes("CurseForge sodium file"));
+        using var client = new HttpClient(new CurseForgeMatchHandler());
+        var service = new LocalResourceCategoryEnrichmentService(
+            new LauncherPathProvider(TempRoot),
+            client,
+            new TestCurseForgeKeyResolver());
+
+        var matched = Assert.Single(await service.ResolveMetadataAsync(
+            [new LocalResourceCategoryCandidate(path, ResourceProjectKind.Mod)])).Value;
+
+        Assert.Equal(ResourceProjectSource.CurseForge, matched.ProjectReference?.Source);
+        Assert.Equal("钠", matched.LocalizedName);
+    }
+
     [Fact]
     public async Task ExactModrinthFileMatchMapsCategoriesForRequestedResourceKind()
     {
@@ -360,7 +436,7 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
         Assert.Equal(paths.Length, resolved.Count);
     }
 
-    private sealed class ModrinthMatchHandler(string sha1) : HttpMessageHandler
+    private sealed class ModrinthMatchHandler(string sha1, string? slug = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -369,7 +445,7 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
             var json = request.RequestUri!.AbsolutePath switch
             {
                 "/v2/version_files" => $"{{\"{sha1}\":{{\"project_id\":\"shader-project\"}}}}",
-                "/v2/projects" => """[{"id":"shader-project","icon_url":"https://cdn.example/shader.png","categories":["fabric","fantasy","realistic","fantasy"]}]""",
+                "/v2/projects" => $$"""[{"id":"shader-project","slug":"{{slug}}","icon_url":"https://cdn.example/shader.png","categories":["fabric","fantasy","realistic","fantasy"]}]""",
                 _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
             };
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -385,6 +461,49 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Directory resources must not trigger remote matching.");
+    }
+
+    private sealed class TestCurseForgeKeyResolver : ICurseForgeApiKeyResolver
+    {
+        public Task<string?> TryResolveAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("test-key");
+    }
+
+    private sealed class CurseForgeMatchHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            string json;
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/v2/version_files":
+                    json = "{}";
+                    break;
+                case "/v1/fingerprints/432":
+                    using (var document = JsonDocument.Parse(
+                               await request.Content!.ReadAsStringAsync(cancellationToken)))
+                    {
+                        var fingerprint = document.RootElement.GetProperty("fingerprints")[0].GetInt64();
+                        json = JsonSerializer.Serialize(new
+                        {
+                            data = new { exactMatches = new[] { new { id = 123, fileFingerprint = fingerprint } } }
+                        });
+                    }
+                    break;
+                case "/v1/mods":
+                    json = """{"data":[{"id":123,"slug":"sodium","categories":[]}]}""";
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unexpected request: {request.RequestUri}");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+        }
     }
 
     private sealed class MultipleModrinthMatchHandler(IReadOnlyList<string> hashes) : HttpMessageHandler

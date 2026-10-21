@@ -31,6 +31,11 @@ public sealed class ResourceProject
 
     public string Title { get; init; } = string.Empty;
 
+    /// <summary>
+    /// 本地映射命中的显示名称。原始平台标题始终保留在 <see cref="Title"/> 中。
+    /// </summary>
+    public string? LocalizedTitle { get; set; }
+
     public string Description { get; init; } = string.Empty;
 
     public string? IconUrl { get; init; }

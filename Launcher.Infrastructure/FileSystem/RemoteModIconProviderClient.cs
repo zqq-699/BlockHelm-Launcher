@@ -115,6 +115,7 @@ internal sealed class RemoteModIconProviderClient
                 result[sha1] = new RemoteIconCandidate(
                     "modrinth",
                     version.ProjectId,
+                    project.Slug,
                     project.IconUrl ?? string.Empty,
                     ResourceProjectCategoryMapping.MapModrinth(candidate.Kind, project.Categories));
             }
@@ -210,6 +211,7 @@ internal sealed class RemoteModIconProviderClient
                 result[candidate.Sha1] = new RemoteIconCandidate(
                     "curseforge",
                     projectId.ToString(),
+                    mod.Slug,
                     iconUrl ?? string.Empty,
                     ResourceProjectCategoryMapping.MapCurseForge(
                         candidate.Kind,
@@ -320,6 +322,9 @@ internal sealed class RemoteModIconProviderClient
         [JsonPropertyName("id")]
         public string Id { get; init; } = string.Empty;
 
+        [JsonPropertyName("slug")]
+        public string? Slug { get; init; }
+
         [JsonPropertyName("icon_url")]
         public string? IconUrl { get; init; }
 
@@ -343,6 +348,9 @@ internal sealed class RemoteModIconProviderClient
     {
         [JsonPropertyName("id")]
         public long Id { get; init; }
+
+        [JsonPropertyName("slug")]
+        public string? Slug { get; init; }
 
         [JsonPropertyName("logo")]
         public CurseForgeModLogo? Logo { get; init; }
@@ -383,5 +391,6 @@ internal sealed record ModIconLookupCandidate(
 internal sealed record RemoteIconCandidate(
     string Source,
     string ProjectId,
+    string? Slug,
     string IconUrl,
     IReadOnlyList<ResourceProjectCategory> Categories);

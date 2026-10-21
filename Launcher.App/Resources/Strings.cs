@@ -169,6 +169,7 @@ public static class Strings
     public static string Resources_ModProjectsLoadMoreError => Get(nameof(Resources_ModProjectsLoadMoreError));
     public static string Resources_ModCurseForgeMissingApiKey => Get(nameof(Resources_ModCurseForgeMissingApiKey));
     public static string Resources_ModDownloadsFormat => Get(nameof(Resources_ModDownloadsFormat));
+    public static string Resources_ModLocalizedTitleFormat => Get(nameof(Resources_ModLocalizedTitleFormat));
     public static string Resources_ModDownloadsTenThousandFormat => Get(nameof(Resources_ModDownloadsTenThousandFormat));
     public static string Resources_ModDownloadsHundredMillionFormat => Get(nameof(Resources_ModDownloadsHundredMillionFormat));
     public static string Resources_ModDetailsInfoSection => Get(nameof(Resources_ModDetailsInfoSection));
@@ -176,6 +177,7 @@ public static class Strings
     public static string Resources_ModDetailsLoaderLabel => Get(nameof(Resources_ModDetailsLoaderLabel));
     public static string Resources_ModDetailsSourceLabel => Get(nameof(Resources_ModDetailsSourceLabel));
     public static string Resources_ModDetailsRelatedWebsitesLabel => Get(nameof(Resources_ModDetailsRelatedWebsitesLabel));
+    public static string Resources_ModDetailsMcmodWebsiteName => Get(nameof(Resources_ModDetailsMcmodWebsiteName));
     public static string Resources_ModDetailsDownloadsLabel => Get(nameof(Resources_ModDetailsDownloadsLabel));
     public static string Resources_ModDetailsTagsLabel => Get(nameof(Resources_ModDetailsTagsLabel));
     public static string Resources_ModDetailsDependenciesLabel => Get(nameof(Resources_ModDetailsDependenciesLabel));

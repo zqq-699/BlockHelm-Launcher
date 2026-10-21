@@ -21,6 +21,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Launcher.App.Services;
+using Launcher.App.Resources;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -61,6 +62,7 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasRelatedWebsite))]
+    [NotifyPropertyChangedFor(nameof(RelatedWebsiteName))]
     private ResourceProjectRelatedWebsite? relatedWebsite;
 
     public ObservableCollection<ResourcesModProjectItemViewModel> RequiredDependencies { get; } = [];
@@ -70,6 +72,10 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
     public bool HasRequiredDependencies => RequiredDependencies.Count > 0;
 
     public bool HasRelatedWebsite => RelatedWebsite is not null;
+
+    public string RelatedWebsiteName => RelatedWebsite?.Name is "MCMod"
+        ? Strings.Resources_ModDetailsMcmodWebsiteName
+        : RelatedWebsite?.Name ?? string.Empty;
 
     public string InfoSectionText => options.DetailsInfoSectionText;
 
@@ -144,6 +150,8 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
 
         if (resourceCatalogService is null
             || project.Project.Kind is not (
+                ResourceProjectKind.Mod
+                or
                 ResourceProjectKind.ResourcePack
                 or ResourceProjectKind.ShaderPack
                 or ResourceProjectKind.World))
@@ -154,10 +162,7 @@ public sealed partial class ResourcesProjectDetailsViewModel : ObservableObject,
         try
         {
             var website = await resourceCatalogService.GetRelatedWebsiteAsync(
-                new ResourceProjectReference(
-                    project.Project.Kind,
-                    project.Project.Source,
-                    project.Project.ProjectId),
+                project.Project,
                 cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             await uiDispatcher.PostAfterTransitionAsync(() =>

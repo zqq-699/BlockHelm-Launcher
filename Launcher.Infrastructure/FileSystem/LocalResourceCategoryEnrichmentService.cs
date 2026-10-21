@@ -14,6 +14,7 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.CurseForge;
 using Launcher.Infrastructure.Minecraft;
+using Launcher.Infrastructure.Resources.ResourceLocalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -30,6 +31,7 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
 
     private readonly RemoteModIconProviderClient providerClient;
     private readonly LocalFileFingerprintService fingerprintService;
+    private readonly IModNameLocalizationService modNameLocalizationService;
     private readonly IResourceThumbnailService? thumbnailService;
     private readonly ILogger<LocalResourceCategoryEnrichmentService> logger;
     private readonly LocalResourceCategoryCacheStore cacheStore;
@@ -42,7 +44,8 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
         ICurseForgeApiKeyResolver? curseForgeApiKeyResolver = null,
         ILogger<LocalResourceCategoryEnrichmentService>? logger = null,
         IResourceThumbnailService? thumbnailService = null,
-        LocalFileFingerprintService? fingerprintService = null)
+        LocalFileFingerprintService? fingerprintService = null,
+        IModNameLocalizationService? modNameLocalizationService = null)
     {
         var resolvedPathProvider = pathProvider ?? new LauncherPathProvider();
         var resolvedHttpClient = LauncherHttpUserAgent.Apply(
@@ -50,6 +53,7 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
         this.logger = logger ?? NullLogger<LocalResourceCategoryEnrichmentService>.Instance;
         this.thumbnailService = thumbnailService;
         this.fingerprintService = fingerprintService ?? new LocalFileFingerprintService();
+        this.modNameLocalizationService = modNameLocalizationService ?? new EmbeddedModNameLocalizationService();
         var apiKeyResolver = curseForgeApiKeyResolver ?? new CurseForgeApiKeyResolver(resolvedPathProvider);
         providerClient = new RemoteModIconProviderClient(resolvedHttpClient, apiKeyResolver, this.logger);
         cacheStore = new LocalResourceCategoryCacheStore(
@@ -287,7 +291,11 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
                 var needsIconMetadataUpgrade = SupportsRemoteProjectIcon(identity.Resource.Kind)
                     && thumbnailService is not null
                     && !entry.HasRemoteMetadata;
+                var needsSlugUpgrade = identity.Resource.Kind is ResourceProjectKind.Mod
+                    && entry.HasRemoteMetadata
+                    && entry.ProjectSlug is null;
                 if (!needsIconMetadataUpgrade
+                    && !needsSlugUpgrade
                     && entry.CheckedAt != default
                     && now - entry.CheckedAt < RefreshAfter)
                     continue;
@@ -340,7 +348,11 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
                 var needsIconMetadataUpgrade = SupportsRemoteProjectIcon(identity.Resource.Kind)
                     && thumbnailService is not null
                     && !copiedEntry.HasRemoteMetadata;
+                var needsSlugUpgrade = identity.Resource.Kind is ResourceProjectKind.Mod
+                    && copiedEntry.HasRemoteMetadata
+                    && copiedEntry.ProjectSlug is null;
                 if (!needsIconMetadataUpgrade
+                    && !needsSlugUpgrade
                     && copiedEntry.CheckedAt != default
                     && now - copiedEntry.CheckedAt < RefreshAfter)
                 {
@@ -441,6 +453,7 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
                     Categories = previous?.Categories ?? [],
                     Source = previous?.Source,
                     ProjectId = previous?.ProjectId ?? string.Empty,
+                    ProjectSlug = previous?.ProjectSlug,
                     IconUrl = previous?.IconUrl ?? string.Empty,
                     HasRemoteMetadata = previous?.HasRemoteMetadata ?? false,
                     CheckedAt = previous?.CheckedAt ?? default,
@@ -485,6 +498,7 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
                     Categories = metadata.Categories.Distinct().ToArray(),
                     Source = ParseSource(metadata.Source),
                     ProjectId = metadata.ProjectId,
+                    ProjectSlug = metadata.Slug ?? string.Empty,
                     IconUrl = metadata.IconUrl,
                     HasRemoteMetadata = true,
                     CheckedAt = checkedAt,
@@ -539,6 +553,7 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
             Categories = source.Categories,
             Source = source.Source,
             ProjectId = source.ProjectId,
+            ProjectSlug = source.ProjectSlug,
             IconUrl = source.IconUrl,
             HasRemoteMetadata = source.HasRemoteMetadata,
             CheckedAt = source.CheckedAt,
@@ -558,6 +573,7 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
         return new RemoteIconCandidate(
             entry.Source.Value.ToString().ToLowerInvariant(),
             entry.ProjectId,
+            entry.ProjectSlug,
             entry.IconUrl,
             entry.Categories);
     }
@@ -699,7 +715,7 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
     private static IReadOnlyDictionary<string, LocalResourceEnrichmentResult> CombineMetadata(
         IReadOnlyDictionary<string, IReadOnlyList<ResourceProjectCategory>> categories,
         IReadOnlyDictionary<string, string> icons,
-        IReadOnlyDictionary<string, ResourceProjectReference> references)
+        IReadOnlyDictionary<string, (ResourceProjectReference Reference, string? LocalizedName)> references)
     {
         var paths = categories.Keys
             .Concat(icons.Keys)
@@ -707,19 +723,24 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
             .Distinct(StringComparer.OrdinalIgnoreCase);
         return paths.ToDictionary(
             path => path,
-            path => new LocalResourceEnrichmentResult(
-                categories.TryGetValue(path, out var values) ? values : [],
-                icons.GetValueOrDefault(path),
-                references.GetValueOrDefault(path)),
+            path =>
+            {
+                references.TryGetValue(path, out var match);
+                return new LocalResourceEnrichmentResult(
+                    categories.TryGetValue(path, out var values) ? values : [],
+                    icons.GetValueOrDefault(path),
+                    match.Reference,
+                    match.LocalizedName);
+            },
             StringComparer.OrdinalIgnoreCase);
     }
 
-    private async Task<IReadOnlyDictionary<string, ResourceProjectReference>> ResolveProjectReferencesAsync(
+    private async Task<IReadOnlyDictionary<string, (ResourceProjectReference Reference, string? LocalizedName)>> ResolveProjectReferencesAsync(
         IReadOnlyList<LocalResourceCategoryCandidate> resources,
         CancellationToken cancellationToken)
     {
         var identities = CreateFileIdentities(resources);
-        var result = new Dictionary<string, ResourceProjectReference>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, (ResourceProjectReference Reference, string? LocalizedName)>(StringComparer.OrdinalIgnoreCase);
         if (identities.Count == 0)
             return result;
 
@@ -736,10 +757,14 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
                     continue;
                 }
 
-                result[identity.Resource.FullPath] = new ResourceProjectReference(
+                var reference = new ResourceProjectReference(
                     identity.Resource.Kind,
                     entry.Source.Value,
                     entry.ProjectId);
+                var localizedName = identity.Resource.Kind is ResourceProjectKind.Mod
+                    ? modNameLocalizationService.FindByProjectSlug(entry.Source.Value, entry.ProjectSlug, null)
+                    : null;
+                result[identity.Resource.FullPath] = (reference, localizedName);
             }
         }
         finally

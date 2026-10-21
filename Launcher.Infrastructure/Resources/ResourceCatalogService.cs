@@ -24,6 +24,7 @@ using Launcher.Domain.Models;
 using Launcher.Infrastructure.CurseForge;
 using Launcher.Infrastructure.FileSystem;
 using Launcher.Infrastructure.Minecraft;
+using Launcher.Infrastructure.Resources.ResourceLocalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -39,6 +40,7 @@ public sealed class ResourceCatalogService :
     private readonly ResourceProjectStorage storage;
     private readonly ResourceThumbnailCacheService thumbnailCache;
     private readonly McresBhlClient mcresBhlClient;
+    private readonly IModNameLocalizationService modNameLocalizationService;
     private readonly ILogger<ResourceCatalogService> logger;
 
     public ResourceCatalogService(
@@ -50,12 +52,15 @@ public sealed class ResourceCatalogService :
         ILocalSaveService? localSaveService = null,
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         IImportConcurrencyLimiter? limiter = null,
-        IMcresBhlApiKeyResolver? mcresBhlApiKeyResolver = null)
+        IMcresBhlApiKeyResolver? mcresBhlApiKeyResolver = null,
+        IModNameLocalizationService? modNameLocalizationService = null)
     {
         var resolvedPathProvider = pathProvider ?? new LauncherPathProvider();
         var resolvedHttpClient = LauncherHttpUserAgent.Apply(
             httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.logger = logger ?? NullLogger<ResourceCatalogService>.Instance;
+        this.modNameLocalizationService = modNameLocalizationService
+            ?? new EmbeddedModNameLocalizationService();
         var keyResolver = curseForgeApiKeyResolver
             ?? new CurseForgeApiKeyResolver(resolvedPathProvider, settingsService);
         var resolvedLocalSaveService = localSaveService ?? new LocalSaveService(resolvedPathProvider);
@@ -95,15 +100,44 @@ public sealed class ResourceCatalogService :
         CancellationToken cancellationToken = default) =>
         thumbnailCache.GetOrCreateThumbnailSourceAsync(project, cancellationToken);
 
-    public Task<ResourceProject?> GetProjectAsync(
+    public async Task<ResourceProject?> GetProjectAsync(
         ResourceProjectReference reference,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reference);
-        return providers.TryGetValue(reference.Source, out var provider)
-            && provider.Supports(reference.Kind)
-            ? provider.GetProjectAsync(reference, cancellationToken)
-            : Task.FromResult<ResourceProject?>(null);
+        if (!providers.TryGetValue(reference.Source, out var provider)
+            || !provider.Supports(reference.Kind))
+            return null;
+
+        var project = await provider.GetProjectAsync(reference, cancellationToken).ConfigureAwait(false);
+        if (project is not null)
+            ApplyLocalization(project);
+
+        return project;
+    }
+
+    public Task<ResourceProjectRelatedWebsite?> GetRelatedWebsiteAsync(
+        ResourceProject project,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (project.Kind is ResourceProjectKind.Mod)
+        {
+            var mcmodId = modNameLocalizationService.FindMcmodIdByProjectSlug(project.Source, project.Slug);
+            return Task.FromResult<ResourceProjectRelatedWebsite?>(mcmodId is > 0
+                ? new ResourceProjectRelatedWebsite(
+                    project.Source,
+                    project.ProjectId,
+                    "MCMod",
+                    $"https://www.mcmod.cn/class/{mcmodId}.html")
+                : null);
+        }
+
+        return GetRelatedWebsiteAsync(
+            new ResourceProjectReference(project.Kind, project.Source, project.ProjectId),
+            cancellationToken);
     }
 
     public Task<ResourceProjectRelatedWebsite?> GetRelatedWebsiteAsync(
@@ -166,6 +200,9 @@ public sealed class ResourceCatalogService :
             }
         }
 
+        foreach (var project in projects)
+            ApplyLocalization(project);
+
         var searchResult = new ResourceCatalogSearchResult
         {
             Projects = projects
@@ -184,6 +221,11 @@ public sealed class ResourceCatalogService :
             totalStopwatch.ElapsedMilliseconds);
         return searchResult;
     }
+
+    private void ApplyLocalization(ResourceProject project) =>
+        project.LocalizedTitle = project.Kind is ResourceProjectKind.Mod
+            ? modNameLocalizationService.FindByProjectSlug(project.Source, project.Slug, project.Title)
+            : null;
 
     private async Task<(ResourceProjectSource Source, ResourceProviderSearchResult Result)> SearchProviderAsync(
         IResourceProviderClient provider,
@@ -229,9 +271,13 @@ public sealed class ResourceCatalogService :
             return new ResourceProjectVersionsResult();
         }
 
-        return providers.TryGetValue(request.Source, out var provider)
-            ? await provider.GetVersionsAsync(request, cancellationToken).ConfigureAwait(false)
-            : new ResourceProjectVersionsResult();
+        if (!providers.TryGetValue(request.Source, out var provider))
+            return new ResourceProjectVersionsResult();
+
+        var result = await provider.GetVersionsAsync(request, cancellationToken).ConfigureAwait(false);
+        foreach (var dependency in result.Versions.SelectMany(version => version.RequiredDependencies))
+            ApplyLocalization(dependency.Project);
+        return result;
     }
 
     public async Task<ResourceProjectDependenciesResult> GetProjectDependenciesAsync(
@@ -240,9 +286,13 @@ public sealed class ResourceCatalogService :
     {
         if (request.Kind is not ResourceProjectKind.Mod)
             return new ResourceProjectDependenciesResult();
-        return providers.TryGetValue(request.Source, out var provider)
-            ? await provider.GetDependenciesAsync(request, cancellationToken).ConfigureAwait(false)
-            : new ResourceProjectDependenciesResult();
+        if (!providers.TryGetValue(request.Source, out var provider))
+            return new ResourceProjectDependenciesResult();
+
+        var result = await provider.GetDependenciesAsync(request, cancellationToken).ConfigureAwait(false);
+        foreach (var project in result.RequiredProjects)
+            ApplyLocalization(project);
+        return result;
     }
 
     public async Task<string> InstallProjectVersionAsync(

@@ -51,7 +51,12 @@ public sealed partial class ResourcesModProjectItemViewModel : ObservableObject
 
     public ResourceProject Project { get; }
 
-    public string Title => Project.Title;
+    public string Title => FormatTitle(Project);
+
+    internal static string FormatTitle(ResourceProject project) => string.IsNullOrWhiteSpace(project.LocalizedTitle)
+        || string.Equals(project.LocalizedTitle.Trim(), project.Title.Trim(), StringComparison.OrdinalIgnoreCase)
+            ? project.Title
+            : string.Format(Strings.Resources_ModLocalizedTitleFormat, project.LocalizedTitle.Trim(), project.Title);
 
     public string Description => Project.Description;
 

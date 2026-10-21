@@ -115,6 +115,7 @@
   <data name="Resources_ModProjectsLoadMoreError" xml:space="preserve"><value>加载更多失败，请稍后重试。</value></data>
   <data name="Resources_ModCurseForgeMissingApiKey" xml:space="preserve"><value>未配置 CurseForge API Key，当前仅显示 Modrinth 结果。</value></data>
   <data name="Resources_ModDownloadsFormat" xml:space="preserve"><value>{0} 下载</value></data>
+  <data name="Resources_ModLocalizedTitleFormat" xml:space="preserve"><value>{0} | {1}</value></data>
   <data name="Resources_ModDownloadsTenThousandFormat" xml:space="preserve"><value>{0:0.##}万</value></data>
   <data name="Resources_ModDownloadsHundredMillionFormat" xml:space="preserve"><value>{0:0.##}亿</value></data>
   <data name="Resources_ModDetailsInfoSection" xml:space="preserve"><value>模组&#x4FE1;&#x606F;</value></data>
@@ -122,6 +123,7 @@
   <data name="Resources_ModDetailsLoaderLabel" xml:space="preserve"><value>&#x52A0;&#x8F7D;&#x5668;</value></data>
   <data name="Resources_ModDetailsSourceLabel" xml:space="preserve"><value>&#x6765;&#x6E90;</value></data>
   <data name="Resources_ModDetailsRelatedWebsitesLabel" xml:space="preserve"><value>相关网站</value></data>
+  <data name="Resources_ModDetailsMcmodWebsiteName" xml:space="preserve"><value>MC百科</value></data>
   <data name="Resources_ModDetailsDownloadsLabel" xml:space="preserve"><value>&#x4E0B;&#x8F7D;&#x6B21;&#x6570;</value></data>
   <data name="Resources_ModDetailsTagsLabel" xml:space="preserve"><value>&#x6807;&#x7B7E;</value></data>
   <data name="Resources_ModDetailsDependenciesLabel" xml:space="preserve"><value>&#x524D;&#x7F6E;模组</value></data>

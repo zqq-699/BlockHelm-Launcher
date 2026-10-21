@@ -31,6 +31,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Modpacks\Log4Shell\*.xml"
                       LogicalName="Launcher.Infrastructure.Modpacks.Log4Shell.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Resources\ResourceLocalization\Data\mods.v1.jsonl"
+                      LogicalName="Launcher.Infrastructure.Resources.ResourceLocalization.mods.v1.jsonl" />
   </ItemGroup>
 
   <PropertyGroup>

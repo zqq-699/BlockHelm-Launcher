@@ -41,6 +41,117 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     }
 
     [Fact]
+    public async Task SearchAddsChineseTitleFromEmbeddedCatalog()
+    {
+        var handler = new StubHandler(_ => Json(
+            """{"hits":[{"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"","downloads":1}]}"""));
+        var service = CreateService(handler);
+
+        var result = await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            Query = "Sodium"
+        });
+
+        var project = Assert.Single(result.Projects);
+        Assert.Equal("Sodium", project.Title);
+        Assert.Equal("钠", project.LocalizedTitle);
+        Assert.Contains("query=Sodium", Assert.Single(handler.Requests).Query);
+    }
+
+    [Fact]
+    public async Task GetProjectAddsChineseTitleForInstanceModDetails()
+    {
+        var handler = new StubHandler(_ => Json(
+            """{"id":"AANobbMI","slug":"sodium","title":"Sodium","description":"","downloads":1,"project_type":"mod"}"""));
+        var service = CreateService(handler);
+
+        var project = await service.GetProjectAsync(new ResourceProjectReference(
+            ResourceProjectKind.Mod,
+            ResourceProjectSource.Modrinth,
+            "AANobbMI"));
+
+        Assert.NotNull(project);
+        Assert.Equal("Sodium", project.Title);
+        Assert.Equal("钠", project.LocalizedTitle);
+        Assert.Contains("/project/AANobbMI", Assert.Single(handler.Requests).AbsolutePath);
+    }
+
+    [Fact]
+    public async Task ModDependenciesUseSameChineseTitleMapping()
+    {
+        var handler = new StubHandler(request => Json(request.RequestUri!.AbsolutePath switch
+        {
+            "/v2/project/main/version" =>
+                """[{"id":"version","files":[{"filename":"main.jar","url":"https://download.test/main.jar"}],"dependencies":[{"project_id":"AANobbMI","dependency_type":"required"}]}]""",
+            "/v2/projects" =>
+                """[{"id":"AANobbMI","slug":"sodium","title":"Sodium","project_type":"mod"}]""",
+            _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+        }));
+        var service = CreateService(handler);
+
+        var versions = await service.GetProjectVersionsAsync(new ResourceProjectVersionsRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            ProjectId = "main",
+            IncludeAllVersions = true,
+            IncludeDependencies = true
+        });
+        var dependency = Assert.Single(Assert.Single(versions.Versions).RequiredDependencies).Project;
+        Assert.Equal("钠", dependency.LocalizedTitle);
+
+        var details = await service.GetProjectDependenciesAsync(new ResourceProjectDependenciesRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            ProjectId = "main"
+        });
+        Assert.Equal("钠", Assert.Single(details.RequiredProjects).LocalizedTitle);
+    }
+
+    [Theory]
+    [InlineData(ResourceProjectSource.Modrinth)]
+    [InlineData(ResourceProjectSource.CurseForge)]
+    public async Task ModDetailsLinkToMatchedMcmodPage(ResourceProjectSource source)
+    {
+        var handler = new StubHandler(_ => throw new InvalidOperationException("No network request expected."));
+        var service = CreateService(handler);
+
+        var website = await service.GetRelatedWebsiteAsync(new ResourceProject
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = source,
+            ProjectId = "sodium-project",
+            Slug = "sodium",
+            Title = "Sodium"
+        });
+
+        Assert.NotNull(website);
+        Assert.Equal("MCMod", website.Name);
+        Assert.Equal("https://www.mcmod.cn/class/2785.html", website.Url);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ModDetailsWithoutMappingDoNotInventMcmodPage()
+    {
+        var service = CreateService(new StubHandler(_ =>
+            throw new InvalidOperationException("No network request expected.")));
+
+        var website = await service.GetRelatedWebsiteAsync(new ResourceProject
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            ProjectId = "unlisted",
+            Slug = "unlisted"
+        });
+
+        Assert.Null(website);
+    }
+
+    [Fact]
     public async Task ModrinthVersionsPreserveFileIntegrityMetadata()
     {
         const string sha512 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

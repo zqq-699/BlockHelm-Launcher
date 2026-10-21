@@ -321,6 +321,9 @@
   <data name="Resources_ModDownloadsFormat" xml:space="preserve">
     <value>{0} 下載</value>
   </data>
+  <data name="Resources_ModLocalizedTitleFormat" xml:space="preserve">
+    <value>{0} | {1}</value>
+  </data>
   <data name="Resources_ModDownloadsTenThousandFormat" xml:space="preserve">
     <value>{0:0.##}萬</value>
   </data>
@@ -341,6 +344,9 @@
   </data>
   <data name="Resources_ModDetailsRelatedWebsitesLabel" xml:space="preserve">
     <value>相關網站</value>
+  </data>
+  <data name="Resources_ModDetailsMcmodWebsiteName" xml:space="preserve">
+    <value>MC百科</value>
   </data>
   <data name="Resources_ModDetailsDownloadsLabel" xml:space="preserve">
     <value>下載次數</value>

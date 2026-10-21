@@ -221,7 +221,8 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         }
 
         return uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            && uri.Host.Equals("www.mcresource.cn", StringComparison.OrdinalIgnoreCase);
+            && (uri.Host.Equals("www.mcresource.cn", StringComparison.OrdinalIgnoreCase)
+                || uri.Host.Equals("www.mcmod.cn", StringComparison.OrdinalIgnoreCase));
     }
 
     public ObservableCollection<ResourcesSectionItem> Sections { get; }

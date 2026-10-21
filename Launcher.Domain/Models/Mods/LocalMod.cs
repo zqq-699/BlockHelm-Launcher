@@ -22,6 +22,7 @@ namespace Launcher.Domain.Models;
 public sealed class LocalMod
 {
     public string Name { get; set; } = string.Empty;
+    public string? LocalizedName { get; set; }
     public string? Loader { get; set; }
     public string? ModId { get; set; }
     public string? Version { get; set; }

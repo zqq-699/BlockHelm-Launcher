@@ -32,6 +32,56 @@ namespace Launcher.Tests.Infrastructure.Mods;
 public sealed class ModServiceTests : TestTempDirectory
 {
     [Theory]
+    [InlineData("sodium")]
+    [InlineData("unlisted-mod-id")]
+    public async Task GetModsAsyncWaitsForOnlineProjectLocalization(string modId)
+    {
+        var instanceDirectory = Directory.CreateDirectory(
+            Path.Combine(TempRoot, "instances", "localized-name")).FullName;
+        var modsDirectory = Directory.CreateDirectory(Path.Combine(instanceDirectory, "mods")).FullName;
+        var jarPath = Path.Combine(modsDirectory, "sodium.jar");
+        using (var archive = ZipFile.Open(jarPath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("fabric.mod.json");
+            await using var stream = entry.Open();
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(
+                $$"""{"id":"{{modId}}","name":"Sodium","version":"1.0.0"}"""));
+        }
+        var service = CreateService();
+
+        var mod = Assert.Single(await service.GetModsAsync(new GameInstance
+        {
+            Id = "localized-name",
+            InstanceDirectory = instanceDirectory
+        }));
+
+        Assert.Equal(modId, mod.ModId);
+        Assert.Equal("Sodium", mod.Name);
+        Assert.Null(mod.LocalizedName);
+    }
+
+    [Fact]
+    public async Task GetModsAsyncDoesNotIdentifyModByFileNameAlone()
+    {
+        var instanceDirectory = Directory.CreateDirectory(
+            Path.Combine(TempRoot, "instances", "filename-only")).FullName;
+        var modsDirectory = Directory.CreateDirectory(Path.Combine(instanceDirectory, "mods")).FullName;
+        using (ZipFile.Open(Path.Combine(modsDirectory, "sodium.jar"), ZipArchiveMode.Create))
+        {
+        }
+        var service = CreateService();
+
+        var mod = Assert.Single(await service.GetModsAsync(new GameInstance
+        {
+            Id = "filename-only",
+            InstanceDirectory = instanceDirectory
+        }));
+
+        Assert.Equal("sodium", mod.Name);
+        Assert.Null(mod.LocalizedName);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task SetEnabledAsyncRejectsExistingTargetWithoutChangingEitherFile(bool enabled)

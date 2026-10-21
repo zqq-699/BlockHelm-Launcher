@@ -61,7 +61,7 @@ public sealed class ResourcesModDependencyRequirementItemViewModel
 
     public string IconKey { get; }
 
-    public string Title => Project.Title;
+    public string Title => ResourcesModProjectItemViewModel.FormatTitle(Project);
 
     public string VersionText => string.Format(
         Strings.Resources_ModRequiredDependencyVersionFormat,

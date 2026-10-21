@@ -32,6 +32,7 @@ using Launcher.Infrastructure.Multiplayer;
 using Launcher.Infrastructure.Platform;
 using Launcher.Infrastructure.Persistence;
 using Launcher.Infrastructure.Resources;
+using Launcher.Infrastructure.Resources.ResourceLocalization;
 using Launcher.Infrastructure.Updates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -108,6 +109,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<CmlLibJavaRuntimeProvisioningService>());
         services.AddSingleton<ISystemMemoryService, WindowsSystemMemoryService>();
         services.AddSingleton<IUserFileDeletionService, UserFileDeletionService>();
+        services.AddSingleton<IModNameLocalizationService, EmbeddedModNameLocalizationService>();
         services.AddSingleton<IModService, ModService>();
         services.AddSingleton<LocalFileFingerprintService>();
         services.AddSingleton<IModUpdateProvider, ModrinthModUpdateProvider>();

@@ -90,9 +90,13 @@ public sealed partial class ModManagementModItemViewModel : ObservableObject
 
     public void SyncFrom(LocalMod mod)
     {
-        Title = string.IsNullOrWhiteSpace(mod.Name)
+        var originalTitle = string.IsNullOrWhiteSpace(mod.Name)
             ? GetDisplayFileNameWithoutModExtensions(mod.FileName)
             : mod.Name;
+        Title = string.IsNullOrWhiteSpace(mod.LocalizedName)
+            || string.Equals(mod.LocalizedName.Trim(), originalTitle.Trim(), StringComparison.OrdinalIgnoreCase)
+                ? originalTitle
+                : string.Format(Strings.Resources_ModLocalizedTitleFormat, mod.LocalizedName.Trim(), originalTitle);
         Loader = NormalizeSubtitlePart(mod.Loader);
         ModId = NormalizeSubtitlePart(mod.ModId);
         Version = NormalizeSubtitlePart(mod.Version);

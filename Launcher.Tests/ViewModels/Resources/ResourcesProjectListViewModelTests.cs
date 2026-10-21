@@ -27,6 +27,27 @@ namespace Launcher.Tests.ViewModels.Resources;
 public sealed class ResourcesProjectListViewModelTests
 {
     [Fact]
+    public void McmodRelatedWebsiteUsesExistingExternalLinkCommand()
+    {
+        var links = new RecordingExternalLinkService();
+        var page = new ResourcesPageViewModel(externalLinkService: links);
+        var website = new ResourceProjectRelatedWebsite(
+            ResourceProjectSource.Modrinth,
+            "sodium",
+            "MCMod",
+            "https://www.mcmod.cn/class/2785.html");
+
+        Assert.True(page.OpenRelatedWebsiteCommand.CanExecute(website));
+        page.OpenRelatedWebsiteCommand.Execute(website);
+
+        Assert.Equal(website.Url, links.LastOpenedUrl);
+        Assert.False(page.OpenRelatedWebsiteCommand.CanExecute(website with
+        {
+            Url = "https://www.mcmod.cn.evil.example/class/2785.html"
+        }));
+    }
+
+    [Fact]
     public async Task FailedProjectListCanBeRefreshed()
     {
         var retryResult = new TaskCompletionSource<ResourceCatalogSearchResult>(
@@ -381,5 +402,16 @@ public sealed class ResourcesProjectListViewModelTests
             GameInstance instance,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class RecordingExternalLinkService : IExternalLinkService
+    {
+        public string? LastOpenedUrl { get; private set; }
+
+        public bool TryOpen(string url)
+        {
+            LastOpenedUrl = url;
+            return true;
+        }
     }
 }

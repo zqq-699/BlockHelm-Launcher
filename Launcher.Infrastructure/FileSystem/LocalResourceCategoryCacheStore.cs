@@ -96,6 +96,8 @@ internal sealed class LocalResourceCategoryCacheEntry
 
     public string ProjectId { get; init; } = string.Empty;
 
+    public string? ProjectSlug { get; init; }
+
     public string IconUrl { get; init; } = string.Empty;
 
     public bool HasRemoteMetadata { get; init; }

@@ -358,7 +358,7 @@
                                         <Hyperlink Command="{Binding DataContext.Parent.OpenRelatedWebsiteCommand, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}}"
                                                    CommandParameter="{Binding DataContext.Details.RelatedWebsite, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}}"
                                                    Style="{StaticResource ResourcesModDetailHyperlinkStyle}">
-                                            <Run Text="{Binding DataContext.Details.RelatedWebsite.Name, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}, Mode=OneWay}" />
+                                            <Run Text="{Binding DataContext.Details.RelatedWebsiteName, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}, Mode=OneWay}" />
                                         </Hyperlink>
                                     </TextBlock>
                                 </Grid>

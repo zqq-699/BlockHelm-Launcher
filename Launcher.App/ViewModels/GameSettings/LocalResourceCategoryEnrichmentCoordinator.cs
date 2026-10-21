@@ -29,6 +29,8 @@ internal sealed class LocalResourceCategoryEnrichmentCoordinator<T> : IDisposabl
     private readonly Action<T, string>? iconChanged;
     private readonly Func<T, ResourceProjectReference?>? projectReferenceSelector;
     private readonly Action<T, ResourceProjectReference>? projectReferenceSetter;
+    private readonly Func<T, string?>? localizedNameSelector;
+    private readonly Action<T, string?>? localizedNameSetter;
     private readonly Func<IReadOnlyList<T>> currentItemsProvider;
     private readonly Action changed;
     private readonly IUiDispatcher dispatcher;
@@ -51,7 +53,9 @@ internal sealed class LocalResourceCategoryEnrichmentCoordinator<T> : IDisposabl
         bool preferResolvedIconSource = false,
         Func<T, ResourceProjectReference?>? projectReferenceSelector = null,
         Action<T, ResourceProjectReference>? projectReferenceSetter = null,
-        Action<T, string>? iconChanged = null)
+        Action<T, string>? iconChanged = null,
+        Func<T, string?>? localizedNameSelector = null,
+        Action<T, string?>? localizedNameSetter = null)
     {
         this.service = service;
         this.kind = kind;
@@ -64,6 +68,8 @@ internal sealed class LocalResourceCategoryEnrichmentCoordinator<T> : IDisposabl
         this.iconChanged = iconChanged;
         this.projectReferenceSelector = projectReferenceSelector;
         this.projectReferenceSetter = projectReferenceSetter;
+        this.localizedNameSelector = localizedNameSelector;
+        this.localizedNameSetter = localizedNameSetter;
         this.currentItemsProvider = currentItemsProvider;
         this.changed = changed;
         this.dispatcher = dispatcher;
@@ -190,6 +196,15 @@ internal sealed class LocalResourceCategoryEnrichmentCoordinator<T> : IDisposabl
                 && projectReferenceSelector(item) != metadata.ProjectReference)
             {
                 projectReferenceSetter(item, metadata.ProjectReference);
+                updated = true;
+            }
+
+            if (localizedNameSelector is not null
+                && localizedNameSetter is not null
+                && metadata.ProjectReference is not null
+                && !string.Equals(localizedNameSelector(item), metadata.LocalizedName, StringComparison.Ordinal))
+            {
+                localizedNameSetter(item, metadata.LocalizedName);
                 updated = true;
             }
         }
