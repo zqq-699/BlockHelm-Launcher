@@ -28,6 +28,35 @@ namespace Launcher.Tests.ViewModels.GameSettings;
 public sealed class InstanceModManagementConflictTests
 {
     [Fact]
+    public async Task SearchMatchesLocalizedModNameWithoutChangingEnglishSearch()
+    {
+        var animations = CreateMod(Path.Combine("instance", "mods", "not-enough-animations.jar"), isEnabled: true);
+        animations.Name = "Not Enough Animations";
+        animations.LocalizedName = "更多动画";
+        var advancements = CreateMod(Path.Combine("instance", "mods", "better-advancements.jar"), isEnabled: false);
+        advancements.Name = "Better Advancements";
+        advancements.LocalizedName = "更好的进度";
+        var service = new ControlledModService([animations, advancements], (_, _) => Task.CompletedTask);
+        var status = new RecordingStatusService();
+        using var localMods = new LocalModsViewModel(service, status, new NoOpDirectoryMonitor());
+        var viewModel = CreateViewModel(localMods, status, new RecordingFloatingMessageService());
+        await viewModel.SetSelectedInstanceAsync(CreateInstance());
+        await viewModel.OnSectionActivatedAsync();
+
+        viewModel.ModSearchQuery = "动画";
+        Assert.Equal("更多动画 | Not Enough Animations", Assert.Single(viewModel.Mods).Title);
+
+        viewModel.ModSearchQuery = "进度";
+        Assert.Equal("更好的进度 | Better Advancements", Assert.Single(viewModel.Mods).Title);
+
+        viewModel.ModSearchQuery = "advancements";
+        Assert.Equal("更好的进度 | Better Advancements", Assert.Single(viewModel.Mods).Title);
+
+        viewModel.ModSearchQuery = "更好";
+        Assert.Equal("更好的进度 | Better Advancements", Assert.Single(viewModel.Mods).Title);
+    }
+
+    [Fact]
     public async Task EnabledAndDisabledFilesWithSameBaseNameRemainDistinctListItems()
     {
         var enabled = CreateMod(Path.Combine("instance", "mods", "example.jar"), isEnabled: true);

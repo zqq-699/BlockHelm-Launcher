@@ -278,6 +278,7 @@ public sealed partial class InstanceModManagementSettingsViewModel
 
         var query = ModSearchQuery.Trim();
         return Contains(mod.Name, query)
+            || Contains(mod.LocalizedName, query)
             || Contains(mod.Loader, query)
             || Contains(mod.ModId, query)
             || Contains(mod.Version, query)
