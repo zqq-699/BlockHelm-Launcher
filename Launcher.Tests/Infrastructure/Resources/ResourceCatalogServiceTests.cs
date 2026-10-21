@@ -44,6 +44,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     [Fact]
     public async Task SearchAddsChineseTitleFromEmbeddedCatalog()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var handler = new StubHandler(_ => Json(
             """{"hits":[{"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"","downloads":1}]}"""));
         var service = CreateService(handler);
@@ -61,12 +62,32 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
         Assert.Contains("query=Sodium", Assert.Single(handler.Requests).Query);
     }
 
+    [Fact]
+    public async Task NonChineseLanguageDoesNotTranslateTitlesOrSearchQueries()
+    {
+        using var culture = new TestUiCultureScope("en");
+        var handler = new StubHandler(_ => Json(
+            """{"hits":[{"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"","downloads":1}]}"""));
+        var service = CreateService(handler);
+
+        var result = await service.SearchProjectsAsync(new ResourceCatalogSearchRequest
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = ResourceProjectSource.Modrinth,
+            Query = "钠"
+        });
+
+        Assert.Null(Assert.Single(result.Projects).LocalizedTitle);
+        Assert.Contains("query=%E9%92%A0", Assert.Single(handler.Requests).Query);
+    }
+
     [Theory]
     [InlineData("建筑师的调色板")]
     [InlineData("建筑调色板")]
     [InlineData("建筑师的调色饭")]
     public async Task ChineseModSearchUsesMappedEnglishTerm(string query)
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var handler = new StubHandler(_ => Json(
             """{"hits":[{"project_id":"palette","slug":"architects-palette","title":"Architect's Palette","description":"","downloads":1}]}"""));
         var service = CreateService(handler);
@@ -108,6 +129,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     [Fact]
     public async Task SingleChineseCharacterCanResolveExactMappedMod()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var handler = new StubHandler(_ => Json(
             """{"hits":[{"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"","downloads":1}]}"""));
         var service = CreateService(handler);
@@ -129,6 +151,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     [InlineData("更好", "better")]
     public void BroadChineseSearchUsesSharedEnglishKeyword(string query, string expectedTerm)
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var localization = new EmbeddedModNameLocalizationService();
 
         Assert.Equal(expectedTerm, localization.FindSearchTerm(ResourceProjectSource.CurseForge, query));
@@ -138,6 +161,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     [Fact]
     public async Task BroadChineseSearchUsesSharedKeywordForProviderAndPrioritizesChineseMatch()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var handler = new StubHandler(_ => Json(
             """{"hits":[{"project_id":"unrelated","slug":"unrelated","title":"Animation Helper","description":"","downloads":100},{"project_id":"animations","slug":"not-enough-animations","title":"Not Enough Animations","description":"","downloads":1}]}"""));
         var service = CreateService(handler);
@@ -156,6 +180,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     [Fact]
     public async Task GetProjectAddsChineseTitleForInstanceModDetails()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var handler = new StubHandler(_ => Json(
             """{"id":"AANobbMI","slug":"sodium","title":"Sodium","description":"","downloads":1,"project_type":"mod"}"""));
         var service = CreateService(handler);
@@ -174,6 +199,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
     [Fact]
     public async Task ModDependenciesUseSameChineseTitleMapping()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var handler = new StubHandler(request => Json(request.RequestUri!.AbsolutePath switch
         {
             "/v2/project/main/version" =>

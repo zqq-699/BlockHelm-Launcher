@@ -14,6 +14,7 @@ public sealed class ModManagementModItemViewModelTests
     [Fact]
     public void TitleCombinesLocalizedAndOriginalNames()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var viewModel = new ModManagementModItemViewModel(new LocalMod
         {
             Name = "Sodium",
@@ -22,6 +23,20 @@ public sealed class ModManagementModItemViewModelTests
         });
 
         Assert.Equal("钠 | Sodium", viewModel.Title);
+    }
+
+    [Fact]
+    public void NonChineseLanguageIgnoresCachedLocalizedName()
+    {
+        using var culture = new TestUiCultureScope("ja-JP");
+        var viewModel = new ModManagementModItemViewModel(new LocalMod
+        {
+            Name = "Sodium",
+            LocalizedName = "钠",
+            FileName = "sodium.jar"
+        });
+
+        Assert.Equal("Sodium", viewModel.Title);
     }
 
     [Fact]

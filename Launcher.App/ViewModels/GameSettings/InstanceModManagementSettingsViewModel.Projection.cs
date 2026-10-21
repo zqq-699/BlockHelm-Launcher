@@ -24,6 +24,7 @@ using Launcher.App.Services;
 using Launcher.App.ViewModels.Shared;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.IO;
@@ -278,7 +279,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
 
         var query = ModSearchQuery.Trim();
         return Contains(mod.Name, query)
-            || Contains(mod.LocalizedName, query)
+            || (LauncherLanguages.IsChineseCulture(CultureInfo.CurrentUICulture)
+                && Contains(mod.LocalizedName, query))
             || Contains(mod.Loader, query)
             || Contains(mod.ModId, query)
             || Contains(mod.Version, query)

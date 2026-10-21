@@ -30,6 +30,7 @@ public sealed class InstanceModManagementConflictTests
     [Fact]
     public async Task SearchMatchesLocalizedModNameWithoutChangingEnglishSearch()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var animations = CreateMod(Path.Combine("instance", "mods", "not-enough-animations.jar"), isEnabled: true);
         animations.Name = "Not Enough Animations";
         animations.LocalizedName = "更多动画";
@@ -54,6 +55,29 @@ public sealed class InstanceModManagementConflictTests
 
         viewModel.ModSearchQuery = "更好";
         Assert.Equal("更好的进度 | Better Advancements", Assert.Single(viewModel.Mods).Title);
+    }
+
+    [Fact]
+    public async Task NonChineseLanguageDoesNotSearchLocalizedModName()
+    {
+        using var culture = new TestUiCultureScope("en");
+        var mod = CreateMod(Path.Combine("instance", "mods", "not-enough-animations.jar"), isEnabled: true);
+        mod.Name = "Not Enough Animations";
+        mod.LocalizedName = "更多动画";
+        var status = new RecordingStatusService();
+        using var localMods = new LocalModsViewModel(
+            new ControlledModService([mod], (_, _) => Task.CompletedTask),
+            status,
+            new NoOpDirectoryMonitor());
+        var viewModel = CreateViewModel(localMods, status, new RecordingFloatingMessageService());
+        await viewModel.SetSelectedInstanceAsync(CreateInstance());
+        await viewModel.OnSectionActivatedAsync();
+
+        viewModel.ModSearchQuery = "动画";
+        Assert.Empty(viewModel.Mods);
+
+        viewModel.ModSearchQuery = "Animations";
+        Assert.Equal("Not Enough Animations", Assert.Single(viewModel.Mods).Title);
     }
 
     [Fact]

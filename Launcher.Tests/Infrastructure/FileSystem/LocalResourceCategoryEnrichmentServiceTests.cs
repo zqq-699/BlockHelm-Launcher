@@ -25,6 +25,7 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
     [InlineData("architects-palette-fabric", null)]
     public async Task LocalModUsesExactOnlineProjectSlugForChineseName(string slug, string? expectedName)
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         Directory.CreateDirectory(TempRoot);
         var path = Path.Combine(TempRoot, $"{slug}.jar");
         var bytes = Encoding.UTF8.GetBytes(slug);
@@ -50,6 +51,7 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
     [Fact]
     public async Task CachedModProjectWithoutSlugIsRefreshedForLocalization()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         Directory.CreateDirectory(TempRoot);
         var path = Path.Combine(TempRoot, "sodium.jar");
         var bytes = Encoding.UTF8.GetBytes("cached sodium mod");
@@ -79,6 +81,7 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
     [Fact]
     public async Task CurseForgeFileMatchUsesSameProjectSlugLocalization()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         Directory.CreateDirectory(TempRoot);
         var path = Path.Combine(TempRoot, "curseforge-sodium.jar");
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes("CurseForge sodium file"));

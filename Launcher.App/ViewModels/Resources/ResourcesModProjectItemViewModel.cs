@@ -19,6 +19,7 @@
 
 using Launcher.App.Resources;
 using Launcher.Domain.Models;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Launcher.App.ViewModels.Resources;
@@ -53,7 +54,8 @@ public sealed partial class ResourcesModProjectItemViewModel : ObservableObject
 
     public string Title => FormatTitle(Project);
 
-    internal static string FormatTitle(ResourceProject project) => string.IsNullOrWhiteSpace(project.LocalizedTitle)
+    internal static string FormatTitle(ResourceProject project) => !LauncherLanguages.IsChineseCulture(CultureInfo.CurrentUICulture)
+        || string.IsNullOrWhiteSpace(project.LocalizedTitle)
         || string.Equals(project.LocalizedTitle.Trim(), project.Title.Trim(), StringComparison.OrdinalIgnoreCase)
             ? project.Title
             : string.Format(Strings.Resources_ModLocalizedTitleFormat, project.LocalizedTitle.Trim(), project.Title);

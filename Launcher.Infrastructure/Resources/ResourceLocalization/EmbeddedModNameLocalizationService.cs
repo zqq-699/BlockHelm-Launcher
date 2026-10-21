@@ -9,6 +9,7 @@
  */
 
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -39,7 +40,8 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
 
     public string? FindByProjectSlug(ResourceProjectSource source, string? slug, string? originalTitle)
     {
-        if (string.IsNullOrWhiteSpace(slug))
+        if (!LauncherLanguages.IsChineseCulture(CultureInfo.CurrentUICulture)
+            || string.IsNullOrWhiteSpace(slug))
             return null;
 
         var titlesBySlug = source switch
@@ -71,6 +73,9 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
 
     public string? FindSearchTerm(ResourceProjectSource source, string query)
     {
+        if (!LauncherLanguages.IsChineseCulture(CultureInfo.CurrentUICulture))
+            return null;
+
         var normalizedQuery = NormalizeChineseSearchText(query);
         if (normalizedQuery.Length == 0)
             return null;

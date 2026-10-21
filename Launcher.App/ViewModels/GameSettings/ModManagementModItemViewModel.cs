@@ -21,6 +21,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using Launcher.App.Resources;
 using Launcher.App.ViewModels.Resources;
 using Launcher.Domain.Models;
+using System.Globalization;
 using System.IO;
 
 namespace Launcher.App.ViewModels.GameSettings;
@@ -93,7 +94,8 @@ public sealed partial class ModManagementModItemViewModel : ObservableObject
         var originalTitle = string.IsNullOrWhiteSpace(mod.Name)
             ? GetDisplayFileNameWithoutModExtensions(mod.FileName)
             : mod.Name;
-        Title = string.IsNullOrWhiteSpace(mod.LocalizedName)
+        Title = !LauncherLanguages.IsChineseCulture(CultureInfo.CurrentUICulture)
+            || string.IsNullOrWhiteSpace(mod.LocalizedName)
             || string.Equals(mod.LocalizedName.Trim(), originalTitle.Trim(), StringComparison.OrdinalIgnoreCase)
                 ? originalTitle
                 : string.Format(Strings.Resources_ModLocalizedTitleFormat, mod.LocalizedName.Trim(), originalTitle);

@@ -17,6 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using System.Globalization;
+
 namespace Launcher.Domain.Models;
 
 public static class LauncherLanguages
@@ -25,6 +27,9 @@ public static class LauncherLanguages
     public const string TraditionalChinese = "zh-Hant";
     public const string Japanese = "ja-JP";
     public const string English = "en";
+
+    public static bool IsChineseCulture(CultureInfo culture) =>
+        string.Equals(culture.TwoLetterISOLanguageName, "zh", StringComparison.OrdinalIgnoreCase);
 
     public static string Normalize(string? language)
     {

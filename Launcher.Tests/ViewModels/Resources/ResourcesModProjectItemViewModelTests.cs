@@ -15,6 +15,7 @@ public sealed class ResourcesModProjectItemViewModelTests
     [Fact]
     public void TitleCombinesLocalizedAndOriginalTitles()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var viewModel = new ResourcesModProjectItemViewModel(new ResourceProject
         {
             Title = "Sodium",
@@ -38,6 +39,7 @@ public sealed class ResourcesModProjectItemViewModelTests
     [Fact]
     public void DependencyRequirementUsesLocalizedTitle()
     {
+        using var culture = new TestUiCultureScope("zh-Hans");
         var viewModel = new ResourcesModDependencyRequirementItemViewModel(
             new ResourceProjectDependency
             {
@@ -48,5 +50,18 @@ public sealed class ResourcesModProjectItemViewModelTests
             state: ResourceDependencyRequirementState.Missing);
 
         Assert.Equal("钠 | Sodium", viewModel.Title);
+    }
+
+    [Fact]
+    public void NonChineseLanguageIgnoresCachedLocalizedTitle()
+    {
+        using var culture = new TestUiCultureScope("en");
+        var viewModel = new ResourcesModProjectItemViewModel(new ResourceProject
+        {
+            Title = "Sodium",
+            LocalizedTitle = "钠"
+        });
+
+        Assert.Equal("Sodium", viewModel.Title);
     }
 }
