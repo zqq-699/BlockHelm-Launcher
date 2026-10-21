@@ -98,6 +98,16 @@ public sealed partial class ResourcesProjectListViewModel : ObservableObject, ID
 
     public bool ShowsSourceFilters => SourceOptions.Count > 1;
 
+    public int AppliedFilterCount =>
+        CountAppliedFilter(SelectedVersionOption, VersionOptions)
+        + CountAppliedFilter(SelectedLoaderOption, LoaderOptions)
+        + CountAppliedFilter(SelectedSourceOption, SourceOptions)
+        + CountAppliedFilter(SelectedTypeOption, TypeOptions);
+
+    public string FilterButtonText => AppliedFilterCount == 0
+        ? Strings.Resources_ModFilterButtonLabel
+        : string.Format(Strings.Resources_ModFilterButtonAppliedFormat, AppliedFilterCount);
+
     public string LoadingMessage => options.ProjectsLoadingText;
 
     public string EmptyMessage => options.ProjectsEmptyText;
@@ -297,19 +307,29 @@ public sealed partial class ResourcesProjectListViewModel : ObservableObject, ID
 
     partial void OnSelectedVersionOptionChanged(ResourcesFilterOptionItem? value)
     {
+        RaiseAppliedFilterStateChanged();
         if (!isApplyingVersionOptions && !isApplyingInstanceFilters)
             FilterChanged("version", value);
     }
 
     partial void OnSelectedLoaderOptionChanged(ResourcesFilterOptionItem? value)
     {
+        RaiseAppliedFilterStateChanged();
         if (!isApplyingInstanceFilters)
             FilterChanged("loader", value);
     }
 
-    partial void OnSelectedSourceOptionChanged(ResourcesFilterOptionItem? value) => FilterChanged("source", value);
+    partial void OnSelectedSourceOptionChanged(ResourcesFilterOptionItem? value)
+    {
+        RaiseAppliedFilterStateChanged();
+        FilterChanged("source", value);
+    }
 
-    partial void OnSelectedTypeOptionChanged(ResourcesFilterOptionItem? value) => FilterChanged("type", value);
+    partial void OnSelectedTypeOptionChanged(ResourcesFilterOptionItem? value)
+    {
+        RaiseAppliedFilterStateChanged();
+        FilterChanged("type", value);
+    }
 
     partial void OnIsFilterDialogOpenChanged(bool value)
     {
@@ -787,6 +807,22 @@ public sealed partial class ResourcesProjectListViewModel : ObservableObject, ID
     {
         if (!ReferenceEquals(pending, current))
             apply(pending);
+    }
+
+    private static int CountAppliedFilter(
+        ResourcesFilterOptionItem? selected,
+        IReadOnlyList<ResourcesFilterOptionItem> options)
+    {
+        if (selected is null || options.Count == 0)
+            return 0;
+
+        return string.Equals(selected.Id, options[0].Id, StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+    }
+
+    private void RaiseAppliedFilterStateChanged()
+    {
+        OnPropertyChanged(nameof(AppliedFilterCount));
+        OnPropertyChanged(nameof(FilterButtonText));
     }
 
     private static IReadOnlyList<string> ResolveMinecraftVersions(ResourcesFilterOptionItem? option)

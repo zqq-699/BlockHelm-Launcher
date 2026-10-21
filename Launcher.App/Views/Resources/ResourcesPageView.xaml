@@ -45,7 +45,7 @@
                     Padding="12,0"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Center"
-                    Content="{x:Static res:Strings.Resources_ModFilterButtonLabel}"
+                    Content="{Binding ProjectList.FilterButtonText}"
                     Command="{Binding ProjectList.OpenFilterDialogCommand}"
                     Style="{StaticResource LauncherDialogButtonStyle}" />
         </DataTemplate>

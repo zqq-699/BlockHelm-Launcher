@@ -103,6 +103,7 @@
   <data name="Resources_ModFilterTypeStorage" xml:space="preserve"><value>&#x5B58;&#x50A8;</value></data>
   <data name="Resources_ModFilterTypeLibrary" xml:space="preserve"><value>&#x5E93;/API</value></data>
   <data name="Resources_ModFilterButtonLabel" xml:space="preserve"><value>&#x7B5B;&#x9009;</value></data>
+  <data name="Resources_ModFilterButtonAppliedFormat" xml:space="preserve"><value>&#x7B5B;&#x9009; ({0})</value></data>
   <data name="Resources_ModSourceModrinth" xml:space="preserve"><value>Modrinth</value></data>
   <data name="Resources_ModSourceCurseForge" xml:space="preserve"><value>CurseForge</value></data>
   <data name="Resources_ModVersionsUnknown" xml:space="preserve"><value>未知版本</value></data>

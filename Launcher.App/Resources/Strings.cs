@@ -157,6 +157,7 @@ public static class Strings
     public static string Resources_ModFilterTypeStorage => Get(nameof(Resources_ModFilterTypeStorage));
     public static string Resources_ModFilterTypeLibrary => Get(nameof(Resources_ModFilterTypeLibrary));
     public static string Resources_ModFilterButtonLabel => Get(nameof(Resources_ModFilterButtonLabel));
+    public static string Resources_ModFilterButtonAppliedFormat => Get(nameof(Resources_ModFilterButtonAppliedFormat));
     public static string Resources_ModSourceModrinth => Get(nameof(Resources_ModSourceModrinth));
     public static string Resources_ModSourceCurseForge => Get(nameof(Resources_ModSourceCurseForge));
     public static string Resources_ModVersionsUnknown => Get(nameof(Resources_ModVersionsUnknown));

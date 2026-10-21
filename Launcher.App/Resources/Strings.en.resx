@@ -285,6 +285,9 @@
   <data name="Resources_ModFilterButtonLabel" xml:space="preserve">
     <value>Filters</value>
   </data>
+  <data name="Resources_ModFilterButtonAppliedFormat" xml:space="preserve">
+    <value>Filters ({0})</value>
+  </data>
   <data name="Resources_ModSourceModrinth" xml:space="preserve">
     <value>Modrinth</value>
   </data>

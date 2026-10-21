@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.App.ViewModels.Resources;
 using Launcher.Application.Services;
@@ -26,6 +27,48 @@ namespace Launcher.Tests.ViewModels.Resources;
 
 public sealed class ResourcesProjectListViewModelTests
 {
+    [Fact]
+    public void FilterButtonTextShowsOnlyAppliedFilterCount()
+    {
+        using var page = new ResourcesPageViewModel().ModPage;
+        var viewModel = page.ProjectList;
+        var changedProperties = new HashSet<string>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+                changedProperties.Add(args.PropertyName);
+        };
+
+        Assert.Equal(0, viewModel.AppliedFilterCount);
+        Assert.Equal(Strings.Resources_ModFilterButtonLabel, viewModel.FilterButtonText);
+
+        viewModel.SelectedLoaderOption = viewModel.LoaderOptions[1];
+
+        Assert.Equal(1, viewModel.AppliedFilterCount);
+        Assert.Equal(
+            string.Format(Strings.Resources_ModFilterButtonAppliedFormat, 1),
+            viewModel.FilterButtonText);
+        Assert.Contains(nameof(ResourcesProjectListViewModel.AppliedFilterCount), changedProperties);
+        Assert.Contains(nameof(ResourcesProjectListViewModel.FilterButtonText), changedProperties);
+
+        viewModel.SelectedSourceOption = viewModel.SourceOptions[1];
+
+        Assert.Equal(2, viewModel.AppliedFilterCount);
+        Assert.Equal(
+            string.Format(Strings.Resources_ModFilterButtonAppliedFormat, 2),
+            viewModel.FilterButtonText);
+    }
+
+    [Fact]
+    public void FixedSingleSourceIsNotCountedAsAppliedFilter()
+    {
+        using var page = new ResourcesPageViewModel().WorldsPage;
+
+        Assert.Single(page.ProjectList.SourceOptions);
+        Assert.Equal(0, page.ProjectList.AppliedFilterCount);
+        Assert.Equal(Strings.Resources_ModFilterButtonLabel, page.ProjectList.FilterButtonText);
+    }
+
     [Theory]
     [InlineData(ResourceProjectKind.Mod, "mods")]
     [InlineData(ResourceProjectKind.ResourcePack, "resource_packs")]
