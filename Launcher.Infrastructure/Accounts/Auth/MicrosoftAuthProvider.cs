@@ -46,10 +46,10 @@ internal sealed class MicrosoftAuthProvider
     internal static readonly TimeSpan DefaultInteractiveAuthenticationTimeout =
         TimeSpan.FromMinutes(10);
 
-    private static readonly HttpClient EntitlementHttpClient = new()
+    private static readonly HttpClient EntitlementHttpClient = LauncherHttpUserAgent.Apply(new HttpClient
     {
         Timeout = TimeSpan.FromSeconds(30)
-    };
+    });
 
     private readonly DpapiMicrosoftJsonStorage credentialStorage;
     private readonly MicrosoftClientIdProvider clientIdProvider;

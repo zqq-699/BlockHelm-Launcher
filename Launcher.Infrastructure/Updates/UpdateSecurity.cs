@@ -20,11 +20,12 @@ internal static class OfficialUpdateHttp
 {
     private const int MaxRedirects = 5;
 
-    public static HttpClient CreateClient(TimeSpan timeout) => new(
-        new HttpClientHandler { AllowAutoRedirect = false })
-    {
-        Timeout = timeout
-    };
+    public static HttpClient CreateClient(TimeSpan timeout) =>
+        LauncherHttpUserAgent.Apply(new HttpClient(
+            new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            Timeout = timeout
+        });
 
     public static async Task<HttpResponseMessage> SendAsync(
         HttpClient client,

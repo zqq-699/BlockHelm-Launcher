@@ -52,7 +52,7 @@ internal sealed class ManagedVersionRepairDownloadBatch
         IProgress<LauncherProgress>? progress,
         MinecraftDownloadOperationContext? operationContext = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger;
         this.sourcePreference = sourcePreference;

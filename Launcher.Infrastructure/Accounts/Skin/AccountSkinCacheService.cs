@@ -60,7 +60,7 @@ internal sealed partial class AccountSkinCacheService
         string skinDirectory,
         IUserFileDeletionService userFileDeletionService)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.skinDirectory = skinDirectory;
         this.userFileDeletionService = userFileDeletionService;
         Directory.CreateDirectory(this.skinDirectory);

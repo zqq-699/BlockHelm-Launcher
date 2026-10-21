@@ -61,7 +61,8 @@ public sealed class CurseForgeApiClient
         DownloadHostConcurrencyController hostConcurrencyController,
         Func<TimeSpan, CancellationToken, Task>? metadataDelayAsync = null)
     {
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.limiter = limiter ?? ImportConcurrencyLimiter.Shared;
         this.logger = logger ?? NullLogger<CurseForgeApiClient>.Instance;
         this.hostConcurrencyController = hostConcurrencyController;

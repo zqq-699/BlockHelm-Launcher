@@ -39,11 +39,11 @@ internal sealed class MultiplayerLobbyService : IMultiplayerLobbyService
         ILogger<MultiplayerLobbyService>? logger = null)
         : this(
             provisioningService,
-            new HttpClient(new SocketsHttpHandler
+            LauncherHttpUserAgent.Apply(new HttpClient(new SocketsHttpHandler
             {
                 AllowAutoRedirect = false,
                 UseProxy = false
-            }),
+            })),
             logger)
     {
     }
@@ -54,7 +54,7 @@ internal sealed class MultiplayerLobbyService : IMultiplayerLobbyService
         ILogger<MultiplayerLobbyService>? logger = null)
     {
         this.provisioningService = provisioningService;
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.logger = logger ?? NullLogger<MultiplayerLobbyService>.Instance;
     }
 

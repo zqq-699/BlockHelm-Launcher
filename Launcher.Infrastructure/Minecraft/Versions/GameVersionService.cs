@@ -47,7 +47,8 @@ public sealed class GameVersionService : IGameVersionService
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         ILogger<GameVersionService>? logger = null)
     {
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger<GameVersionService>.Instance;
     }

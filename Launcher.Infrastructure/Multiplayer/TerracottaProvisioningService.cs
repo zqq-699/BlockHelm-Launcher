@@ -70,7 +70,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         this.architecture = architecture;
         this.logger = logger ?? NullLogger<TerracottaProvisioningService>.Instance;
         transport = new MinecraftDownloadTransport(
-            httpClient,
+            LauncherHttpUserAgent.Apply(httpClient),
             new DownloadRetryOptions
             {
                 MaxRedirects = 10,
@@ -215,10 +215,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
     {
         try
         {
-            await using var result = await transport.SendAsync(
-                url,
-                cancellationToken,
-                request => request.Headers.UserAgent.ParseAdd("BlockHelm-Launcher/1.0"))
+            await using var result = await transport.SendAsync(url, cancellationToken)
                 .ConfigureAwait(false);
             using var response = result.Response;
             response.EnsureSuccessStatusCode();

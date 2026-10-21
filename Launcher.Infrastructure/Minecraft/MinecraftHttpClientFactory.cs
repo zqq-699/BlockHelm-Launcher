@@ -25,10 +25,10 @@ internal static class MinecraftHttpClientFactory
 {
     public static HttpClient CreateTransportClient()
     {
-        return new HttpClient(CreateTransportHandler())
+        return LauncherHttpUserAgent.Apply(new HttpClient(CreateTransportHandler())
         {
             Timeout = Timeout.InfiniteTimeSpan
-        };
+        });
     }
 
     public static HttpMessageHandler CreateTransportHandler()

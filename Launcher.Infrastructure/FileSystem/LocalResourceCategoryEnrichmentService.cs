@@ -45,7 +45,8 @@ public sealed class LocalResourceCategoryEnrichmentService : ILocalResourceCateg
         LocalFileFingerprintService? fingerprintService = null)
     {
         var resolvedPathProvider = pathProvider ?? new LauncherPathProvider();
-        var resolvedHttpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        var resolvedHttpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.logger = logger ?? NullLogger<LocalResourceCategoryEnrichmentService>.Instance;
         this.thumbnailService = thumbnailService;
         this.fingerprintService = fingerprintService ?? new LocalFileFingerprintService();

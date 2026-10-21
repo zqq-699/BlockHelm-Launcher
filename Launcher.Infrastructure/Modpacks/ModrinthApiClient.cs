@@ -54,7 +54,8 @@ public sealed class ModrinthApiClient
         ILogger<ModrinthApiClient>? logger,
         DownloadHostConcurrencyController hostConcurrencyController)
     {
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.limiter = limiter ?? ImportConcurrencyLimiter.Shared;
         this.logger = logger ?? NullLogger<ModrinthApiClient>.Instance;
         this.hostConcurrencyController = hostConcurrencyController;

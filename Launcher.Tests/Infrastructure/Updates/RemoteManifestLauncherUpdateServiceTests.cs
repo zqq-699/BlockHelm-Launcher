@@ -1,6 +1,8 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using Launcher.Domain.Models;
+using Launcher.Infrastructure;
 using Launcher.Infrastructure.Updates;
 
 namespace Launcher.Tests.Infrastructure.Updates;
@@ -23,6 +25,24 @@ public sealed class RemoteManifestLauncherUpdateServiceTests
         Assert.True(result.Update?.CanAutoInstall);
         Assert.Equal(12, result.Update?.SizeBytes);
         Assert.Equal(Sha256, result.Update?.Sha256);
+    }
+
+    [Fact]
+    public async Task ManifestRequestsUseUnifiedUserAgent()
+    {
+        var handler = new ResponseHandler([(GiteeManifest, HttpStatusCode.OK, CreateManifest())]);
+        var httpClient = new HttpClient(handler);
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Legacy/1.0");
+        var service = new RemoteManifestLauncherUpdateService(
+            httpClient,
+            logger: null,
+            [DefaultSources[0]]);
+
+        await service.CheckForUpdatesAsync("1.0.0", LauncherUpdateChannel.Release);
+
+        var expected = LauncherHttpUserAgent.BuildValue(Assembly.GetEntryAssembly());
+        Assert.NotEmpty(handler.UserAgents);
+        Assert.All(handler.UserAgents, values => Assert.Equal([expected], values));
     }
 
     [Theory]
@@ -81,6 +101,7 @@ public sealed class RemoteManifestLauncherUpdateServiceTests
     private sealed class ResponseHandler : HttpMessageHandler
     {
         private readonly Dictionary<string, (HttpStatusCode Status, string Content)> responses;
+        public List<IReadOnlyList<string>> UserAgents { get; } = [];
 
         public ResponseHandler(IEnumerable<(string Url, HttpStatusCode Status, string Content)> values) =>
             responses = values.ToDictionary(
@@ -92,6 +113,7 @@ public sealed class RemoteManifestLauncherUpdateServiceTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            UserAgents.Add(request.Headers.UserAgent.Select(value => value.ToString()).ToArray());
             var value = responses.TryGetValue(request.RequestUri!.AbsoluteUri, out var configured)
                 ? configured
                 : (Status: HttpStatusCode.NotFound, Content: string.Empty);

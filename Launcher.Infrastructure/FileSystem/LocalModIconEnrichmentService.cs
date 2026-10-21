@@ -65,7 +65,8 @@ public sealed partial class LocalModIconEnrichmentService : ILocalModIconEnrichm
         LocalFileFingerprintService? fingerprintService = null)
     {
         this.pathProvider = pathProvider ?? new LauncherPathProvider();
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.logger = logger ?? NullLogger<LocalModIconEnrichmentService>.Instance;
         thumbnailDownloader = new RemoteThumbnailDownloadClient(
             this.httpClient,

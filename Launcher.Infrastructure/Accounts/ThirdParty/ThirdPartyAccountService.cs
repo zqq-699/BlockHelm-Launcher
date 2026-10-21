@@ -34,7 +34,10 @@ internal sealed partial class ThirdPartyAccountService : IThirdPartyAccountServi
         LauncherPathProvider pathProvider,
         ILogger<ThirdPartyAccountService>? logger = null)
     {
-        httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        httpClient = LauncherHttpUserAgent.Apply(new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(15)
+        });
         this.tokenStore = tokenStore;
         this.logger = logger ?? NullLogger<ThirdPartyAccountService>.Instance;
         var thirdPartyDataDirectory = Path.Combine(pathProvider.DefaultAccountDataDirectory, "third-party");
@@ -52,7 +55,7 @@ internal sealed partial class ThirdPartyAccountService : IThirdPartyAccountServi
         IThirdPartyAccountAppearanceService? appearanceService = null,
         ILogger<ThirdPartyAccountService>? logger = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.tokenStore = tokenStore;
         this.appearanceService = appearanceService;
         this.logger = logger ?? NullLogger<ThirdPartyAccountService>.Instance;

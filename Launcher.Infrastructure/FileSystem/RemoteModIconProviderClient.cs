@@ -48,7 +48,7 @@ internal sealed class RemoteModIconProviderClient
         ICurseForgeApiKeyResolver curseForgeApiKeyResolver,
         ILogger logger)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.curseForgeApiKeyResolver = curseForgeApiKeyResolver;
         this.logger = logger;
     }

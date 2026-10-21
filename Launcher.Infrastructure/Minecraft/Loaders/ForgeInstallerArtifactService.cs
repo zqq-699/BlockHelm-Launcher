@@ -55,7 +55,7 @@ internal sealed partial class LoaderInstallerArtifactService
         ILogger? logger = null,
         string? tempRootDirectory = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;
     }

@@ -38,7 +38,7 @@ internal sealed class MinecraftProfileClient
 
     public MinecraftProfileClient(HttpClient httpClient)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
     }
 
     public async Task<MinecraftProfileResponse> GetProfileAsync(

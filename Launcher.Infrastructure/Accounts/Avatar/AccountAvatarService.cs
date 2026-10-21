@@ -53,7 +53,7 @@ internal sealed class AccountAvatarService
 
     internal AccountAvatarService(HttpClient httpClient, string avatarDirectory)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.avatarDirectory = avatarDirectory;
         Directory.CreateDirectory(this.avatarDirectory);
     }

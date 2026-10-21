@@ -35,7 +35,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         IDownloadSpeedLimitState? downloadSpeedLimitState,
         ILogger? logger = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;
     }

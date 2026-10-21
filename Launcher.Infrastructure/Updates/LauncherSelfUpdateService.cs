@@ -11,7 +11,6 @@ namespace Launcher.Infrastructure.Updates;
 public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
 {
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromMinutes(5);
-    private const string UserAgent = "BlockHelm-Launcher";
     private readonly HttpClient httpClient;
     private readonly ILogger<LauncherSelfUpdateService>? logger;
     private readonly string baseDirectory;
@@ -44,15 +43,14 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
         Func<ProcessStartInfo, bool> startProcess,
         LauncherUpdateCacheCleaner? cacheCleaner = null)
     {
-        this.httpClient = httpClient ?? OfficialUpdateHttp.CreateClient(DefaultRequestTimeout);
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? OfficialUpdateHttp.CreateClient(DefaultRequestTimeout));
         this.logger = logger;
         this.baseDirectory = baseDirectory;
         this.currentExecutablePath = currentExecutablePath;
         this.currentProcessId = currentProcessId;
         this.startProcess = startProcess;
         this.cacheCleaner = cacheCleaner ?? new LauncherUpdateCacheCleaner(baseDirectory);
-        if (this.httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
-            this.httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
     }
 
     public async Task<LauncherSelfUpdateStartResult> StartUpdateAsync(

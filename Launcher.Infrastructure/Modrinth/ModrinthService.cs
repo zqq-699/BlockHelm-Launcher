@@ -71,14 +71,12 @@ public sealed class ModrinthService : IModrinthService
         IImportConcurrencyLimiter? limiter,
         DownloadRetryOptions? retryOptions = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.logger = logger ?? NullLogger<ModrinthService>.Instance;
         this.settingsService = settingsService;
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.limiter = limiter ?? ImportConcurrencyLimiter.Shared;
         this.retryOptions = retryOptions;
-        if (!this.httpClient.DefaultRequestHeaders.UserAgent.Any())
-            this.httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BHL/0.1 (BlockHelm-Launcher)");
     }
 
     public async Task<IReadOnlyList<ModrinthProject>> SearchModsAsync(string query, string minecraftVersion, LoaderKind loader, CancellationToken cancellationToken = default)

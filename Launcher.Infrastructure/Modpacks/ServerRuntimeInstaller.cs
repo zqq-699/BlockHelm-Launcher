@@ -58,7 +58,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         ILogger<ServerRuntimeInstaller>? logger = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.settingsService = settingsService;
         this.javaRuntimeResolver = javaRuntimeResolver;
         this.forgeInstallerRunner = forgeInstallerRunner ?? new ForgeInstallerRunner();

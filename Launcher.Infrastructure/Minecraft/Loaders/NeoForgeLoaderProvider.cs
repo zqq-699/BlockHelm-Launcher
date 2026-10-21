@@ -71,7 +71,8 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
         ILogger? logger = null,
         ILoaderInstallerJavaRuntimeResolver? javaRuntimeResolver = null)
     {
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.installerRunner = installerRunner ?? new ForgeInstallerRunner();
         this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller();
         this.javaRuntimeResolver = javaRuntimeResolver;

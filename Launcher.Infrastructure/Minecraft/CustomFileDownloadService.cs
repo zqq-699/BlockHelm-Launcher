@@ -33,7 +33,8 @@ public sealed class CustomFileDownloadService : ICustomFileDownloadService, IDis
         this.limiter = limiter;
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger<CustomFileDownloadService>.Instance;
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         ownsHttpClient = httpClient is null;
     }
 

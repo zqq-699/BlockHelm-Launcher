@@ -40,7 +40,7 @@ internal sealed class MinecraftDownloadTransport
         Func<Uri, DownloadHostConcurrencyController.DownloadAdmissionLease?>?
             tryAcquireOpportunisticAdmission = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.retryOptions = retryOptions;
         this.acquireAdmissionAsync = acquireAdmissionAsync;
         this.tryAcquireOpportunisticAdmission = tryAcquireOpportunisticAdmission;

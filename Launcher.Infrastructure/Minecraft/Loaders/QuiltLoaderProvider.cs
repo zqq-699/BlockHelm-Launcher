@@ -40,7 +40,8 @@ public sealed class QuiltLoaderProvider : ILoaderProvider, ISeparatedInstallPath
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         ILogger<QuiltLoaderProvider>? logger = null)
     {
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger<QuiltLoaderProvider>.Instance;
     }

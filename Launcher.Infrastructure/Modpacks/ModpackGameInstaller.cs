@@ -68,7 +68,8 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
     {
         this.providers = providers.ToDictionary(provider => provider.Kind);
         this.finalVersionInstaller = finalVersionInstaller;
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;
         this.sandboxCleanupService = sandboxCleanupService ?? new ModpackSandboxCleanupService(

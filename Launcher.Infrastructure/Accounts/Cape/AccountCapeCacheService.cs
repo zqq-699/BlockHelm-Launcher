@@ -39,7 +39,7 @@ internal sealed class AccountCapeCacheService
 
     internal AccountCapeCacheService(HttpClient httpClient, string capeDirectory)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.capeDirectory = capeDirectory;
         Directory.CreateDirectory(this.capeDirectory);
     }

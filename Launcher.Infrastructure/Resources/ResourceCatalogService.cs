@@ -53,16 +53,14 @@ public sealed class ResourceCatalogService :
         IMcresBhlApiKeyResolver? mcresBhlApiKeyResolver = null)
     {
         var resolvedPathProvider = pathProvider ?? new LauncherPathProvider();
-        var resolvedHttpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        var resolvedHttpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.logger = logger ?? NullLogger<ResourceCatalogService>.Instance;
         var keyResolver = curseForgeApiKeyResolver
             ?? new CurseForgeApiKeyResolver(resolvedPathProvider, settingsService);
         var resolvedLocalSaveService = localSaveService ?? new LocalSaveService(resolvedPathProvider);
         var resolvedMcresBhlApiKeyResolver = mcresBhlApiKeyResolver
             ?? new McresBhlApiKeyResolver(resolvedPathProvider, settingsService);
-
-        if (!resolvedHttpClient.DefaultRequestHeaders.UserAgent.Any())
-            resolvedHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BHL/0.1 (BlockHelm-Launcher)");
 
         var clients = new IResourceProviderClient[]
         {

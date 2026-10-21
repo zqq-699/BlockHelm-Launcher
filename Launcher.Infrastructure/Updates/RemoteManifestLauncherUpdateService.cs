@@ -184,8 +184,7 @@ public sealed class RemoteManifestLauncherUpdateService : ILauncherUpdateService
 
     private static void EnsureDefaultHeaders(HttpClient client)
     {
-        if (client.DefaultRequestHeaders.UserAgent.Count == 0)
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(LauncherProjectLinks.GitHubUserAgent);
+        LauncherHttpUserAgent.Apply(client);
         if (!client.DefaultRequestHeaders.Accept.Any(header => header.MediaType == "application/json"))
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }

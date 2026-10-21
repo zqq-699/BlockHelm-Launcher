@@ -50,7 +50,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         ILogger<VanillaLoaderProvider>? logger = null)
     {
-        this.httpClient = httpClient ?? MinecraftHttpClientFactory.CreateTransportClient();
+        this.httpClient = LauncherHttpUserAgent.Apply(
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger<VanillaLoaderProvider>.Instance;
     }
@@ -336,7 +337,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         // 统一注入镜像路由、限速和运行库下载器，保证 Vanilla/Fabric 使用相同下载策略。
         var parameters = MinecraftLauncherParameters.CreateDefault(path);
         var bandwidthLimiter = DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState);
-        parameters.HttpClient = new HttpClient(new DownloadSourceRoutingHttpMessageHandler(
+        parameters.HttpClient = LauncherHttpUserAgent.Apply(new HttpClient(new DownloadSourceRoutingHttpMessageHandler(
             downloadSourcePreference,
             DownloadConcurrencyCategory.Metadata,
             MinecraftHttpClientFactory.CreateTransportHandler(),
@@ -344,7 +345,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
             bandwidthLimiter))
         {
             Timeout = Timeout.InfiniteTimeSpan
-        };
+        });
         parameters.VersionLoader = new InstanceAuthoritativeVersionLoader(
             path,
             (versionName, cancellationToken) => VanillaVersionMetadataClient.DownloadVersionJsonAsync(

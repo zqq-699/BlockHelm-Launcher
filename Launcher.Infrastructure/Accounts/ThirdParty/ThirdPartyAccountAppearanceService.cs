@@ -54,7 +54,7 @@ internal sealed class ThirdPartyAccountAppearanceService : IThirdPartyAccountApp
         AccountCapeCacheService capeCacheService,
         ILogger? logger = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.avatarService = avatarService;
         this.skinCacheService = skinCacheService;
         this.capeCacheService = capeCacheService;

@@ -40,7 +40,7 @@ internal sealed class ModpackFileDownloader
         IImportConcurrencyLimiter limiter,
         ILogger logger)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.limiter = limiter;
         this.logger = logger;

@@ -45,7 +45,7 @@ internal sealed class ResourceProjectStorage
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         IImportConcurrencyLimiter? limiter = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.localSaveService = localSaveService;
         this.logger = logger;
         this.settingsService = settingsService;

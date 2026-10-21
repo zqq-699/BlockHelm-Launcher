@@ -51,10 +51,10 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
     {
         this.preference = preference;
         this.logger = logger ?? NullLogger.Instance;
-        transportClient = new HttpClient(innerHandler, disposeHandler: false)
+        transportClient = LauncherHttpUserAgent.Apply(new HttpClient(innerHandler, disposeHandler: false)
         {
             Timeout = Timeout.InfiniteTimeSpan
-        };
+        });
         executor = new MinecraftDownloadRequestExecutor(
             transportClient,
             logger ?? NullLogger.Instance,

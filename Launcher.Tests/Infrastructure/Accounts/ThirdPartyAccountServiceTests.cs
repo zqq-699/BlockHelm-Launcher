@@ -5,9 +5,11 @@
  */
 
 using System.Net;
+using System.Reflection;
 using System.Text;
 using Launcher.Application.Accounts;
 using Launcher.Domain.Models;
+using Launcher.Infrastructure;
 using Launcher.Infrastructure.Accounts.ThirdParty;
 
 namespace Launcher.Tests.Infrastructure.Accounts;
@@ -17,20 +19,29 @@ public sealed class ThirdPartyAccountServiceTests
     [Fact]
     public async Task EmailLoginReturnsAllProfilesWithoutUsernameFeature()
     {
-        var handler = new StubHttpMessageHandler(request => Task.FromResult(
-            request.Method == HttpMethod.Get
+        var sentUserAgents = new List<IReadOnlyList<string>>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            sentUserAgents.Add(request.Headers.UserAgent.Select(value => value.ToString()).ToArray());
+            return Task.FromResult(request.Method == HttpMethod.Get
                 ? Json(HttpStatusCode.OK, "{\"meta\":{}}")
                 : Json(HttpStatusCode.OK, """
                     {"accessToken":"access","clientToken":"client","availableProfiles":[
                       {"id":"00112233445566778899aabbccddeeff","name":"First"},
                       {"id":"11112222333344445555666677778888","name":"Second"}]}
-                    """)));
-        var service = new ThirdPartyAccountService(new HttpClient(handler), new RecordingTokenStore());
+                    """));
+        });
+        var httpClient = new HttpClient(handler);
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Legacy/1.0");
+        var service = new ThirdPartyAccountService(httpClient, new RecordingTokenStore());
 
         var session = await service.BeginEmailLoginAsync("https://example.test/api/yggdrasil", "user@example.test", "password");
 
         Assert.Equal(["First", "Second"], session.Profiles.Select(profile => profile.Name));
         Assert.All(session.Profiles, profile => Assert.Equal(LauncherAccount.DefaultSteveAvatarUrl, profile.AvatarSource));
+        var expected = LauncherHttpUserAgent.BuildValue(Assembly.GetEntryAssembly());
+        Assert.NotEmpty(sentUserAgents);
+        Assert.All(sentUserAgents, values => Assert.Equal([expected], values));
     }
 
     [Fact]

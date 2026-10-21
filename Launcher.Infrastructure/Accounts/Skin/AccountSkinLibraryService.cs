@@ -28,7 +28,7 @@ namespace Launcher.Infrastructure.Accounts;
 
 public sealed class AccountSkinLibraryService : IAccountSkinLibraryService
 {
-    private static readonly HttpClient HttpClient = new();
+    private static readonly HttpClient HttpClient = LauncherHttpUserAgent.Apply(new HttpClient());
     private readonly AccountSkinCacheService skinCacheService;
     private readonly AccountAvatarService avatarService;
     private readonly object sharedLibraryGate = new();
@@ -56,6 +56,7 @@ public sealed class AccountSkinLibraryService : IAccountSkinLibraryService
         LauncherPathProvider pathProvider,
         IUserFileDeletionService userFileDeletionService)
     {
+        LauncherHttpUserAgent.Apply(httpClient);
         skinCacheService = new AccountSkinCacheService(
             httpClient,
             Path.Combine(pathProvider.DefaultAccountDataDirectory, "microsoft", "skins"),

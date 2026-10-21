@@ -34,7 +34,10 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
 {
     // 认证 token 只交给底层客户端和缓存，不写入普通日志或暴露给 ViewModel。
     // 头像、皮肤、披风和资料请求都很小，超时必须有界；默认的 100 秒会让直连不通的网络长时间挂起。
-    private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private static readonly HttpClient HttpClient = LauncherHttpUserAgent.Apply(new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(15)
+    });
 
     private readonly MicrosoftAuthProvider authProvider;
     private readonly AccountAvatarService avatarService;

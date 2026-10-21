@@ -25,7 +25,10 @@ internal sealed class ThirdPartyLaunchSessionService : IThirdPartyLaunchSessionS
     public ThirdPartyLaunchSessionService(
         IThirdPartyAccountTokenStore tokenStore,
         ILogger<ThirdPartyLaunchSessionService>? logger = null)
-        : this(new HttpClient { Timeout = TimeSpan.FromSeconds(15) }, tokenStore, logger)
+        : this(
+            LauncherHttpUserAgent.Apply(new HttpClient { Timeout = TimeSpan.FromSeconds(15) }),
+            tokenStore,
+            logger)
     {
     }
 
@@ -34,7 +37,7 @@ internal sealed class ThirdPartyLaunchSessionService : IThirdPartyLaunchSessionS
         IThirdPartyAccountTokenStore tokenStore,
         ILogger<ThirdPartyLaunchSessionService>? logger = null)
     {
-        this.httpClient = httpClient;
+        this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.tokenStore = tokenStore;
         this.logger = logger ?? NullLogger<ThirdPartyLaunchSessionService>.Instance;
     }
