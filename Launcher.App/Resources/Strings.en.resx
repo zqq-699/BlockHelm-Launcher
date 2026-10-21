@@ -2582,13 +2582,13 @@ Longer content wraps automatically.</value>
     <value>Crafting Table</value>
   </data>
   <data name="GameSettings_IconStoneBlock" xml:space="preserve">
-    <value>Stone Block</value>
+    <value>Cobblestone</value>
   </data>
   <data name="GameSettings_IconFabric" xml:space="preserve">
     <value>Fabric</value>
   </data>
   <data name="GameSettings_IconAnvil" xml:space="preserve">
-    <value>Anvil</value>
+    <value>Forge</value>
   </data>
   <data name="GameSettings_IconNeoForge" xml:space="preserve">
     <value>NeoForge</value>
@@ -2597,7 +2597,7 @@ Longer content wraps automatically.</value>
     <value>Quilt</value>
   </data>
   <data name="GameSettings_IconDiamondBlock" xml:space="preserve">
-    <value>Diamond Block</value>
+    <value>Block of Diamond</value>
   </data>
   <data name="GameSettings_IconBeacon" xml:space="preserve">
     <value>Beacon</value>

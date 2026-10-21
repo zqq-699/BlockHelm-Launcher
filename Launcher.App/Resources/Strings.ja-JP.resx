@@ -2576,19 +2576,19 @@
     <value>草ブロック</value>
   </data>
   <data name="GameSettings_IconDirtBlock" xml:space="preserve">
-    <value>土</value>
+    <value>土ブロック</value>
   </data>
   <data name="GameSettings_IconCraftingTable" xml:space="preserve">
     <value>作業台</value>
   </data>
   <data name="GameSettings_IconStoneBlock" xml:space="preserve">
-    <value>石</value>
+    <value>丸石</value>
   </data>
   <data name="GameSettings_IconFabric" xml:space="preserve">
     <value>Fabric</value>
   </data>
   <data name="GameSettings_IconAnvil" xml:space="preserve">
-    <value>金床</value>
+    <value>Forge</value>
   </data>
   <data name="GameSettings_IconNeoForge" xml:space="preserve">
     <value>NeoForge</value>

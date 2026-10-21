@@ -879,14 +879,14 @@
   <data name="GameSettings_InstanceIconLabel" xml:space="preserve"><value>版本图标</value></data>
   <data name="GameSettings_InstanceNameValidation" xml:space="preserve"><value>名称不能为空，且不能包含文件名非法字符。</value></data>
   <data name="GameSettings_IconGrassBlock" xml:space="preserve"><value>草方块</value></data>
-  <data name="GameSettings_IconDirtBlock" xml:space="preserve"><value>泥土</value></data>
+  <data name="GameSettings_IconDirtBlock" xml:space="preserve"><value>泥土块</value></data>
   <data name="GameSettings_IconCraftingTable" xml:space="preserve"><value>工作台</value></data>
-  <data name="GameSettings_IconStoneBlock" xml:space="preserve"><value>石头</value></data>
+  <data name="GameSettings_IconStoneBlock" xml:space="preserve"><value>原石</value></data>
   <data name="GameSettings_IconFabric" xml:space="preserve"><value>Fabric</value></data>
-  <data name="GameSettings_IconAnvil" xml:space="preserve"><value>铁砧</value></data>
+  <data name="GameSettings_IconAnvil" xml:space="preserve"><value>Forge</value></data>
   <data name="GameSettings_IconNeoForge" xml:space="preserve"><value>NeoForge</value></data>
   <data name="GameSettings_IconQuilt" xml:space="preserve"><value>Quilt</value></data>
-  <data name="GameSettings_IconDiamondBlock" xml:space="preserve"><value>钻石方块</value></data>
+  <data name="GameSettings_IconDiamondBlock" xml:space="preserve"><value>钻石块</value></data>
   <data name="GameSettings_IconBeacon" xml:space="preserve"><value>信标</value></data>
   <data name="GameSettings_IconFurnace" xml:space="preserve"><value>熔炉</value></data>
   <data name="GameSettings_IconTnt" xml:space="preserve"><value>TNT</value></data>

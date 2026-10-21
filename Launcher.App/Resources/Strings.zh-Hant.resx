@@ -2573,22 +2573,22 @@
     <value>名稱不能為空，且不能包含檔名非法字元。</value>
   </data>
   <data name="GameSettings_IconGrassBlock" xml:space="preserve">
-    <value>草方塊</value>
+    <value>草地</value>
   </data>
   <data name="GameSettings_IconDirtBlock" xml:space="preserve">
-    <value>泥土</value>
+    <value>泥土方塊</value>
   </data>
   <data name="GameSettings_IconCraftingTable" xml:space="preserve">
     <value>工作台</value>
   </data>
   <data name="GameSettings_IconStoneBlock" xml:space="preserve">
-    <value>石頭</value>
+    <value>鵝卵石</value>
   </data>
   <data name="GameSettings_IconFabric" xml:space="preserve">
     <value>Fabric</value>
   </data>
   <data name="GameSettings_IconAnvil" xml:space="preserve">
-    <value>鐵砧</value>
+    <value>Forge</value>
   </data>
   <data name="GameSettings_IconNeoForge" xml:space="preserve">
     <value>NeoForge</value>
@@ -2600,7 +2600,7 @@
     <value>鑽石方塊</value>
   </data>
   <data name="GameSettings_IconBeacon" xml:space="preserve">
-    <value>信標</value>
+    <value>烽火台</value>
   </data>
   <data name="GameSettings_IconFurnace" xml:space="preserve">
     <value>熔爐</value>
