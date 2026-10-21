@@ -448,6 +448,7 @@
                                                                  Subtitle="{Binding Subtitle}"
                                                                  TrailingText="{Binding UpdatedDateText}"
                                                                  IconSource="{Binding IconSource}"
+                                                                 IconScalingMode="NearestNeighbor"
                                                                  IsSelected="{Binding IsSelected}"
                                                                  IsFirstVisible="{Binding Tag.IsFirstVisible, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                                                                  IsLastVisible="{Binding Tag.IsLastVisible, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"

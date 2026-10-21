@@ -123,7 +123,7 @@ public partial class ListPageItemButton : UserControl
         DependencyProperty.Register(nameof(IconMargin), typeof(Thickness), typeof(ListPageItemButton), new PropertyMetadata(new Thickness(10, 0, 0, 0)));
 
     public static readonly DependencyProperty IconScalingModeProperty =
-        DependencyProperty.Register(nameof(IconScalingMode), typeof(BitmapScalingMode), typeof(ListPageItemButton), new PropertyMetadata(BitmapScalingMode.NearestNeighbor));
+        DependencyProperty.Register(nameof(IconScalingMode), typeof(BitmapScalingMode), typeof(ListPageItemButton), new PropertyMetadata(BitmapScalingMode.HighQuality));
 
     public static readonly DependencyProperty TextMarginProperty =
         DependencyProperty.Register(nameof(TextMargin), typeof(Thickness), typeof(ListPageItemButton), new PropertyMetadata(new Thickness(5, 0, 0, 0)));
