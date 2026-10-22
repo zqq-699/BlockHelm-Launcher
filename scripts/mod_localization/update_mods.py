@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import json
 import os
 import random
@@ -25,7 +26,9 @@ CATALOG = ROOT / "Launcher.Infrastructure/Resources/ResourceLocalization/Data/mo
 STATE = Path(__file__).with_name("crawl-state.json")
 BASE_URL = "https://www.mcmod.cn"
 CLASS_PATH = re.compile(r"^/class/(\d+)\.html$")
-SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+CURSEFORGE_HOSTS = frozenset(("curseforge.com", "www.curseforge.com", "legacy.curseforge.com"))
+MODRINTH_HOSTS = frozenset(("modrinth.com", "www.modrinth.com"))
 USER_AGENT = "BlockHelm-ModLocalization/1.0 (+https://github.com/zqq-699/BlockHelm-Launcher)"
 MAX_HTML_BYTES = 4_000_000
 CATALOG_FIELDS = ("mcmodId", "chineseName", "englishName", "abbreviation",
@@ -85,9 +88,18 @@ def load_catalog(path: Path) -> dict[int, dict]:
             if not line.strip():
                 continue
             record = json.loads(line)
+            if not isinstance(record, dict):
+                raise ValueError(f"Invalid catalog record at line {number}")
             mod_id = record.get("mcmodId")
             if type(mod_id) is not int or mod_id <= 0 or mod_id in catalog:
                 raise ValueError(f"Invalid or duplicate mcmodId at line {number}")
+            if (not isinstance(record.get("chineseName"), str) or not record["chineseName"].strip()
+                    or any(record.get(field) is not None and not isinstance(record[field], str)
+                           for field in ("englishName", "abbreviation"))
+                    or any(not isinstance(record.get(field), list)
+                           or any(not isinstance(value, str) for value in record[field])
+                           for field in ("curseForgeSlugs", "modrinthSlugs", "modIds"))):
+                raise ValueError(f"Invalid catalog fields at line {number}")
             catalog[mod_id] = record
     return catalog
 
@@ -118,7 +130,8 @@ class McmodHtmlParser(HTMLParser):
         self.stack: list[tuple[str, set[str]]] = []
         self.captures: list[tuple[str, int, list[str]]] = []
         self.names: dict[str, str] = {}
-        self.links: list[str] = []
+        self.links: list[tuple[str, str]] = []
+        self.link_frame_seen = False
         self.list_ids: list[int] = []
 
     def has_class(self, name: str) -> bool:
@@ -130,6 +143,8 @@ class McmodHtmlParser(HTMLParser):
         in_title = self.has_class("class-title")
         in_links = self.has_class("common-link-frame")
         in_list = self.has_class("modlist-block")
+        if "common-link-frame" in classes:
+            self.link_frame_seen = True
         self.stack.append((tag, classes))
         if in_title and (tag in ("h3", "h4") or "short-name" in classes):
             field = "abbr" if "short-name" in classes else tag
@@ -137,9 +152,13 @@ class McmodHtmlParser(HTMLParser):
         if tag == "a":
             href = attributes.get("href") or ""
             if in_links:
-                self.links.append(href)
+                hint = (attributes.get("data-original-title") or attributes.get("title") or "").strip().lower()
+                self.links.append((href, hint))
             if in_list:
-                match = CLASS_PATH.fullmatch(parse.urlsplit(href).path)
+                try:
+                    match = CLASS_PATH.fullmatch(parse.urlsplit(href).path)
+                except ValueError:
+                    match = None
                 if match:
                     self.list_ids.append(int(match.group(1)))
 
@@ -168,40 +187,56 @@ class McmodHtmlParser(HTMLParser):
 
 
 def decode_target(href: str) -> str:
-    path = parse.urlsplit(href).path
-    if "/target/" not in path:
+    url = parse.urlsplit(href)
+    if not url.path.startswith("/target/") or url.hostname not in (None, "mcmod.cn", "www.mcmod.cn"):
         return href
-    encoded = path.split("/target/", 1)[1]
+    encoded = url.path[len("/target/"):]
     try:
-        decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
         return decoded.decode("utf-8")
-    except (ValueError, UnicodeDecodeError):
-        return ""
+    except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
+        raise ParseFailure("Malformed target link") from exc
 
 
-def platform_slugs(links: list[str]) -> tuple[list[str], list[str]]:
+def platform_slugs(links: list[tuple[str, str]]) -> tuple[list[str], list[str]]:
     curseforge: set[str] = set()
     modrinth: set[str] = set()
-    for href in links:
-        url = parse.urlsplit(decode_target(href))
-        if url.scheme != "https":
-            continue
-        host = (url.hostname or "").lower()
+    for href, hint in links:
+        try:
+            url = parse.urlsplit(decode_target(href))
+            host = (url.hostname or "").lower()
+        except ValueError as exc:
+            raise ParseFailure("Malformed related link") from exc
         segments = [parse.unquote(part) for part in url.path.split("/") if part]
-        if host in ("curseforge.com", "www.curseforge.com") and segments[:2] == ["minecraft", "mc-mods"]:
+        target = None
+        slug = ""
+        if host in CURSEFORGE_HOSTS:
+            platform = "curseforge"
+            if segments[:2] == ["minecraft", "data-packs"]:
+                continue  # A valid CurseForge link, but not a mod project.
+        elif host in MODRINTH_HOSTS:
+            platform = "modrinth"
+            if segments[:1] == ["datapack"]:
+                continue  # Modrinth data packs cannot be matched as mods.
+        else:
+            if host and url.scheme in ("http", "https"):
+                continue  # Trust the destination, not a mismatched link label.
+            platform = hint
+        if (url.scheme in ("http", "https") and host in CURSEFORGE_HOSTS
+                and segments[:2] == ["minecraft", "mc-mods"]):
             target = curseforge
             slug = segments[2] if len(segments) > 2 else ""
-        elif host in ("modrinth.com", "www.modrinth.com") and segments[:1] == ["mod"]:
+        elif url.scheme in ("http", "https") and host in MODRINTH_HOSTS and segments[:1] == ["mod"]:
             target = modrinth
             slug = segments[1] if len(segments) > 1 else ""
-        else:
-            continue
-        if SLUG.fullmatch(slug):
+        if target is not None and SLUG.fullmatch(slug):
             target.add(slug.lower())
+        elif platform in ("curseforge", "modrinth"):
+            raise ParseFailure(f"Unrecognized {platform} project link")
     return sorted(curseforge), sorted(modrinth)
 
 
-def parse_mod(html: str, mod_id: int) -> dict:
+def parse_mod(html: str, mod_id: int, expect_link_frame: bool = False) -> dict:
     parser = McmodHtmlParser()
     parser.feed(html)
     chinese = parser.names.get("h3", "").strip()
@@ -210,6 +245,8 @@ def parse_mod(html: str, mod_id: int) -> dict:
         raise ParseFailure(f"Mod {mod_id}: missing class title (possibly a challenge page)")
     if len(chinese) > 200 or len(english) > 200:
         raise ParseFailure(f"Mod {mod_id}: implausibly long title")
+    if expect_link_frame and not parser.link_frame_seen:
+        raise ParseFailure(f"Mod {mod_id}: related-link section disappeared")
     curseforge, modrinth = platform_slugs(parser.links)
     return {
         "mcmodId": mod_id,
@@ -314,10 +351,10 @@ def record_result(state: dict, mod_id: int, status: str, now: datetime,
 
 
 def fetch_mod(client: BudgetClient, state: dict, state_path: Path, mod_id: int,
-              now: datetime, is_new: bool) -> str:
+              now: datetime, is_new: bool, expect_link_frame: bool = False) -> str:
     try:
         html = client.get(f"/class/{mod_id}.html")
-        candidate = parse_mod(html, mod_id)
+        candidate = parse_mod(html, mod_id, expect_link_frame)
         status = "ok"
     except error.HTTPError as exc:
         try:
@@ -346,21 +383,9 @@ def merge_updates(catalog: dict[int, dict], state: dict) -> tuple[int, list[str]
     for key, candidate in candidates.items():
         mod_id = int(key)
         existing = catalog.get(mod_id)
-        conflict = None
-        if (existing and any("\u3400" <= character <= "\u9fff" for character in existing.get("chineseName", ""))
-                and not any("\u3400" <= character <= "\u9fff" for character in candidate["chineseName"])):
-            conflict = "Chinese title disappeared from the page"
-        if conflict:
-            if state["quarantine"].get(key) != {"reason": conflict, "candidate": candidate}:
-                anomalies.append(f"{mod_id}: {conflict}")
-            state["quarantine"][key] = {"reason": conflict, "candidate": candidate}
-            state["pendingUpdates"].pop(key, None)
-            continue
-
         merged = dict(existing) if existing else dict(candidate)
         for field in ("chineseName", "englishName", "abbreviation"):
-            if candidate.get(field):
-                merged[field] = candidate[field]
+            merged[field] = candidate[field]
         for field in ("curseForgeSlugs", "modrinthSlugs"):
             # MC Encyclopedia is authoritative for platform links. A successful
             # refresh replaces obsolete slugs, including when a list becomes empty.
@@ -386,17 +411,21 @@ def write_catalog(path: Path, catalog: dict[int, dict]) -> None:
 
 
 def run_live(catalog_path: Path, state_path: Path, max_requests: int,
-             edit_pages: int, min_delay: float, max_delay: float) -> None:
+             edit_pages: int, min_delay: float, max_delay: float,
+             existing_only: bool = False, retry_now: bool = False) -> None:
     catalog = load_catalog(catalog_path)
     state = load_state(state_path, catalog)
     client = BudgetClient(max_requests, min_delay, max_delay)
     now = utc_now()
     today = iso_date(now)
-    client.load_robots()  # Fail closed if the current policy cannot be read.
-    latest_ids = parse_mod_list(client.get("/modlist.html?sort=createtime"))
-    newest = max(latest_ids)
-    if newest < state["nextNewId"] - 1:
-        raise ParseFailure("Newest list ID is behind the saved checkpoint")
+    client.load_robots()
+    if existing_only:
+        newest = state.get("lastRun", {}).get("newestSeenId", state["nextNewId"] - 1)
+    else:
+        latest_ids = parse_mod_list(client.get("/modlist.html?sort=createtime"))
+        newest = max(latest_ids)
+        if newest < state["nextNewId"] - 1:
+            raise ParseFailure("Newest list ID is behind the saved checkpoint")
 
     edited: list[int] = []
     for page in range(1, edit_pages + 1):
@@ -409,49 +438,59 @@ def run_live(catalog_path: Path, state_path: Path, max_requests: int,
             print(f"Edited-list page {page} unavailable: {exc}")
             break
 
-    previous_edited = set(state.get("recentEditedIds", []))
     edited = list(dict.fromkeys(edited))
     state["recentEditedIds"] = edited
     save_state(state_path, state)
     attempted = {"new": 0, "edited": 0, "retry": 0, "gap": 0}
     outcomes = {"ok": 0, "missing": 0, "failed": 0}
+    attempted_ids: set[int] = set()
 
     def phase(name: str, candidates, allowance: int, is_new: bool = False) -> None:
         starting_requests = client.used
         for mod_id in candidates:
             if client.used - starting_requests >= allowance or client.used >= max_requests:
                 break
-            status = fetch_mod(client, state, state_path, mod_id, now, is_new)
+            if mod_id in attempted_ids:
+                continue
+            existing = catalog.get(mod_id, {})
+            expect_link_frame = bool(existing.get("curseForgeSlugs") or existing.get("modrinthSlugs"))
+            status = fetch_mod(client, state, state_path, mod_id, now, is_new, expect_link_frame)
+            attempted_ids.add(mod_id)
             attempted[name] += 1
             outcomes[status] += 1
 
     try:
-        phase("new", range(state["nextNewId"], newest + 1), max(1, max_requests * 55 // 100), True)
+        if not existing_only:
+            phase("new", range(state["nextNewId"], newest + 1), max(1, max_requests * 55 // 100), True)
         edited_candidates = []
-        for mod_id in edited:
+        for position, mod_id in enumerate(edited):
             if mod_id not in catalog or str(mod_id) in state["pendingUpdates"]:
                 continue
             metadata = state["records"].get(str(mod_id), {})
-            checked = metadata.get("lastChecked")
+            checked = metadata.get("lastChecked") or ""
             missing_link = not catalog[mod_id].get("curseForgeSlugs") or not catalog[mod_id].get("modrinthSlugs")
-            if mod_id not in previous_edited or not checked or checked <= iso_date(now - timedelta(days=30)):
-                edited_candidates.append((missing_link, mod_id))
-        edited_candidates.sort(key=lambda item: not item[0])  # Stable: retain list recency within each priority.
-        phase("edited", (mod_id for _, mod_id in edited_candidates),
-              max(1, max_requests * 25 // 100))
+            edited_candidates.append((checked, not missing_link, position, mod_id))
+        # Revisit every ID in the edited list, oldest check first. A repeated
+        # edit is no longer hidden for 30 days by last week's list snapshot.
+        edited_candidates.sort()
+        phase("edited", (mod_id for _, _, _, mod_id in edited_candidates),
+              max(1, max_requests * (10 if retry_now else 70 if existing_only else 25) // 100))
 
         retries = [int(key) for key, metadata in state["records"].items()
                    if metadata.get("status") in ("failed", "missing")
-                   and due_on_or_before(metadata.get("nextRetry"), today)]
-        phase("retry", sorted(retries), max(1, max_requests * 10 // 100))
+                   and (retry_now or due_on_or_before(metadata.get("nextRetry"), today))]
+        phase("retry", sorted(retries), max(1, max_requests * (70 if retry_now else 25 if existing_only else 10) // 100))
 
-        gaps = (mod_id for mod_id in range(min(catalog, default=1), max(catalog, default=0))
-                if mod_id not in catalog and str(mod_id) not in state["records"])
-        phase("gap", gaps, max(1, max_requests * 5 // 100))
-        # Spend unused phase allocations on the new-ID backlog, but keep a
-        # small reserve for retries already consumed within each phase.
-        if state["nextNewId"] <= newest and client.used < max_requests:
-            phase("new", range(state["nextNewId"], newest + 1), max_requests, True)
+        if existing_only:
+            phase("edited", (mod_id for _, _, _, mod_id in edited_candidates), max_requests)
+        else:
+            gaps = (mod_id for mod_id in range(min(catalog, default=1), max(catalog, default=0))
+                    if mod_id not in catalog and str(mod_id) not in state["records"])
+            phase("gap", gaps, max(1, max_requests * 5 // 100))
+            # Spend unused phase allocations on the new-ID backlog, but keep a
+            # small reserve for retries already consumed within each phase.
+            if state["nextNewId"] <= newest and client.used < max_requests:
+                phase("new", range(state["nextNewId"], newest + 1), max_requests, True)
     except BudgetExhausted:
         print("HTTP request budget reached; progress is saved.")
     finally:
@@ -460,6 +499,8 @@ def run_live(catalog_path: Path, state_path: Path, max_requests: int,
             write_catalog(catalog_path, catalog)
         state["lastRun"] = {
             "date": today,
+            "existingOnly": existing_only,
+            "retryNow": retry_now,
             "requests": client.used,
             "requestLimit": max_requests,
             "newestSeenId": newest,
@@ -484,8 +525,12 @@ def main() -> None:
                                help="Validate the catalog without network access or file changes")
     offline_modes.add_argument("--reconcile-only", action="store_true",
                                help="Apply saved candidates using the current merge rules without network access")
-    parser.add_argument("--max-requests", type=int, default=100)
+    parser.add_argument("--max-requests", type=int, default=200)
     parser.add_argument("--edit-pages", type=int, default=3)
+    parser.add_argument("--existing-only", action="store_true",
+                        help="Refresh previously known mods and due retries without scanning new IDs or gaps")
+    parser.add_argument("--retry-now", action="store_true",
+                        help="With --existing-only, retry previously failed IDs even before their scheduled date")
     parser.add_argument("--min-delay", type=float, default=5)
     parser.add_argument("--max-delay", type=float, default=10)
     parser.add_argument("--catalog", type=Path, default=CATALOG)
@@ -514,8 +559,10 @@ def main() -> None:
         return
     if args.edit_pages < 1:
         parser.error("--edit-pages must be at least 1")
+    if args.retry_now and not args.existing_only:
+        parser.error("--retry-now requires --existing-only")
     run_live(args.catalog, args.state, args.max_requests, args.edit_pages,
-             args.min_delay, args.max_delay)
+             args.min_delay, args.max_delay, args.existing_only, args.retry_now)
 
 
 if __name__ == "__main__":
