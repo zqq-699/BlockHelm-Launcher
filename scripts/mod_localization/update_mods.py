@@ -190,7 +190,9 @@ def decode_target(href: str) -> str:
     url = parse.urlsplit(href)
     if not url.path.startswith("/target/") or url.hostname not in (None, "mcmod.cn", "www.mcmod.cn", "link.mcmod.cn"):
         return href
-    encoded = url.path[len("/target/"):]
+    # MC Encyclopedia appends separately encoded query parameters after '@'.
+    # The destination URL alone is enough to identify a mod platform and slug.
+    encoded = url.path[len("/target/"):].split("@", 1)[0]
     try:
         decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
         return decoded.decode("utf-8")
@@ -205,7 +207,13 @@ def platform_slugs(links: list[tuple[str, str]]) -> tuple[list[str], list[str]]:
         try:
             url = parse.urlsplit(decode_target(href))
             host = (url.hostname or "").lower()
+        except ParseFailure:
+            if hint and hint not in ("curseforge", "modrinth"):
+                continue  # A malformed, clearly unrelated link cannot block mod links.
+            raise  # An unknown or platform link must not silently clear old slugs.
         except ValueError as exc:
+            if hint and hint not in ("curseforge", "modrinth"):
+                continue
             raise ParseFailure("Malformed related link") from exc
         segments = [parse.unquote(part) for part in url.path.split("/") if part]
         target = None

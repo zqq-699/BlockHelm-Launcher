@@ -120,6 +120,33 @@ class ParserTests(unittest.TestCase):
         with self.assertRaisesRegex(scraper.ParseFailure, "Malformed target link"):
             scraper.parse_mod(html, 123, expect_link_frame=True)
 
+    def test_unrelated_segmented_and_malformed_links_do_not_discard_mod_slugs(self):
+        def target(url, parameters=None):
+            encoded = base64.urlsafe_b64encode(url.encode()).decode()
+            if parameters:
+                encoded += "@" + base64.urlsafe_b64encode(parameters.encode()).decode()
+            return "//link.mcmod.cn/target/" + encoded
+
+        html = f"""<div class='class-title'><h3>示例</h3></div>
+                   <div class='common-link-frame'>
+                     <a href='{target('https://www.youtube.com/watch', 'v=6e6uPP8tdo')}' title='YouTube'>Video</a>
+                     <a href='{target('https://www.curseforge.com/minecraft/mc-mods/marvel-superheroes')}' title='CurseForge'>CF</a>
+                     <a href='{target('https://pan.quark.cn/s/7e798397e639', 'pwd=WxpJ')}' title='Quark'>Download</a>
+                     <a href='{target('https://modrinth.com/mod/marvel-superheroes')}' title='Modrinth'>MR</a>
+                     <a href='//link.mcmod.cn/target/%%%' title='YouTube'>Broken video</a>
+                   </div>"""
+        record = scraper.parse_mod(html, 31889, expect_link_frame=True)
+        self.assertEqual(["marvel-superheroes"], record["curseForgeSlugs"])
+        self.assertEqual(["marvel-superheroes"], record["modrinthSlugs"])
+
+    def test_malformed_platform_target_still_fails(self):
+        html = """<div class='class-title'><h3>示例</h3></div>
+                  <div class='common-link-frame'>
+                    <a href='//link.mcmod.cn/target/%%%' title='Modrinth'>Broken mod link</a>
+                  </div>"""
+        with self.assertRaisesRegex(scraper.ParseFailure, "Malformed target link"):
+            scraper.parse_mod(html, 123, expect_link_frame=True)
+
     def test_other_sites_target_paths_are_not_decoded_as_mcmod_redirects(self):
         self.assertEqual("https://example.com/target/link", scraper.decode_target("https://example.com/target/link"))
 
