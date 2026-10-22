@@ -138,10 +138,10 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
     private LocalizationIndexes LoadIndexes()
     {
         var stopwatch = Stopwatch.StartNew();
-        var modrinthTitles = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        var curseForgeTitles = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        var modrinthMcmodIds = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
-        var curseForgeMcmodIds = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+        var modrinthTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var curseForgeTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var modrinthMcmodIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var curseForgeMcmodIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var searchEntries = new List<SearchEntry>();
         var invalidLineCount = 0;
 
@@ -179,15 +179,15 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
 
                 if (record.McmodId > 0)
                 {
-                    AddIds(modrinthMcmodIds, record.ModrinthSlugs, record.McmodId);
-                    AddIds(curseForgeMcmodIds, record.CurseForgeSlugs, record.McmodId);
+                    AddPreferredRecord(modrinthMcmodIds, modrinthTitles,
+                        record.ModrinthSlugs, record.McmodId, record.ChineseName);
+                    AddPreferredRecord(curseForgeMcmodIds, curseForgeTitles,
+                        record.CurseForgeSlugs, record.McmodId, record.ChineseName);
                 }
 
                 if (string.IsNullOrWhiteSpace(record.ChineseName))
                     continue;
 
-                AddKeys(modrinthTitles, record.ModrinthSlugs, record.ChineseName);
-                AddKeys(curseForgeTitles, record.CurseForgeSlugs, record.ChineseName);
                 var normalizedName = NormalizeChineseSearchText(record.ChineseName);
                 if (normalizedName.Length > 0)
                     searchEntries.Add(new SearchEntry(
@@ -197,10 +197,10 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
             }
 
             var result = new LocalizationIndexes(
-                RemoveAmbiguousEntries(modrinthTitles),
-                RemoveAmbiguousEntries(curseForgeTitles),
-                RemoveAmbiguousIds(modrinthMcmodIds),
-                RemoveAmbiguousIds(curseForgeMcmodIds),
+                modrinthTitles,
+                curseForgeTitles,
+                modrinthMcmodIds,
+                curseForgeMcmodIds,
                 searchEntries);
             if (invalidLineCount > 0)
             {
@@ -225,43 +225,12 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
         }
     }
 
-    private static void AddKeys(
-        IDictionary<string, string?> titlesByKey,
-        IReadOnlyList<string>? keys,
+    private static void AddPreferredRecord(
+        IDictionary<string, int> idsBySlug,
+        IDictionary<string, string> titlesBySlug,
+        IReadOnlyList<string>? slugs,
+        int mcmodId,
         string chineseName)
-    {
-        if (keys is null)
-            return;
-
-        var normalizedTitle = chineseName.Trim();
-        foreach (var value in keys)
-        {
-            var key = value?.Trim();
-            if (string.IsNullOrWhiteSpace(key))
-                continue;
-
-            if (!titlesByKey.TryGetValue(key, out var existingTitle))
-            {
-                titlesByKey[key] = normalizedTitle;
-                continue;
-            }
-
-            if (existingTitle is not null
-                && !string.Equals(existingTitle, normalizedTitle, StringComparison.Ordinal))
-            {
-                // 同一标识指向多个不同条目时宁可不显示，也不猜测错误的中文名。
-                titlesByKey[key] = null;
-            }
-        }
-    }
-
-    private static IReadOnlyDictionary<string, string> RemoveAmbiguousEntries(
-        IReadOnlyDictionary<string, string?> titlesByKey) =>
-        titlesByKey
-            .Where(pair => pair.Value is not null)
-            .ToDictionary(pair => pair.Key, pair => pair.Value!, StringComparer.OrdinalIgnoreCase);
-
-    private static void AddIds(IDictionary<string, int?> idsBySlug, IReadOnlyList<string>? slugs, int mcmodId)
     {
         if (slugs is null)
             return;
@@ -269,21 +238,18 @@ public sealed class EmbeddedModNameLocalizationService : IModNameLocalizationSer
         foreach (var value in slugs)
         {
             var slug = value?.Trim();
-            if (string.IsNullOrWhiteSpace(slug))
+            if (string.IsNullOrWhiteSpace(slug)
+                || (idsBySlug.TryGetValue(slug, out var existingId) && existingId <= mcmodId))
                 continue;
 
-            if (!idsBySlug.TryGetValue(slug, out var existingId))
-                idsBySlug[slug] = mcmodId;
-            else if (existingId != mcmodId)
-                idsBySlug[slug] = null;
+            // 同一 slug 的中文名与百科 ID 必须来自同一条记录；最小 ID 优先。
+            idsBySlug[slug] = mcmodId;
+            if (string.IsNullOrWhiteSpace(chineseName))
+                titlesBySlug.Remove(slug);
+            else
+                titlesBySlug[slug] = chineseName.Trim();
         }
     }
-
-    private static IReadOnlyDictionary<string, int> RemoveAmbiguousIds(
-        IReadOnlyDictionary<string, int?> idsBySlug) =>
-        idsBySlug
-            .Where(pair => pair.Value is not null)
-            .ToDictionary(pair => pair.Key, pair => pair.Value!.Value, StringComparer.OrdinalIgnoreCase);
 
     private static string? NormalizeMatch(string localizedTitle, string? originalTitle)
     {

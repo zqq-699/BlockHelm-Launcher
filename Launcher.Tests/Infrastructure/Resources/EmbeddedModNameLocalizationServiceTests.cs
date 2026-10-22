@@ -50,4 +50,33 @@ public sealed class EmbeddedModNameLocalizationServiceTests
         using var culture = new TestUiCultureScope("zh-Hant");
         Assert.True(LauncherLanguages.IsChineseCulture(System.Globalization.CultureInfo.CurrentUICulture));
     }
+
+    [Fact]
+    public void DuplicateSlugUsesLowestMcmodIdForBothTitleAndLink()
+    {
+        using var culture = new TestUiCultureScope("zh-Hans");
+        const string resourceName = "Launcher.Infrastructure.Resources.ResourceLocalization.mods.v1.jsonl";
+        using var stream = typeof(EmbeddedModNameLocalizationService).Assembly
+            .GetManifestResourceStream(resourceName);
+        if (stream is null)
+            return;
+
+        var localization = new EmbeddedModNameLocalizationService();
+        Assert.Equal("匠魂", localization.FindByProjectSlug(ResourceProjectSource.CurseForge,
+            "tinkers-construct", "Tinkers' Construct"));
+        Assert.Equal(101, localization.FindMcmodIdByProjectSlug(ResourceProjectSource.CurseForge,
+            "tinkers-construct"));
+        Assert.Equal("匠魂", localization.FindByProjectSlug(ResourceProjectSource.Modrinth,
+            "tinkers-construct", "Tinkers' Construct"));
+        Assert.Equal(101, localization.FindMcmodIdByProjectSlug(ResourceProjectSource.Modrinth,
+            "tinkers-construct"));
+        Assert.Equal("电脑", localization.FindByProjectSlug(ResourceProjectSource.CurseForge,
+            "computercraft", "Computer Craft"));
+        Assert.Equal(8, localization.FindMcmodIdByProjectSlug(ResourceProjectSource.CurseForge,
+            "computercraft"));
+        Assert.Equal("群峦传说", localization.FindByProjectSlug(ResourceProjectSource.CurseForge,
+            "tfcraft", "TerraFirmaCraft"));
+        Assert.Equal(28, localization.FindMcmodIdByProjectSlug(ResourceProjectSource.CurseForge,
+            "tfcraft"));
+    }
 }

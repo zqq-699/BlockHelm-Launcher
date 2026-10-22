@@ -9,3 +9,4 @@ obj/
 TestResults/
 publish/
 .local-secrets/
+__pycache__/
