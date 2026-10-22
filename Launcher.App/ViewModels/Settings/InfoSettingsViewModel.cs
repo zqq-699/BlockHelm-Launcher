@@ -99,7 +99,7 @@ public sealed partial class InfoSettingsViewModel : SettingsSectionViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUpdateReleaseNotes))]
-    private IReadOnlyList<LauncherUpdateReleaseNotesSection> updateReleaseNotes = [];
+    private string updateReleaseNotesMarkdown = string.Empty;
 
     [ObservableProperty]
     private bool isCheckingUpdates;
@@ -122,7 +122,7 @@ public sealed partial class InfoSettingsViewModel : SettingsSectionViewModelBase
         ? Strings.Status_DownloadingLauncherUpdate
         : Strings.Dialog_UpdateButton;
 
-    public bool HasUpdateReleaseNotes => UpdateReleaseNotes.Count > 0;
+    public bool HasUpdateReleaseNotes => !string.IsNullOrWhiteSpace(UpdateReleaseNotesMarkdown);
 
 #if DEBUG
     public bool IsUpdateDialogPreviewAvailable => true;

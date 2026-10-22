@@ -3859,4 +3859,5 @@
   <data name="Dialog_UpdatePreviewFixOne" xml:space="preserve"><value>セクションのない以前のリリースノートにも対応します。</value></data>
   <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>長い更新内容をスクロールして確認できます。</value></data>
   <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>プレビュー更新項目 {0}：長いリリースノートの折り返しとスクロール動作を確認するためのサンプルです。</value></data>
+  <data name="Markdown_ContentTruncated" xml:space="preserve"><value>リリースノートが長いため、表示を省略しました。完全な更新履歴を開いて続きを確認できます。</value></data>
 </root>

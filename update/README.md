@@ -35,8 +35,8 @@ When preparing a new version, update the build metadata in
   - Beta builds use the beta revision for `bb`, for example `0.9.1-beta.1` -> `90101`.
 
 Use `release-notes.template.md` as the starting point for every new release
-note. Release notes use a level-one release title followed by one or more of
-these level-two sections, in the listed order when applicable:
+note. Start with a level-one release title. The following level-two sections
+are recommended when applicable, but names and ordering are not restricted:
 
 - `新功能`
 - `问题修复`
@@ -45,22 +45,18 @@ these level-two sections, in the listed order when applicable:
 - `已知问题`
 - `其他`
 
-Beta notes may use the equivalent English names `New Features`, `Bug Fixes`,
-`Improvements`, `Compatibility and Migration`, `Known Issues`, and `Other`.
-Do not include both language variants of the same category in one file.
-
-Remove unused sections. Every retained section must contain one or more
-single-line, plain-text Markdown list items. A file may contain at most 200
-items, and each item may contain at most 1000 characters. Do not put release
-content outside a section, use nested lists, or add arbitrary section names.
-The release and beta workflows run `scripts/validate-release-notes.ps1` before
-publishing.
+Beta notes may use English headings or introduce release-specific sections.
+The dialog supports headings, paragraphs, ordered and unordered nested lists,
+bold, italic, strikethrough, inline and fenced code, block quotes, horizontal
+rules, and HTTP/HTTPS links. Raw HTML is displayed as text, image URLs are not
+loaded, and tables are not enabled. Keep each notes file within 65536
+characters. The release and beta workflows run
+`scripts/validate-release-notes.ps1` before publishing.
 
 The manifest continues to carry the original Markdown in the `releaseNotes`
-string so older launchers remain compatible. Newer launchers parse the
-level-two headings and list items into sections displayed directly in the
-update dialog. Historical flat release notes remain supported as one untitled
-section.
+string so older launchers remain compatible. Newer launchers render the
+Markdown directly in the update dialog. Historical flat release notes remain
+supported.
 
 The release workflows parse `versionName` from the Git tag and verify
 `InformationalVersion`, `LauncherBuildChannel`, and `LauncherVersionCode` from

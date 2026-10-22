@@ -238,6 +238,10 @@
     <SolidColorBrush x:Key="Brush.Accent.Primary" Color="{StaticResource Color.0891FE}" />
     <SolidColorBrush x:Key="Brush.Accent.Hover" Color="{StaticResource Color.047EDC}" />
     <SolidColorBrush x:Key="Brush.Accent.Pressed" Color="{StaticResource Color.036FC2}" />
+    <SolidColorBrush x:Key="Brush.Markdown.CodeBackground" Color="{StaticResource Color.1F1F1F}" />
+    <SolidColorBrush x:Key="Brush.Markdown.CodeBorder" Color="{StaticResource Color.30606060}" />
+    <SolidColorBrush x:Key="Brush.Markdown.QuoteBackground" Color="{StaticResource Color.1F1F1F}" />
+    <SolidColorBrush x:Key="Brush.Markdown.Divider" Color="{StaticResource Color.30606060}" />
     <SolidColorBrush x:Key="Brush.Accent.Selection" Color="{StaticResource Color.660891FE}" />
     <SolidColorBrush x:Key="Brush.Accent.Border" Color="{StaticResource Color.667ABEFF}" />
     <SolidColorBrush x:Key="Brush.Accent.Outline" Color="{StaticResource Color.887ABEFF}" />

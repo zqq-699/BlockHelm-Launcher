@@ -1392,53 +1392,8 @@
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto"
                                   Visibility="{Binding HasUpdateReleaseNotes, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}">
-                        <ItemsControl ItemsSource="{Binding UpdateReleaseNotes}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Margin="0,0,8,18">
-                                        <TextBlock Margin="0,0,0,8"
-                                                   Text="{Binding Title}"
-                                                   Foreground="{DynamicResource Brush.F4F4F4}"
-                                                   FontSize="15"
-                                                   FontWeight="SemiBold">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Title}" Value="{x:Null}">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding Title}" Value="">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                        <ItemsControl ItemsSource="{Binding Items}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Grid Margin="0,0,0,7">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="14" />
-                                                            <ColumnDefinition Width="*" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <TextBlock Text="-"
-                                                                   Foreground="{DynamicResource Brush.CFFFFFFF}"
-                                                                   FontSize="14"
-                                                                   VerticalAlignment="Top" />
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="{Binding}"
-                                                                   Style="{StaticResource DialogBodyTextStyle}"
-                                                                   TextWrapping="Wrap" />
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <controls:MarkdownView Markdown="{Binding UpdateReleaseNotesMarkdown}"
+                                               LinkCommand="{Binding OpenUpdateReleaseNotesLinkCommand}" />
                     </ScrollViewer>
 
                     <Grid Grid.Row="3">

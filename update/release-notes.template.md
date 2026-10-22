@@ -23,3 +23,7 @@
 ## 其他
 
 - 记录不属于上述板块但仍需向用户说明的内容。
+
+> 可选：在这里补充升级注意事项。
+
+更多信息可使用 [HTTP/HTTPS 链接](https://github.com/zqq-699/BlockHelm-Launcher)；不使用远程图片、原始 HTML 或表格。

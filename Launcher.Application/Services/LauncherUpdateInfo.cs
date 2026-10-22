@@ -24,16 +24,12 @@ public sealed record LauncherUpdateDownloadUrl(
     string Url,
     int Priority);
 
-public sealed record LauncherUpdateReleaseNotesSection(
-    string? Title,
-    IReadOnlyList<string> Items);
-
 public sealed record LauncherUpdateInfo(
     string Version,
     string DisplayVersion,
     string ReleasePageUrl,
     string? DownloadUrl,
-    string? Changelog,
+    string? ReleaseNotesMarkdown,
     string? DownloadFileName,
     LauncherUpdateAssetKind AssetKind,
     long SizeBytes,
@@ -42,8 +38,7 @@ public sealed record LauncherUpdateInfo(
     bool IsMandatory = false,
     int MinSupportedVersionCode = 0,
     DateTimeOffset? PublishedAt = null,
-    IReadOnlyList<LauncherUpdateDownloadUrl>? DownloadUrls = null,
-    IReadOnlyList<LauncherUpdateReleaseNotesSection>? ReleaseNotesSections = null)
+    IReadOnlyList<LauncherUpdateDownloadUrl>? DownloadUrls = null)
 {
     public bool CanAutoInstall => AssetKind is LauncherUpdateAssetKind.WindowsX64Executable
         && SizeBytes > 0
@@ -57,7 +52,4 @@ public sealed record LauncherUpdateInfo(
             : string.IsNullOrWhiteSpace(DownloadUrl)
                 ? []
                 : [new LauncherUpdateDownloadUrl("default", DownloadUrl, 1)];
-
-    public IReadOnlyList<LauncherUpdateReleaseNotesSection> EffectiveReleaseNotesSections =>
-        ReleaseNotesSections is { Count: > 0 } ? ReleaseNotesSections : [];
 }

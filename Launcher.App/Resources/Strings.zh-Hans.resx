@@ -1435,4 +1435,5 @@
   <data name="Dialog_UpdatePreviewFixOne" xml:space="preserve"><value>兼容旧版未分区的更新日志。</value></data>
   <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>较长的更新内容现在可以滚动查看。</value></data>
   <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>预览更新子项 {0}：这是一条用于检查较长更新日志、自动换行和滚动效果的示例内容。</value></data>
+  <data name="Markdown_ContentTruncated" xml:space="preserve"><value>更新日志内容过长，已截断显示。可打开完整更新日志继续查看。</value></data>
 </root>

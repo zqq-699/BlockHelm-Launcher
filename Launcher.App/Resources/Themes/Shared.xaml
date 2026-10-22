@@ -22,6 +22,7 @@
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
     <FontFamily x:Key="LauncherFontFamily">Microsoft YaHei UI</FontFamily>
     <FontFamily x:Key="LauncherIconFontFamily">Segoe MDL2 Assets</FontFamily>
+    <FontFamily x:Key="LauncherMonospaceFontFamily">Cascadia Mono, Consolas</FontFamily>
     <sys:Double x:Key="LauncherCompactControlHeight">34</sys:Double>
     <sys:Double x:Key="DetailPageContentMaxWidth">800</sys:Double>
     <sys:Double x:Key="HomeLaunchMenuPanelWidth">224</sys:Double>

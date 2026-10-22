@@ -28,19 +28,14 @@ public sealed class RemoteManifestLauncherUpdateServiceTests
     }
 
     [Fact]
-    public async Task ReleaseNotesAreExposedAsStructuredSections()
+    public async Task ReleaseNotesMarkdownIsPreserved()
     {
         const string releaseNotes = "# 正式版 1.1.0\n\n## 新功能\n- 弹窗内显示更新日志。\n\n## 问题修复\n- 修复更新提示。";
         var service = CreateService((GiteeManifest, HttpStatusCode.OK, CreateManifest(releaseNotes: releaseNotes)));
 
         var result = await service.CheckForUpdatesAsync("1.0.0", LauncherUpdateChannel.Release);
 
-        var sections = result.Update?.EffectiveReleaseNotesSections;
-        Assert.NotNull(sections);
-        Assert.Equal(2, sections.Count);
-        Assert.Equal("新功能", sections[0].Title);
-        Assert.Equal(["弹窗内显示更新日志。"], sections[0].Items);
-        Assert.Equal("问题修复", sections[1].Title);
+        Assert.Equal(releaseNotes, result.Update?.ReleaseNotesMarkdown);
     }
 
     [Fact]

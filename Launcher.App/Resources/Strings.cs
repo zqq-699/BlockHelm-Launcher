@@ -372,6 +372,7 @@ public static class Strings
     public static string Dialog_UpdatePreviewFixesTitle => Get(nameof(Dialog_UpdatePreviewFixesTitle));
     public static string Dialog_UpdatePreviewFixOne => Get(nameof(Dialog_UpdatePreviewFixOne));
     public static string Dialog_UpdatePreviewFixTwo => Get(nameof(Dialog_UpdatePreviewFixTwo));
+    public static string Markdown_ContentTruncated => Get(nameof(Markdown_ContentTruncated));
     public static string Dialog_OpenUpdateChangelogButton => Get(nameof(Dialog_OpenUpdateChangelogButton));
     public static string Dialog_UpdateButton => Get(nameof(Dialog_UpdateButton));
     public static string Dialog_ModUpdateTitle => Get(nameof(Dialog_ModUpdateTitle));

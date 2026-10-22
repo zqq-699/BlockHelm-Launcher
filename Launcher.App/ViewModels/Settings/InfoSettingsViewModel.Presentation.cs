@@ -40,7 +40,7 @@ public sealed partial class InfoSettingsViewModel
         isUpdateDialogPreview = isPreview;
         UpdateDialogVersionText = update.DisplayVersion;
         UpdateDialogMessage = string.Format(Strings.Dialog_UpdateAvailableVersionFormat, update.DisplayVersion);
-        UpdateReleaseNotes = update.EffectiveReleaseNotesSections;
+        UpdateReleaseNotesMarkdown = update.ReleaseNotesMarkdown ?? string.Empty;
         updateDialogReleasePageUrl = update.ReleasePageUrl;
         updateDialogDownloadUrl = string.IsNullOrWhiteSpace(update.DownloadUrl)
             ? update.ReleasePageUrl

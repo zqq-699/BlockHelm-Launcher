@@ -3859,4 +3859,5 @@
   <data name="Dialog_UpdatePreviewFixOne" xml:space="preserve"><value>相容舊版未分區的更新日誌。</value></data>
   <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>較長的更新內容現在可以捲動檢視。</value></data>
   <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>預覽更新子項 {0}：這是一條用於檢查較長更新日誌、自動換行和捲動效果的範例內容。</value></data>
+  <data name="Markdown_ContentTruncated" xml:space="preserve"><value>更新日誌內容過長，已截斷顯示。可開啟完整更新日誌繼續查看。</value></data>
 </root>

@@ -13,22 +13,21 @@ public sealed class LauncherUpdateDialogContractTests
     private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
 
     [Fact]
-    public void UpdateReleaseNotesUseThemedScrollableSectionList()
+    public void UpdateReleaseNotesUseThemedScrollableMarkdownView()
     {
         var document = XDocument.Load(Path.Combine(
             FindRepositoryRoot(), "Launcher.App", "Views", "Shell", "MainWindow.xaml"));
         var dialog = Assert.Single(document.Descendants().Where(element =>
             (string?)element.Attribute(Xaml + "Name") == "LauncherUpdateDialogHost"));
-        var notesItems = Assert.Single(dialog.Descendants().Where(element =>
-            (string?)element.Attribute("ItemsSource") == "{Binding UpdateReleaseNotes}"));
-        var scrollViewer = notesItems.Ancestors().First(element => element.Name.LocalName == "ScrollViewer");
+        var markdownView = Assert.Single(dialog.Descendants().Where(element =>
+            element.Name.LocalName == "MarkdownView"));
+        var scrollViewer = markdownView.Ancestors().First(element => element.Name.LocalName == "ScrollViewer");
 
+        Assert.Equal("{Binding UpdateReleaseNotesMarkdown}", (string?)markdownView.Attribute("Markdown"));
+        Assert.Equal("{Binding OpenUpdateReleaseNotesLinkCommand}", (string?)markdownView.Attribute("LinkCommand"));
         Assert.Equal("{StaticResource MainContentScrollViewerStyle}", (string?)scrollViewer.Attribute("Style"));
         Assert.Equal("Auto", (string?)scrollViewer.Attribute("VerticalScrollBarVisibility"));
         Assert.Equal("0,0,12,0", (string?)scrollViewer.Attribute("Padding"));
-        Assert.Contains(scrollViewer.Descendants(), element =>
-            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("Text") == "-");
-        Assert.DoesNotContain(scrollViewer.Descendants(), element => element.Name.LocalName == "Ellipse");
     }
 
     [Fact]

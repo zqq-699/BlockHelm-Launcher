@@ -1,0 +1,13 @@
+<!--
+  BlockHelm Launcher
+  Copyright (C) 2026 Quan Zhou
+  SPDX-License-Identifier: GPL-3.0-only
+-->
+
+<UserControl x:Class="Launcher.App.Controls.MarkdownView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="False"
+             IsTabStop="False">
+    <StackPanel x:Name="ContentPanel" />
+</UserControl>

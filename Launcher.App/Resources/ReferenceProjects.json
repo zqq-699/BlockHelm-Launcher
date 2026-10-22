@@ -100,5 +100,11 @@
     "copyrightNotice": "Copyright 2019-present Bytedance Inc.",
     "projectUrl": "https://github.com/bytedance/IconPark",
     "licenseText": "Apache-2.0 License"
+  },
+  {
+    "name": "Markdig",
+    "copyrightNotice": "Copyright (c) Alexandre Mutel. All rights reserved.",
+    "projectUrl": "https://github.com/xoofx/markdig",
+    "licenseText": "BSD-2-Clause License"
   }
 ]

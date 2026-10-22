@@ -19,6 +19,7 @@
 
 using System.Reflection;
 using System.Collections.ObjectModel;
+using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Launcher.App.Models;
@@ -125,43 +126,46 @@ public sealed partial class InfoSettingsViewModel
     private void PreviewUpdateDialog()
     {
 #if DEBUG
-        var featureItems = new List<string>
+        var markdown = new StringBuilder()
+            .AppendLine("# 1.0.0-preview")
+            .AppendLine()
+            .AppendLine($"## {Strings.Dialog_UpdatePreviewNewFeaturesTitle}")
+            .AppendLine()
+            .AppendLine($"- {Strings.Dialog_UpdatePreviewNewFeatureOne}")
+            .AppendLine($"- {Strings.Dialog_UpdatePreviewNewFeatureTwo}");
+        for (var index = 1; index <= 5; index++)
         {
-            Strings.Dialog_UpdatePreviewNewFeatureOne,
-            Strings.Dialog_UpdatePreviewNewFeatureTwo
-        };
-        for (var index = 1; index <= 10; index++)
-        {
-            featureItems.Add(string.Format(
-                Strings.Dialog_UpdatePreviewAdditionalItemFormat,
-                index));
+            markdown.AppendLine($"- {string.Format(Strings.Dialog_UpdatePreviewAdditionalItemFormat, index)}");
         }
-
-        var sections = new LauncherUpdateReleaseNotesSection[]
+        markdown
+            .AppendLine()
+            .AppendLine($"## {Strings.Dialog_UpdatePreviewFixesTitle}")
+            .AppendLine()
+            .AppendLine($"- {Strings.Dialog_UpdatePreviewFixOne}")
+            .AppendLine($"- {Strings.Dialog_UpdatePreviewFixTwo}");
+        for (var index = 6; index <= 12; index++)
         {
-            new(
-                Strings.Dialog_UpdatePreviewNewFeaturesTitle,
-                featureItems),
-            new(
-                Strings.Dialog_UpdatePreviewFixesTitle,
-                [
-                    Strings.Dialog_UpdatePreviewFixOne,
-                    Strings.Dialog_UpdatePreviewFixTwo
-                ])
-        };
+            markdown.AppendLine($"- {string.Format(Strings.Dialog_UpdatePreviewAdditionalItemFormat, index)}");
+        }
         var update = new LauncherUpdateInfo(
             "preview",
             "1.0.0-preview",
             LauncherProjectLinks.GitHubReleasesUrl,
             null,
-            null,
+            markdown.ToString(),
             null,
             LauncherUpdateAssetKind.None,
             0,
-            string.Empty,
-            ReleaseNotesSections: sections);
+            string.Empty);
         ShowUpdateAvailableDialog(update, isPreview: true);
 #endif
+    }
+
+    [RelayCommand]
+    private void OpenUpdateReleaseNotesLink(string? url)
+    {
+        if (!TryOpenUpdateUrl(url))
+            ReportVisibleStatus(Strings.Status_OpenUpdatePageFailed);
     }
 
     [RelayCommand]
