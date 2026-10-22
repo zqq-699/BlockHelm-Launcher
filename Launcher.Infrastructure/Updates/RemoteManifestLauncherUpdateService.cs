@@ -142,7 +142,8 @@ public sealed class RemoteManifestLauncherUpdateService : ILauncherUpdateService
             IsMandatory: manifest.Mandatory || currentVersionCode < manifest.MinSupportedVersionCode,
             MinSupportedVersionCode: manifest.MinSupportedVersionCode,
             PublishedAt: manifest.PublishedAt,
-            DownloadUrls: urls));
+            DownloadUrls: urls,
+            ReleaseNotesSections: LauncherReleaseNotesParser.Parse(manifest.ReleaseNotes)));
     }
 
     private static void ValidateManifest(RemoteUpdateManifestDto manifest, string expectedChannel)

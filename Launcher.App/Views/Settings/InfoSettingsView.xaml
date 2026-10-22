@@ -65,6 +65,11 @@
                         Command="{Binding CheckUpdatesCommand}"
                         RequestBringIntoView="CheckUpdatesButton_OnRequestBringIntoView"
                         Style="{StaticResource LauncherPrimaryDialogButtonStyle}" />
+                <Button Margin="0,0,10,10"
+                        Content="{x:Static res:Strings.Settings_PreviewUpdateDialogButton}"
+                        Command="{Binding PreviewUpdateDialogCommand}"
+                        Style="{StaticResource LauncherDialogButtonStyle}"
+                        Visibility="{Binding IsUpdateDialogPreviewAvailable, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}" />
             </WrapPanel>
         </StackPanel>
 

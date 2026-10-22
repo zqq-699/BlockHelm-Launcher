@@ -3851,4 +3851,12 @@ The current game folder will be backed up first.</value>
   <data name="Status_DataPackDownloadingFormat" xml:space="preserve"><value>Downloading {0}</value></data>
   <data name="Status_DataPackDownloadedFormat" xml:space="preserve"><value>Data pack downloaded: {0}</value></data>
   <data name="Status_DataPackDownloadFailed" xml:space="preserve"><value>Failed to download the data pack.</value></data>
+  <data name="Settings_PreviewUpdateDialogButton" xml:space="preserve"><value>Preview Update Dialog</value></data>
+  <data name="Dialog_UpdatePreviewNewFeaturesTitle" xml:space="preserve"><value>New Features</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureOne" xml:space="preserve"><value>The update dialog can now display categorized release notes.</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureTwo" xml:space="preserve"><value>Each section supports multiple update items.</value></data>
+  <data name="Dialog_UpdatePreviewFixesTitle" xml:space="preserve"><value>Bug Fixes</value></data>
+  <data name="Dialog_UpdatePreviewFixOne" xml:space="preserve"><value>Historical release notes without sections remain supported.</value></data>
+  <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>Long release notes can now be scrolled.</value></data>
+  <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>Preview update item {0}: this longer example checks release-note wrapping and scrolling behavior.</value></data>
 </root>

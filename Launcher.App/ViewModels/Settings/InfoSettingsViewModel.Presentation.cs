@@ -33,16 +33,19 @@ namespace Launcher.App.ViewModels.Settings;
 
 public sealed partial class InfoSettingsViewModel
 {
-private void ShowUpdateAvailableDialog(LauncherUpdateInfo update)
+    private void ShowUpdateAvailableDialog(LauncherUpdateInfo update, bool isPreview = false)
     {
         // 冻结本次更新的发布页与下载地址，弹窗打开后远端状态变化不影响用户确认目标。
         availableUpdate = update;
+        isUpdateDialogPreview = isPreview;
         UpdateDialogVersionText = update.DisplayVersion;
         UpdateDialogMessage = string.Format(Strings.Dialog_UpdateAvailableVersionFormat, update.DisplayVersion);
+        UpdateReleaseNotes = update.EffectiveReleaseNotesSections;
         updateDialogReleasePageUrl = update.ReleasePageUrl;
         updateDialogDownloadUrl = string.IsNullOrWhiteSpace(update.DownloadUrl)
             ? update.ReleasePageUrl
             : update.DownloadUrl;
+        ConfirmUpdateCommand.NotifyCanExecuteChanged();
         IsUpdateAvailableDialogOpen = true;
     }
 

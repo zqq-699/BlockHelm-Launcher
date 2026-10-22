@@ -1432,4 +1432,12 @@
   <data name="Status_DataPackDownloadingFormat" xml:space="preserve"><value>正在下载 {0}</value></data>
   <data name="Status_DataPackDownloadedFormat" xml:space="preserve"><value>数据包已下载：{0}</value></data>
   <data name="Status_DataPackDownloadFailed" xml:space="preserve"><value>数据包下载失败。</value></data>
+  <data name="Settings_PreviewUpdateDialogButton" xml:space="preserve"><value>预览更新弹窗</value></data>
+  <data name="Dialog_UpdatePreviewNewFeaturesTitle" xml:space="preserve"><value>新功能</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureOne" xml:space="preserve"><value>更新弹窗现在可以直接显示分区更新日志。</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureTwo" xml:space="preserve"><value>每个板块支持显示多个更新子项。</value></data>
+  <data name="Dialog_UpdatePreviewFixesTitle" xml:space="preserve"><value>问题修复</value></data>
+  <data name="Dialog_UpdatePreviewFixOne" xml:space="preserve"><value>兼容旧版未分区的更新日志。</value></data>
+  <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>较长的更新内容现在可以滚动查看。</value></data>
+  <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>预览更新子项 {0}：这是一条用于检查较长更新日志、自动换行和滚动效果的示例内容。</value></data>
 </root>

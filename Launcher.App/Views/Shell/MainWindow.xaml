@@ -1363,7 +1363,7 @@
             <controls:DialogHost x:Name="LauncherUpdateDialogHost"
                                  Grid.ColumnSpan="2"
                                  Grid.RowSpan="2"
-                                 DialogWidth="420"
+                                 DialogWidth="560"
                                  UseIntegratedOverlay="True"
                                  IsOpen="{Binding DataContext.SettingsPage.Info.IsUpdateAvailableDialogOpen, ElementName=RootWindow}"
                                  DataContext="{Binding DataContext.SettingsPage.Info, ElementName=RootWindow}">
@@ -1371,6 +1371,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
@@ -1378,12 +1379,69 @@
                                Style="{StaticResource DialogTitleTextStyle}" />
 
                     <TextBlock Grid.Row="1"
-                               Margin="0,16,0,24"
+                               Margin="0,8,0,16"
                                Text="{Binding UpdateDialogMessage}"
                                Style="{StaticResource DialogBodyTextStyle}"
                                TextWrapping="Wrap" />
 
-                    <Grid Grid.Row="2">
+                    <ScrollViewer Grid.Row="2"
+                                  MaxHeight="360"
+                                  Margin="0,0,0,24"
+                                  Padding="0,0,12,0"
+                                  Style="{StaticResource MainContentScrollViewerStyle}"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Visibility="{Binding HasUpdateReleaseNotes, Converter={StaticResource BooleanToMenuTextVisibilityConverter}}">
+                        <ItemsControl ItemsSource="{Binding UpdateReleaseNotes}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,8,18">
+                                        <TextBlock Margin="0,0,0,8"
+                                                   Text="{Binding Title}"
+                                                   Foreground="{DynamicResource Brush.F4F4F4}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Title}" Value="{x:Null}">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding Title}" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <ItemsControl ItemsSource="{Binding Items}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,0,0,7">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="14" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="-"
+                                                                   Foreground="{DynamicResource Brush.CFFFFFFF}"
+                                                                   FontSize="14"
+                                                                   VerticalAlignment="Top" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding}"
+                                                                   Style="{StaticResource DialogBodyTextStyle}"
+                                                                   TextWrapping="Wrap" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <Grid Grid.Row="3">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />

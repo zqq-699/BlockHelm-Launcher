@@ -345,6 +345,7 @@ public static class Strings
     public static string Settings_LauncherVersionUnknown => Get(nameof(Settings_LauncherVersionUnknown));
     public static string Settings_ViewGithubRepositoryButton => Get(nameof(Settings_ViewGithubRepositoryButton));
     public static string Settings_CheckUpdatesButton => Get(nameof(Settings_CheckUpdatesButton));
+    public static string Settings_PreviewUpdateDialogButton => Get(nameof(Settings_PreviewUpdateDialogButton));
     public static string Settings_UpdateSection => Get(nameof(Settings_UpdateSection));
     public static string Settings_UpdateChannelLabel => Get(nameof(Settings_UpdateChannelLabel));
     public static string Settings_UpdateChannelReleaseTitle => Get(nameof(Settings_UpdateChannelReleaseTitle));
@@ -364,6 +365,13 @@ public static class Strings
     public static string Dialog_FeedbackFeatureSuggestionsButton => Get(nameof(Dialog_FeedbackFeatureSuggestionsButton));
     public static string Dialog_FeedbackBugReportsButton => Get(nameof(Dialog_FeedbackBugReportsButton));
     public static string Dialog_UpdateAvailableVersionFormat => Get(nameof(Dialog_UpdateAvailableVersionFormat));
+    public static string Dialog_UpdatePreviewNewFeaturesTitle => Get(nameof(Dialog_UpdatePreviewNewFeaturesTitle));
+    public static string Dialog_UpdatePreviewNewFeatureOne => Get(nameof(Dialog_UpdatePreviewNewFeatureOne));
+    public static string Dialog_UpdatePreviewNewFeatureTwo => Get(nameof(Dialog_UpdatePreviewNewFeatureTwo));
+    public static string Dialog_UpdatePreviewAdditionalItemFormat => Get(nameof(Dialog_UpdatePreviewAdditionalItemFormat));
+    public static string Dialog_UpdatePreviewFixesTitle => Get(nameof(Dialog_UpdatePreviewFixesTitle));
+    public static string Dialog_UpdatePreviewFixOne => Get(nameof(Dialog_UpdatePreviewFixOne));
+    public static string Dialog_UpdatePreviewFixTwo => Get(nameof(Dialog_UpdatePreviewFixTwo));
     public static string Dialog_OpenUpdateChangelogButton => Get(nameof(Dialog_OpenUpdateChangelogButton));
     public static string Dialog_UpdateButton => Get(nameof(Dialog_UpdateButton));
     public static string Dialog_ModUpdateTitle => Get(nameof(Dialog_ModUpdateTitle));

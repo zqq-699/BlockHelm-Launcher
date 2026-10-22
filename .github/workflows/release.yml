@@ -54,6 +54,8 @@ jobs:
             throw "Release notes file is empty: $notesPath"
           }
 
+          & ./scripts/validate-release-notes.ps1 -Path $notesPath
+
           [xml]$project = Get-Content "Launcher.App/Launcher.App.csproj"
           $properties = $project.Project.PropertyGroup | Where-Object { $_.InformationalVersion } | Select-Object -First 1
           if ($properties.InformationalVersion -ne $versionName) {

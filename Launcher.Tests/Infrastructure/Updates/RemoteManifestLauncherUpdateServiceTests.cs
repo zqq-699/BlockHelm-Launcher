@@ -28,6 +28,22 @@ public sealed class RemoteManifestLauncherUpdateServiceTests
     }
 
     [Fact]
+    public async Task ReleaseNotesAreExposedAsStructuredSections()
+    {
+        const string releaseNotes = "# 正式版 1.1.0\n\n## 新功能\n- 弹窗内显示更新日志。\n\n## 问题修复\n- 修复更新提示。";
+        var service = CreateService((GiteeManifest, HttpStatusCode.OK, CreateManifest(releaseNotes: releaseNotes)));
+
+        var result = await service.CheckForUpdatesAsync("1.0.0", LauncherUpdateChannel.Release);
+
+        var sections = result.Update?.EffectiveReleaseNotesSections;
+        Assert.NotNull(sections);
+        Assert.Equal(2, sections.Count);
+        Assert.Equal("新功能", sections[0].Title);
+        Assert.Equal(["弹窗内显示更新日志。"], sections[0].Items);
+        Assert.Equal("问题修复", sections[1].Title);
+    }
+
+    [Fact]
     public async Task ManifestRequestsUseUnifiedUserAgent()
     {
         var handler = new ResponseHandler([(GiteeManifest, HttpStatusCode.OK, CreateManifest())]);
@@ -79,7 +95,8 @@ public sealed class RemoteManifestLauncherUpdateServiceTests
         string version = "1.1.0",
         long size = 12,
         string sha256 = Sha256,
-        string downloadUrl = "https://github.com/zqq-699/BlockHelm-Launcher/releases/download/v1.1.0/BlockHelm_Launcher_x64.exe") => $$"""
+        string downloadUrl = "https://github.com/zqq-699/BlockHelm-Launcher/releases/download/v1.1.0/BlockHelm_Launcher_x64.exe",
+        string releaseNotes = "test") => $$"""
     {
       "schemaVersion": 1,
       "appId": "BlockHelm-Launcher",
@@ -89,7 +106,7 @@ public sealed class RemoteManifestLauncherUpdateServiceTests
       "publishedAt": "2026-07-12T00:00:00Z",
       "mandatory": false,
       "minSupportedVersionCode": 0,
-      "releaseNotes": "test",
+      "releaseNotes": {{System.Text.Json.JsonSerializer.Serialize(releaseNotes)}},
       "assets": [{
         "platform": "windows", "arch": "x64", "packageType": "exe",
         "fileName": "BlockHelm_Launcher_x64.exe", "size": {{size}}, "sha256": "{{sha256}}",

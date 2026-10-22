@@ -3851,4 +3851,12 @@
   <data name="Status_DataPackDownloadingFormat" xml:space="preserve"><value>{0} をダウンロードしています</value></data>
   <data name="Status_DataPackDownloadedFormat" xml:space="preserve"><value>データパックをダウンロードしました: {0}</value></data>
   <data name="Status_DataPackDownloadFailed" xml:space="preserve"><value>データパックのダウンロードに失敗しました。</value></data>
+  <data name="Settings_PreviewUpdateDialogButton" xml:space="preserve"><value>更新ダイアログをプレビュー</value></data>
+  <data name="Dialog_UpdatePreviewNewFeaturesTitle" xml:space="preserve"><value>新機能</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureOne" xml:space="preserve"><value>更新ダイアログに分類されたリリースノートを表示できるようになりました。</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureTwo" xml:space="preserve"><value>各セクションに複数の更新項目を表示できます。</value></data>
+  <data name="Dialog_UpdatePreviewFixesTitle" xml:space="preserve"><value>不具合修正</value></data>
+  <data name="Dialog_UpdatePreviewFixOne" xml:space="preserve"><value>セクションのない以前のリリースノートにも対応します。</value></data>
+  <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>長い更新内容をスクロールして確認できます。</value></data>
+  <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>プレビュー更新項目 {0}：長いリリースノートの折り返しとスクロール動作を確認するためのサンプルです。</value></data>
 </root>

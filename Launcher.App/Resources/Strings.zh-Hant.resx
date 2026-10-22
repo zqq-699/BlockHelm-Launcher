@@ -3851,4 +3851,12 @@
   <data name="Status_DataPackDownloadingFormat" xml:space="preserve"><value>正在下載 {0}</value></data>
   <data name="Status_DataPackDownloadedFormat" xml:space="preserve"><value>資料包已下載：{0}</value></data>
   <data name="Status_DataPackDownloadFailed" xml:space="preserve"><value>資料包下載失敗。</value></data>
+  <data name="Settings_PreviewUpdateDialogButton" xml:space="preserve"><value>預覽更新彈窗</value></data>
+  <data name="Dialog_UpdatePreviewNewFeaturesTitle" xml:space="preserve"><value>新功能</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureOne" xml:space="preserve"><value>更新彈窗現在可以直接顯示分區更新日誌。</value></data>
+  <data name="Dialog_UpdatePreviewNewFeatureTwo" xml:space="preserve"><value>每個板塊支援顯示多個更新子項。</value></data>
+  <data name="Dialog_UpdatePreviewFixesTitle" xml:space="preserve"><value>問題修復</value></data>
+  <data name="Dialog_UpdatePreviewFixOne" xml:space="preserve"><value>相容舊版未分區的更新日誌。</value></data>
+  <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>較長的更新內容現在可以捲動檢視。</value></data>
+  <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>預覽更新子項 {0}：這是一條用於檢查較長更新日誌、自動換行和捲動效果的範例內容。</value></data>
 </root>

@@ -48,6 +48,7 @@ public sealed partial class InfoSettingsViewModel : SettingsSectionViewModelBase
     private string? updateDialogReleasePageUrl;
     private string? updateDialogDownloadUrl;
     private bool isUpdateCheckRunning;
+    private bool isUpdateDialogPreview;
 
     internal InfoSettingsViewModel(
         SettingsPersistenceCoordinator persistence,
@@ -97,6 +98,10 @@ public sealed partial class InfoSettingsViewModel : SettingsSectionViewModelBase
     private string updateDialogMessage = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUpdateReleaseNotes))]
+    private IReadOnlyList<LauncherUpdateReleaseNotesSection> updateReleaseNotes = [];
+
+    [ObservableProperty]
     private bool isCheckingUpdates;
 
     [ObservableProperty]
@@ -116,4 +121,12 @@ public sealed partial class InfoSettingsViewModel : SettingsSectionViewModelBase
     public string ConfirmUpdateButtonText => IsStartingUpdate
         ? Strings.Status_DownloadingLauncherUpdate
         : Strings.Dialog_UpdateButton;
+
+    public bool HasUpdateReleaseNotes => UpdateReleaseNotes.Count > 0;
+
+#if DEBUG
+    public bool IsUpdateDialogPreviewAvailable => true;
+#else
+    public bool IsUpdateDialogPreviewAvailable => false;
+#endif
 }

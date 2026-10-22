@@ -122,6 +122,49 @@ public sealed partial class InfoSettingsViewModel
     }
 
     [RelayCommand]
+    private void PreviewUpdateDialog()
+    {
+#if DEBUG
+        var featureItems = new List<string>
+        {
+            Strings.Dialog_UpdatePreviewNewFeatureOne,
+            Strings.Dialog_UpdatePreviewNewFeatureTwo
+        };
+        for (var index = 1; index <= 10; index++)
+        {
+            featureItems.Add(string.Format(
+                Strings.Dialog_UpdatePreviewAdditionalItemFormat,
+                index));
+        }
+
+        var sections = new LauncherUpdateReleaseNotesSection[]
+        {
+            new(
+                Strings.Dialog_UpdatePreviewNewFeaturesTitle,
+                featureItems),
+            new(
+                Strings.Dialog_UpdatePreviewFixesTitle,
+                [
+                    Strings.Dialog_UpdatePreviewFixOne,
+                    Strings.Dialog_UpdatePreviewFixTwo
+                ])
+        };
+        var update = new LauncherUpdateInfo(
+            "preview",
+            "1.0.0-preview",
+            LauncherProjectLinks.GitHubReleasesUrl,
+            null,
+            null,
+            null,
+            LauncherUpdateAssetKind.None,
+            0,
+            string.Empty,
+            ReleaseNotesSections: sections);
+        ShowUpdateAvailableDialog(update, isPreview: true);
+#endif
+    }
+
+    [RelayCommand]
     private void CancelUpdateDialog()
     {
         IsUpdateAvailableDialogOpen = false;
@@ -178,7 +221,7 @@ public sealed partial class InfoSettingsViewModel
 
     private bool CanConfirmUpdate()
     {
-        return !IsStartingUpdate;
+        return !IsStartingUpdate && !isUpdateDialogPreview;
     }
 
     partial void OnIsCheckingUpdatesChanged(bool value)
