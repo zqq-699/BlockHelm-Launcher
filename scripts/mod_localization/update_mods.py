@@ -188,7 +188,7 @@ class McmodHtmlParser(HTMLParser):
 
 def decode_target(href: str) -> str:
     url = parse.urlsplit(href)
-    if not url.path.startswith("/target/") or url.hostname not in (None, "mcmod.cn", "www.mcmod.cn"):
+    if not url.path.startswith("/target/") or url.hostname not in (None, "mcmod.cn", "www.mcmod.cn", "link.mcmod.cn"):
         return href
     encoded = url.path[len("/target/"):]
     try:
@@ -289,7 +289,7 @@ class BudgetClient:
         self.last_request_at = time.monotonic()
         http_request = request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
         try:
-            with request.urlopen(http_request, timeout=10) as response:
+            with request.urlopen(http_request, timeout=15) as response:
                 if parse.urlsplit(response.geturl()).hostname != "www.mcmod.cn":
                     raise StopCrawl("MC Encyclopedia redirected to another host")
                 payload = response.read(MAX_HTML_BYTES + 1)
@@ -307,6 +307,8 @@ class BudgetClient:
             raise TransientFailure(f"HTTP {exc.code}") from exc
         except error.URLError as exc:
             raise TransientFailure(f"Network request failed: {exc.reason}") from exc
+        except TimeoutError as exc:
+            raise TransientFailure(f"Network request timed out: {exc}") from exc
 
     def load_robots(self) -> None:
         text = self._get_once(BASE_URL + "/robots.txt")

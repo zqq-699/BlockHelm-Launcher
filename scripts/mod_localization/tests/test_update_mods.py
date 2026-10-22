@@ -123,6 +123,20 @@ class ParserTests(unittest.TestCase):
     def test_other_sites_target_paths_are_not_decoded_as_mcmod_redirects(self):
         self.assertEqual("https://example.com/target/link", scraper.decode_target("https://example.com/target/link"))
 
+    def test_mcmod_link_host_redirects_resolve_platform_slugs(self):
+        curseforge = base64.urlsafe_b64encode(
+            b"https://www.curseforge.com/minecraft/mc-mods/blood-magic-altar-automation-optimization"
+        ).decode()
+        modrinth = base64.urlsafe_b64encode(b"https://modrinth.com/mod/laychens-lie").decode()
+        html = f"""<div class='class-title'><h3>示例</h3></div>
+                   <div class='common-link-frame'>
+                     <a href='//link.mcmod.cn/target/{curseforge}' title='CurseForge'>CF</a>
+                     <a href='https://link.mcmod.cn/target/{modrinth}' title='Modrinth'>MR</a>
+                   </div>"""
+        record = scraper.parse_mod(html, 31775, expect_link_frame=True)
+        self.assertEqual(["blood-magic-altar-automation-optimization"], record["curseForgeSlugs"])
+        self.assertEqual(["laychens-lie"], record["modrinthSlugs"])
+
     def test_legacy_curseforge_http_and_modrinth_plus_slugs_are_preserved(self):
         links = [
             "http://www.curseforge.com/minecraft/mc-mods/tinkers-construct",
@@ -528,6 +542,27 @@ class BudgetTests(unittest.TestCase):
         client.used = client.max_requests
         with self.assertRaises(scraper.BudgetExhausted):
             client.get("/class/3.html")
+
+    def test_read_timeout_retries_then_marks_mod_failed(self):
+        client = scraper.BudgetClient(5, 0, 0)
+        client.robots = scraper.robotparser.RobotFileParser()
+        client.robots.parse(["User-agent: *", "Allow: /"])
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value = response
+        response.geturl.return_value = "https://www.mcmod.cn/class/2.html"
+        response.read.side_effect = TimeoutError("The read operation timed out")
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            state = scraper.load_state(state_path, {1: make_record(1)})
+            with patch.object(scraper.request, "urlopen", return_value=response) as open_url:
+                status = scraper.fetch_mod(client, state, state_path, 2,
+                                           datetime(2026, 10, 22, tzinfo=timezone.utc), True)
+            self.assertEqual("failed", status)
+            self.assertEqual(2, client.used)
+            self.assertEqual(2, open_url.call_count)
+            self.assertEqual(3, state["nextNewId"])
+            self.assertEqual("2026-10-29", state["records"]["2"]["nextRetry"])
+            self.assertNotIn("2", state["pendingUpdates"])
 
 
 class CommandLineTests(unittest.TestCase):
