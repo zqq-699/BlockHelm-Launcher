@@ -89,13 +89,14 @@ public sealed class MinecraftDownloadRetryTests
     [Fact]
     public async Task TransientStatusRetriesFourTimesThenSwitchesSource()
     {
+        var logger = new CollectingLogger();
         var handler = new CallbackRequestHandler((requestNumber, request, _) =>
             Task.FromResult(CreateResponse(
                 requestNumber <= 4 ? HttpStatusCode.InternalServerError : HttpStatusCode.OK,
                 "{}",
                 request)));
         using var httpClient = CreateClient(handler);
-        var executor = CreateExecutor(httpClient);
+        var executor = CreateExecutor(httpClient, logger: logger);
 
         var result = await executor.ExecuteAsync(
             ManifestUrl,
@@ -108,6 +109,83 @@ public sealed class MinecraftDownloadRetryTests
         Assert.Equal(5, handler.RequestUris.Count);
         Assert.All(handler.RequestUris.Take(4), uri => Assert.Equal(handler.RequestUris[0], uri));
         Assert.NotEqual(handler.RequestUris[0], handler.RequestUris[4]);
+        Assert.DoesNotContain(logger.Entries, entry =>
+            entry.Message.Contains("Download exhausted all sources.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ExhaustedChecksumSourcesLogTimeoutAndFinalHttpStatusAtInformationLevel()
+    {
+        const string checksumUrl = "https://maven.neoforged.net/releases/net/neoforged/neoforge/26.3.0.95/neoforge-26.3.0.95-installer.jar.sha1";
+        var logger = new CollectingLogger { MinimumLevel = LogLevel.Information };
+        var handler = new CallbackRequestHandler(async (_, request, token) =>
+        {
+            if (request.RequestUri!.Host == "maven.neoforged.net")
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+
+            return CreateResponse(HttpStatusCode.NotFound, string.Empty, request);
+        });
+        using var httpClient = CreateClient(handler);
+        var executor = CreateExecutor(httpClient, new DownloadRetryOptions
+        {
+            MaxAttemptsPerSource = 2,
+            RetryDelay = TimeSpan.Zero,
+            ResponseHeadersTimeout = TimeSpan.FromMilliseconds(50)
+        }, logger);
+
+        await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
+            executor.ExecuteAsync(
+                checksumUrl,
+                DownloadSourcePreference.Official,
+                categoryHint: "NeoForge",
+                static (_, _) => Task.FromResult(true),
+                CancellationToken.None));
+
+        var summary = Assert.Single(logger.Entries, entry =>
+            entry.Message.Contains("Download exhausted all sources.", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Error, summary.Level);
+        Assert.Contains("NeoForgeOfficial: ResponseHeadersTimeout x2", summary.Message, StringComparison.Ordinal);
+        Assert.Contains("BmclApiNeoForge: HttpStatus (HTTP 404) x1", summary.Message, StringComparison.Ordinal);
+        Assert.Contains(checksumUrl, summary.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Debug);
+    }
+
+    [Fact]
+    public async Task ExhaustedFileSourceRoundLogsOneSummary()
+    {
+        var logger = new CollectingLogger { MinimumLevel = LogLevel.Information };
+        var handler = new CallbackRequestHandler((_, request, _) =>
+            Task.FromResult(CreateResponse(HttpStatusCode.NotFound, string.Empty, request)));
+        using var httpClient = CreateClient(handler);
+        var executor = CreateExecutor(httpClient, new DownloadRetryOptions
+        {
+            MaxFileSourceRounds = 1,
+            RetryDelay = TimeSpan.Zero
+        }, logger);
+        var directory = CreateTempDirectory();
+
+        try
+        {
+            await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
+                executor.DownloadFileAsync(
+                    ManifestUrl,
+                    DownloadSourcePreference.Official,
+                    categoryHint: "Mojang",
+                    Path.Combine(directory, "client.jar"),
+                    expectedSha1: null,
+                    expectedSize: null,
+                    CancellationToken.None));
+
+            var summary = Assert.Single(logger.Entries, entry =>
+                entry.Message.Contains("Download exhausted all sources.", StringComparison.Ordinal));
+            Assert.Equal(LogLevel.Error, summary.Level);
+            Assert.Contains("MojangOfficial: HttpStatus (HTTP 404) x1", summary.Message, StringComparison.Ordinal);
+            Assert.Contains("BmclApiMojang: HttpStatus (HTTP 404) x1", summary.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
@@ -561,10 +639,11 @@ public sealed class MinecraftDownloadRetryTests
     {
         public List<string> Messages { get; } = [];
         public List<LogEntry> Entries { get; } = [];
+        public LogLevel MinimumLevel { get; init; } = LogLevel.Trace;
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-        public bool IsEnabled(LogLevel logLevel) => true;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= MinimumLevel;
 
         public void Log<TState>(
             LogLevel logLevel,
@@ -573,6 +652,9 @@ public sealed class MinecraftDownloadRetryTests
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
+            if (!IsEnabled(logLevel))
+                return;
+
             var message = formatter(state, exception);
             Messages.Add(message);
             Entries.Add(new LogEntry(logLevel, message, exception));

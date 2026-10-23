@@ -1337,6 +1337,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             .EnumerateRequests(originalUrl, preference, categoryHint)
             .ToList();
         var failures = new List<Exception>();
+        var sourceFailures = new List<SourceFailure>();
         var noResultSourceCount = 0;
         ResolvedDownloadRequest? lastResolution = null;
 
@@ -1361,6 +1362,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                         DownloadFailureReason.Network,
                         "The download host is temporarily avoided after repeated transient failures.");
                     failures.Add(avoided);
+                    sourceFailures.Add(new SourceFailure(resolution.ResolvedSourceKind, avoided.Reason, avoided.StatusCode));
                     LogFailure(resolution, attempt, avoided, retryCurrentSource: false);
                     break;
                 }
@@ -1438,6 +1440,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                         throw failure;
 
                     failures.Add(failure);
+                    sourceFailures.Add(new SourceFailure(resolution.ResolvedSourceKind, failure.Reason, failure.StatusCode));
                     var retryCurrentSource = failure.Disposition is DownloadFailureDisposition.RetryCurrentSource
                         && attempt < retryOptions.MaxAttemptsPerSource;
                     LogFailure(resolution, attempt, failure, retryCurrentSource);
@@ -1460,6 +1463,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             ?? throw new InvalidOperationException($"No download candidates were available for {originalUrl}.");
         var finalException = failures.LastOrDefault()
             ?? new InvalidOperationException($"No download source returned a usable result for {originalUrl}.");
+        LogExhaustedRequest(finalResolution, sourceFailures);
         throw new DownloadSourceRequestException(finalResolution, finalException, failures);
     }
 
@@ -1475,6 +1479,7 @@ internal sealed class MinecraftDownloadRequestExecutor
     {
         var activeCandidateIndexes = Enumerable.Range(0, candidates.Count).ToList();
         var failures = new List<Exception>();
+        var sourceFailures = new List<SourceFailure>();
         var maxRounds = Math.Max(1, retryOptions.MaxFileSourceRounds);
         ResolvedDownloadRequest? lastResolution = null;
 
@@ -1499,6 +1504,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                         DownloadFailureReason.Network,
                         "The download host is temporarily avoided after repeated transient failures.");
                     failures.Add(avoided);
+                    sourceFailures.Add(new SourceFailure(resolution.ResolvedSourceKind, avoided.Reason, avoided.StatusCode));
                     var retryInLaterRound = round < maxRounds;
                     if (retryInLaterRound)
                     {
@@ -1551,6 +1557,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                         throw failure;
 
                     failures.Add(failure);
+                    sourceFailures.Add(new SourceFailure(resolution.ResolvedSourceKind, failure.Reason, failure.StatusCode));
                     var retryInLaterRound = failure.Disposition is DownloadFailureDisposition.RetryCurrentSource
                         && round < maxRounds;
                     if (retryInLaterRound)
@@ -1593,6 +1600,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             ?? throw new InvalidOperationException($"No download candidates were available for {originalUrl}.");
         var finalException = failures.LastOrDefault()
             ?? new InvalidOperationException($"No download source returned a usable result for {originalUrl}.");
+        LogExhaustedRequest(finalResolution, sourceFailures);
         throw new DownloadSourceRequestException(finalResolution, finalException, failures);
     }
 
@@ -1998,6 +2006,29 @@ internal sealed class MinecraftDownloadRequestExecutor
             failures.Count,
             failureReasons);
     }
+
+    private void LogExhaustedRequest(
+        ResolvedDownloadRequest resolution,
+        IReadOnlyList<SourceFailure> failures)
+    {
+        var summary = string.Join("; ", failures
+            .GroupBy(failure => (failure.SourceKind, failure.Reason, failure.StatusCode))
+            .Select(group =>
+                $"{group.Key.SourceKind}: {group.Key.Reason}"
+                + (group.Key.StatusCode is { } status ? $" (HTTP {(int)status})" : string.Empty)
+                + $" x{group.Count()}"));
+        logger.LogError(
+            "Download exhausted all sources. ResourceCategory={ResourceCategory} OriginalUrl={OriginalUrl} FailureCount={FailureCount} FailureSummary={FailureSummary}",
+            resolution.ResourceCategory,
+            DownloadUriLogSanitizer.Sanitize(resolution.OriginalUrl),
+            failures.Count,
+            summary);
+    }
+
+    private readonly record struct SourceFailure(
+        string SourceKind,
+        DownloadFailureReason Reason,
+        HttpStatusCode? StatusCode);
 
     private void LogFailure(
         ResolvedDownloadRequest resolution,
