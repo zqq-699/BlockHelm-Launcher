@@ -20,6 +20,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Launcher.App.Behaviors;
 using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.Application.Services;
@@ -34,11 +35,20 @@ namespace Launcher.App.ViewModels.Resources;
 public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject, IDisposable
 {
     private const int PageSize = 10000;
+    private const int GroupExpansionStagingThreshold = 8;
+    private const int FallbackVisibleGroupRowCount = 20;
+    private const double GroupRowHeight = 52;
+    private static readonly TimeSpan GroupExpansionStagingDuration = TimeSpan.FromMilliseconds(420);
 
     // 分页来源可能返回重叠结果，稳定 ID 集合确保同一版本只进入页面一次。
     private readonly HashSet<string> loadedVersionIds = new(StringComparer.OrdinalIgnoreCase);
     // 只记录用户主动切换过的分组；未操作分组始终根据当前分组数量应用默认状态。
     private readonly Dictionary<string, bool> groupExpansionStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> groupCollapseGenerations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> groupExpansionStagingGenerations = new(StringComparer.OrdinalIgnoreCase);
+    private bool isGroupExpansionStagingEnabled;
+    private double groupExpansionViewportHeight;
+    private int listRevision;
     private readonly ResourcesOnlineProjectPageOptions options;
     private readonly IResourceCatalogService? resourceCatalogService;
     private readonly Func<IReadOnlyList<GameInstance>>? getInstanceCatalogSnapshot;
@@ -91,6 +101,20 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
     public string LoadingMessage => options.VersionsLoadingText;
 
     public string Title => Builder.FormatTitle(SelectedTarget);
+
+    /// <summary>由版本列表视图挂载时开启；无视图时保持一次性插入。</summary>
+    public bool IsGroupExpansionStagingEnabled
+    {
+        get => isGroupExpansionStagingEnabled;
+        set => SetProperty(ref isGroupExpansionStagingEnabled, value);
+    }
+
+    /// <summary>用于只插入足以覆盖当前视口的首批子项；其余子项在位移动画后补齐。</summary>
+    public double GroupExpansionViewportHeight
+    {
+        get => groupExpansionViewportHeight;
+        set => groupExpansionViewportHeight = Math.Max(0, value);
+    }
 
     [ObservableProperty]
     private ResourcesModInstallTargetItemViewModel? selectedTarget;
@@ -498,7 +522,7 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
         var accepted = new List<ResourceProjectVersion>(versions.Count);
         foreach (var version in versions)
         {
-            // 旧来源缺失 VersionId 时使用文件名、版本号和发布时间组合成稳定兜底键。
+            // 旧来源缺少 VersionId 时使用文件名、版本号和发布时间组合成稳定兜底键。
             var key = string.IsNullOrWhiteSpace(version.VersionId)
                 ? $"{version.FileName}|{version.VersionNumber}|{version.PublishedAt:O}"
                 : version.VersionId;
@@ -547,6 +571,8 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
 
     private void ResetVersions(bool resetFilters)
     {
+        listRevision++;
+        groupExpansionStagingGenerations.Clear();
         SourceVersions = [];
         NextPageOffset = 0;
         loadedVersionIds.Clear();
@@ -635,6 +661,8 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
     /// </summary>
     private void RebuildList(bool playEntranceAnimation = true)
     {
+        listRevision++;
+        groupExpansionStagingGenerations.Clear();
         // Builder 集中处理 Minecraft/Loader 兼容、搜索和异构标题项，本类只发布构建结果。
         ListItems.Clear();
         var result = Builder.Build(
@@ -660,6 +688,40 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
     private void SetGroupExpanded(string title, bool isExpanded)
     {
         groupExpansionStates[title] = isExpanded;
+        var generation = groupCollapseGenerations.GetValueOrDefault(title) + 1;
+        groupCollapseGenerations[title] = generation;
+        groupExpansionStagingGenerations[title] =
+            groupExpansionStagingGenerations.GetValueOrDefault(title) + 1;
+
+        var revision = listRevision;
+        var children = GetGroupChildren(title);
+        if (!isExpanded
+            && children.Count > 0
+            && GroupCollapseRequested is not null)
+        {
+            // 真实行控件先播放倒放入场动画，动画结束后再移除行并补偿下方布局。
+            GroupCollapseRequested.Invoke(children, () =>
+            {
+                if (revision == listRevision
+                    && groupCollapseGenerations.GetValueOrDefault(title) == generation
+                    && groupExpansionStates.TryGetValue(title, out var expanded)
+                    && !expanded)
+                {
+                    ApplyGroupExpansion(title);
+                }
+            });
+            return;
+        }
+
+        ApplyGroupExpansion(title);
+    }
+
+    public event Action<IReadOnlyList<object>>? GroupEntranceRequested;
+
+    public event Action<IReadOnlyList<ResourcesModVersionItemViewModel>, Action>? GroupCollapseRequested;
+
+    private void ApplyGroupExpansion(string title)
+    {
         var groupIndex = -1;
         for (var index = 0; index < ListItems.Count; index++)
         {
@@ -673,6 +735,30 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
 
         if (groupIndex < 0)
             return;
+
+        if (!groupExpansionStates[title])
+        {
+            var children = GetGroupChildren(title);
+            if (children.Count > 0)
+            {
+                // 行控件已经淡出；用一段可见高度占位把下方内容平滑收回。
+                var visibleRows = Math.Min(children.Count, GetVisibleGroupRowCount());
+                var spacer = new ResourcesGroupCollapseSpacerItem(
+                    visibleRows * GroupRowHeight,
+                    ListEntranceAnimationDefaults.LayoutShiftDuration);
+                RemoveGroupChildren(title);
+                ListItems.Insert(groupIndex + 1, spacer);
+                RaiseStateChanged();
+
+                _ = RemoveGroupCollapseSpacerAsync(title, spacer, listRevision);
+            }
+            else
+            {
+                RaiseStateChanged();
+            }
+
+            return;
+        }
 
         // 保留标题对象和虚拟化容器，使箭头能在同一控件上完成旋转。
         var result = Builder.Build(
@@ -698,6 +784,28 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
         if (rebuiltGroupIndex < 0)
             return;
 
+        var newChildren = new List<object>();
+        for (var index = rebuiltGroupIndex + 1; index < result.Items.Count
+            && result.Items[index] is ResourcesModVersionItemViewModel; index++)
+            newChildren.Add(result.Items[index]);
+
+        var stageLargeGroup = groupExpansionStates[title]
+            && IsGroupExpansionStagingEnabled
+            && newChildren.Count > GroupExpansionStagingThreshold;
+        var stagedRowCount = GetVisibleGroupRowCount();
+        var entranceChildren = stageLargeGroup
+            ? newChildren.Take(stagedRowCount).ToList()
+            : newChildren;
+
+        if (groupExpansionStates[title]
+            && newChildren.Count > 0
+            && GroupEntranceRequested is not null)
+        {
+            foreach (var child in entranceChildren.OfType<ResourcesModVersionItemViewModel>())
+                child.IsGroupEntrancePending = true;
+            GroupEntranceRequested.Invoke(entranceChildren);
+        }
+
         var firstChildIndex = groupIndex + 1;
         while (firstChildIndex < ListItems.Count
             && ListItems[firstChildIndex] is not ResourcesModVersionListHeaderItem
@@ -706,13 +814,156 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
             ListItems.RemoveAt(firstChildIndex);
         }
 
-        for (var index = rebuiltGroupIndex + 1; index < result.Items.Count
-            && result.Items[index] is not ResourcesModVersionListHeaderItem; index++)
+        if (stageLargeGroup)
         {
-            ListItems.Insert(firstChildIndex++, result.Items[index]);
+            foreach (var child in entranceChildren)
+                ListItems.Insert(firstChildIndex++, child);
+
+            StartGroupExpansionCompletion(
+                title,
+                newChildren.Skip(stagedRowCount)
+                    .OfType<ResourcesModVersionItemViewModel>()
+                    .ToList());
+        }
+        else
+        {
+            foreach (var child in newChildren)
+                ListItems.Insert(firstChildIndex++, child);
         }
 
         RaiseStateChanged();
+    }
+
+    private void StartGroupExpansionCompletion(
+        string title,
+        IReadOnlyList<ResourcesModVersionItemViewModel> remainingChildren)
+    {
+        _ = CompleteGroupExpansionAsync(
+            title,
+            remainingChildren,
+            listRevision,
+            groupExpansionStagingGenerations.GetValueOrDefault(title));
+    }
+
+    private async Task CompleteGroupExpansionAsync(
+        string title,
+        IReadOnlyList<ResourcesModVersionItemViewModel> remainingChildren,
+        int revision,
+        int generation)
+    {
+        try
+        {
+            await Task.Delay(GroupExpansionStagingDuration).ConfigureAwait(false);
+            uiDispatcher.Invoke(() =>
+            {
+                if (revision != listRevision
+                    || !groupExpansionStates.TryGetValue(title, out var expanded)
+                    || !expanded
+                    || groupExpansionStagingGenerations.GetValueOrDefault(title) != generation)
+                    return;
+
+                if (remainingChildren.Count > 0)
+                {
+                    var insertIndex = GetGroupChildInsertIndex(title);
+                    if (insertIndex >= 0)
+                        foreach (var child in remainingChildren)
+                            ListItems.Insert(insertIndex++, child);
+                }
+
+                RaiseStateChanged();
+            });
+        }
+        catch (Exception exception)
+        {
+            logger?.LogWarning(
+                exception,
+                "Failed to complete resource version group expansion. Title={Title}",
+                title);
+        }
+    }
+
+    private List<ResourcesModVersionItemViewModel> GetGroupChildren(string title)
+    {
+        var children = new List<ResourcesModVersionItemViewModel>();
+        var headerIndex = FindGroupHeaderIndex(title);
+        for (var index = headerIndex + 1; headerIndex >= 0 && index < ListItems.Count
+            && ListItems[index] is ResourcesModVersionItemViewModel child; index++)
+            children.Add(child);
+
+        return children;
+    }
+
+    private int FindGroupHeaderIndex(string title)
+    {
+        for (var index = 0; index < ListItems.Count; index++)
+            if (ListItems[index] is ResourcesModVersionListHeaderItem header
+                && string.Equals(header.Title, title, StringComparison.OrdinalIgnoreCase))
+                return index;
+
+        return -1;
+    }
+
+    private int GetGroupChildInsertIndex(string title)
+    {
+        var headerIndex = FindGroupHeaderIndex(title);
+        if (headerIndex < 0)
+            return -1;
+
+        var index = headerIndex + 1;
+        while (index < ListItems.Count && ListItems[index] is ResourcesModVersionItemViewModel)
+            index++;
+        return index;
+    }
+
+    private int GetVisibleGroupRowCount()
+    {
+        return GroupExpansionViewportHeight > 0
+            ? Math.Max(1, (int)Math.Ceiling(GroupExpansionViewportHeight / GroupRowHeight) + 2)
+            : FallbackVisibleGroupRowCount;
+    }
+
+    private async Task RemoveGroupCollapseSpacerAsync(
+        string title,
+        ResourcesGroupCollapseSpacerItem spacer,
+        int revision)
+    {
+        try
+        {
+            await Task.Delay(spacer.Duration + TimeSpan.FromMilliseconds(50)).ConfigureAwait(false);
+            uiDispatcher.Invoke(() =>
+            {
+                if (revision != listRevision
+                    || !groupExpansionStates.TryGetValue(title, out var expanded)
+                    || expanded)
+                {
+                    return;
+                }
+
+                if (ListItems.Remove(spacer))
+                    RaiseStateChanged();
+            });
+        }
+        catch (Exception exception)
+        {
+            logger?.LogWarning(
+                exception,
+                "Failed to remove resource version group collapse spacer. Title={Title}",
+                title);
+        }
+    }
+
+    private void RemoveGroupChildren(string title)
+    {
+        var headerIndex = FindGroupHeaderIndex(title);
+        if (headerIndex < 0)
+            return;
+
+        var childIndex = headerIndex + 1;
+        while (childIndex < ListItems.Count
+            && ListItems[childIndex] is ResourcesModVersionItemViewModel)
+        {
+            ListItems.RemoveAt(childIndex);
+        }
     }
 
     private void UpdateFooter()

@@ -23,6 +23,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Launcher.App.Controls;
 using Launcher.App.Utilities;
@@ -88,6 +89,22 @@ public static class VirtualizedListItemStateBehavior
             state.QueueRenderedItemStateRefresh();
     }
 
+    public static void QueueItemEntranceAnimation(ListBox listBox, IReadOnlyList<object> items)
+    {
+        if (GetIsEnabled(listBox) && items.Count > 0)
+            GetState(listBox).QueueItemEntranceAnimation(items);
+    }
+
+    /// <summary>
+    /// 在列表数据插入/移除前调用：记录已实现项的旧布局位置，等布局完成后把差值作为
+    /// RenderTransform 起点动画到 0，避免下方分组瞬间跳到新位置。
+    /// </summary>
+    public static void QueueLayoutShiftAnimation(ListBox listBox)
+    {
+        if (GetIsEnabled(listBox))
+            GetState(listBox).QueueLayoutShiftAnimation();
+    }
+
     private static void OnIsEnabledChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
     {
         if (dependencyObject is not ListBox listBox)
@@ -149,12 +166,21 @@ public static class VirtualizedListItemStateBehavior
     {
         // 按数据对象引用记录已播放项，因为 ListBoxItem 会被 Recycling 模式反复复用。
         private readonly HashSet<object> animatedEntranceItems = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<object, int> targetedEntranceItems = new(ReferenceEqualityComparer.Instance);
+        private readonly List<LayoutShift> activeLayoutShifts = [];
         private readonly DispatcherTimer entranceAnimationTimer;
+        private Dictionary<object, LayoutShiftSnapshot>? pendingLayoutShiftTops;
         private ListBox? listBox;
         private ScrollViewer? scrollViewer;
+        private ItemsPresenter? itemsPresenter;
         // 刷新和动画标志把多个 WPF 事件合并为串行 Dispatcher 工作，避免重入遍历视觉树。
         private bool isStateRefreshQueued;
-        private bool isEntranceAnimationPending;
+        private bool isGlobalEntrancePending;
+        private bool isTargetedItemPruneQueued;
+        private bool isTargetedEntranceCompletionQueued;
+        private bool isLayoutShiftQueued;
+        private int targetedEntranceGeneration;
+        private int completedTargetedEntranceGeneration;
         private int entranceAnimationPassesRemaining;
         private int observedEntranceAnimationToken;
         private int observedScrollResetToken;
@@ -182,6 +208,7 @@ public static class VirtualizedListItemStateBehavior
             target.Unloaded += ListBox_OnUnloaded;
             target.SelectionChanged += ListBox_OnSelectionChanged;
             target.ItemContainerGenerator.StatusChanged += ItemContainerGenerator_OnStatusChanged;
+            target.ItemContainerGenerator.ItemsChanged += ItemContainerGenerator_OnItemsChanged;
             AttachScrollViewer();
             QueueScrollReset(GetScrollResetToken(target));
             TryApplyPendingScrollReset();
@@ -192,6 +219,9 @@ public static class VirtualizedListItemStateBehavior
         {
             // Timer 和 ScrollViewer 不是 ListBox 自身事件，必须显式释放以免控件被引用。
             entranceAnimationTimer.Stop();
+            ReleaseTargetedEntranceItems();
+            CancelLayoutShifts();
+            pendingLayoutShiftTops = null;
             DetachScrollViewer();
 
             if (listBox is null)
@@ -201,6 +231,7 @@ public static class VirtualizedListItemStateBehavior
             listBox.Unloaded -= ListBox_OnUnloaded;
             listBox.SelectionChanged -= ListBox_OnSelectionChanged;
             listBox.ItemContainerGenerator.StatusChanged -= ItemContainerGenerator_OnStatusChanged;
+            listBox.ItemContainerGenerator.ItemsChanged -= ItemContainerGenerator_OnItemsChanged;
             listBox = null;
             hoveredItem = null;
             animatedEntranceItems.Clear();
@@ -216,13 +247,178 @@ public static class VirtualizedListItemStateBehavior
 
             // 虚拟化容器会跨多个布局周期生成，因此保留多个短轮询周期来捕获首屏容器。
             observedEntranceAnimationToken = token;
-            isEntranceAnimationPending = true;
+            ReleaseTargetedEntranceItems();
+            isGlobalEntrancePending = true;
             entranceAnimationPassesRemaining = EntranceAnimationPassCount;
             animatedEntranceItems.Clear();
             entranceAnimationTimer.Start();
             MarkEntrancePendingContainers();
             QueueRenderedItemStateRefresh();
         }
+
+        public void QueueItemEntranceAnimation(IReadOnlyList<object> items)
+        {
+            targetedEntranceGeneration++;
+            for (var index = 0; index < items.Count; index++)
+            {
+                targetedEntranceItems[items[index]] = index;
+                animatedEntranceItems.Remove(items[index]);
+            }
+
+            MarkEntrancePendingContainers();
+            QueueRenderedItemStateRefresh();
+            QueueTargetedEntranceCompletion();
+        }
+
+        /// <summary>
+        /// 记录当前已实现项位置，等本次数据变更完成布局后把布局差值动画回 0。
+        /// 由调用方在 <c>ListItems</c> 插入/移除之前触发。
+        /// </summary>
+        public void QueueLayoutShiftAnimation()
+        {
+            if (listBox is null)
+                return;
+
+            // 上一轮补偿仍在播放时先回到布局位置，避免把动画偏移重复计入采样。
+            CancelLayoutShifts();
+            var tops = CaptureContainerTops();
+            pendingLayoutShiftTops = tops.Count == 0 ? null : tops;
+            if (pendingLayoutShiftTops is null || isLayoutShiftQueued)
+                return;
+
+            isLayoutShiftQueued = true;
+            listBox.Dispatcher.BeginInvoke(() =>
+            {
+                isLayoutShiftQueued = false;
+                ApplyLayoutShift();
+            }, DispatcherPriority.Loaded);
+        }
+
+        private Dictionary<object, LayoutShiftSnapshot> CaptureContainerTops()
+        {
+            var tops = new Dictionary<object, LayoutShiftSnapshot>(ReferenceEqualityComparer.Instance);
+            if (listBox is null)
+                return tops;
+
+            foreach (var container in FindRealizedContainers(listBox))
+            {
+                if (container.DataContext is not { } item)
+                    continue;
+
+                var top = GetContainerTop(container);
+                if (!double.IsNaN(top))
+                    tops[item] = new LayoutShiftSnapshot(top, IsContainerInUsableViewport(container));
+            }
+
+            return tops;
+        }
+
+        private void ApplyLayoutShift()
+        {
+            var previousTops = pendingLayoutShiftTops;
+            pendingLayoutShiftTops = null;
+            if (previousTops is null || listBox is null)
+                return;
+
+            var duration = ListEntranceAnimationDefaults.LayoutShiftDuration;
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var viewportTravel = GetLayoutShiftViewportTravel();
+            foreach (var container in FindRealizedContainers(listBox))
+            {
+                if (container.DataContext is not { } item
+                    || !previousTops.TryGetValue(item, out var previous))
+                {
+                    continue;
+                }
+
+                var currentTop = GetContainerTop(container);
+                if (double.IsNaN(currentTop))
+                    continue;
+
+                var isVisibleAfter = IsContainerInUsableViewport(container);
+                // 子项多时下方内容会直接被推出视口；视口外的位移不再处理。
+                if (!previous.WasVisible && !isVisibleAfter)
+                    continue;
+
+                var delta = previous.Top - currentTop;
+                if (Math.Abs(delta) < 0.5)
+                    continue;
+
+                var start = delta;
+                var end = 0d;
+                if (viewportTravel > 0)
+                {
+                    if (previous.WasVisible && !isVisibleAfter)
+                    {
+                        // 离开视口：只播放视口内的可见段，剩余位移直接交给布局。
+                        end = delta > 0
+                            ? delta - Math.Min(delta, viewportTravel)
+                            : delta + Math.Min(-delta, viewportTravel);
+                    }
+                    else if (!previous.WasVisible && isVisibleAfter)
+                    {
+                        // 进入视口：从最近的视口边缘开始，而不是从很远的旧位置。
+                        start = delta > 0
+                            ? Math.Min(delta, viewportTravel)
+                            : Math.Max(delta, -viewportTravel);
+                    }
+                }
+
+                var translate = new TranslateTransform(0, start);
+                container.RenderTransform = translate;
+                var animation = new DoubleAnimation(start, end, duration)
+                {
+                    EasingFunction = easing
+                };
+                animation.Completed += (_, _) =>
+                {
+                    activeLayoutShifts.RemoveAll(shift => ReferenceEquals(shift.Transform, translate));
+                    if (ReferenceEquals(container.RenderTransform, translate))
+                        container.RenderTransform = null;
+                };
+                translate.BeginAnimation(TranslateTransform.YProperty, animation);
+                activeLayoutShifts.Add(new LayoutShift(container, translate));
+            }
+        }
+
+        private double GetLayoutShiftViewportTravel()
+        {
+            return scrollViewer is { ViewportHeight: > 0 } scroller
+                ? scroller.ViewportHeight + 48d
+                : 0d;
+        }
+
+        private double GetContainerTop(ListBoxItem container)
+        {
+            // 相对 ItemsPresenter 采样，滚动位置变化不会污染布局差值。
+            var ancestor = (Visual?)itemsPresenter ?? scrollViewer;
+            if (ancestor is null)
+                return double.NaN;
+
+            try
+            {
+                return container.TransformToAncestor(ancestor).Transform(new Point(0, 0)).Y;
+            }
+            catch (InvalidOperationException)
+            {
+                return double.NaN;
+            }
+        }
+
+        private void CancelLayoutShifts()
+        {
+            foreach (var shift in activeLayoutShifts)
+            {
+                if (ReferenceEquals(shift.Container.RenderTransform, shift.Transform))
+                    shift.Container.RenderTransform = null;
+            }
+
+            activeLayoutShifts.Clear();
+        }
+
+        private readonly record struct LayoutShift(ListBoxItem Container, TranslateTransform Transform);
+
+        private readonly record struct LayoutShiftSnapshot(double Top, bool WasVisible);
 
         /// <summary>
         /// 只在新的上下文令牌发布时重置滚动；控件临时卸载后使用同一令牌重新挂载不会改变原位置。
@@ -245,11 +441,17 @@ public static class VirtualizedListItemStateBehavior
 
             if (listBox is { } target)
                 QueueEntranceAnimation(GetEntranceAnimationToken(target));
+
+            QueueTargetedEntranceCompletion();
         }
 
         private void ListBox_OnUnloaded(object sender, RoutedEventArgs e)
         {
             entranceAnimationTimer.Stop();
+            ReleaseTargetedEntranceItems();
+            CancelLayoutShifts();
+            pendingLayoutShiftTops = null;
+            isGlobalEntrancePending = false;
             DetachScrollViewer();
         }
 
@@ -265,6 +467,76 @@ public static class VirtualizedListItemStateBehavior
                 // 新容器先进入等待状态，再在同一轮判断哪些位于可视区域并真正播放。
                 MarkEntrancePendingContainers();
                 PreparePendingEntranceAnimationStates();
+                QueueTargetedEntranceCompletion();
+            }
+
+            QueueRenderedItemStateRefresh();
+        }
+
+        private void ItemContainerGenerator_OnItemsChanged(object? sender, ItemsChangedEventArgs e)
+        {
+            // 容器即将复用或重建，旧容器的补偿位移不能带到新数据项上。
+            CancelLayoutShifts();
+
+            if (targetedEntranceItems.Count == 0 || isTargetedItemPruneQueued || listBox is null)
+                return;
+
+            isTargetedItemPruneQueued = true;
+            listBox.Dispatcher.BeginInvoke(() =>
+            {
+                isTargetedItemPruneQueued = false;
+                if (listBox is null || targetedEntranceItems.Count == 0)
+                    return;
+
+                var currentItems = new HashSet<object>(listBox.Items.Cast<object>(), ReferenceEqualityComparer.Instance);
+                foreach (var item in targetedEntranceItems.Keys.Where(item => !currentItems.Contains(item)).ToArray())
+                {
+                    if (item is IListEntrancePendingItem pendingItem)
+                        pendingItem.IsGroupEntrancePending = false;
+                    targetedEntranceItems.Remove(item);
+                    animatedEntranceItems.Remove(item);
+                }
+            }, DispatcherPriority.Loaded);
+        }
+
+        private void QueueTargetedEntranceCompletion()
+        {
+            if (targetedEntranceItems.Count == 0 || isTargetedEntranceCompletionQueued || listBox is null
+                || targetedEntranceGeneration == completedTargetedEntranceGeneration)
+                return;
+
+            isTargetedEntranceCompletionQueued = true;
+            listBox.Dispatcher.BeginInvoke(() =>
+            {
+                isTargetedEntranceCompletionQueued = false;
+                CompleteTargetedEntranceAfterInitialLayout();
+            }, DispatcherPriority.ContextIdle);
+        }
+
+        private void CompleteTargetedEntranceAfterInitialLayout()
+        {
+            if (listBox is not { IsLoaded: true, IsVisible: true } target
+                || targetedEntranceItems.Count == 0
+                || target.ItemContainerGenerator.Status != GeneratorStatus.ContainersGenerated)
+                return;
+
+            // 插入大量子项时先完成当前视口布局；仅这一批可见容器参加本次展开动画。
+            completedTargetedEntranceGeneration = targetedEntranceGeneration;
+            target.UpdateLayout();
+            MarkEntrancePendingContainers();
+            PreparePendingEntranceAnimationStates();
+            var initialViewportItems = new HashSet<object>(
+                FindRealizedContainers(target)
+                    .Where(IsContainerInUsableViewport)
+                    .Select(container => container.DataContext)
+                    .OfType<object>(),
+                ReferenceEqualityComparer.Instance);
+            foreach (var item in targetedEntranceItems.Keys.Where(item => !initialViewportItems.Contains(item)).ToArray())
+            {
+                if (item is IListEntrancePendingItem pendingItem)
+                    pendingItem.IsGroupEntrancePending = false;
+                targetedEntranceItems.Remove(item);
+                animatedEntranceItems.Remove(item);
             }
 
             QueueRenderedItemStateRefresh();
@@ -278,13 +550,18 @@ public static class VirtualizedListItemStateBehavior
             // ScrollViewer 位于控件模板内部，模板未应用前无法订阅滚动事件。
             listBox.ApplyTemplate();
             var nextScrollViewer = VisualTreeSearch.FindDescendant<ScrollViewer>(listBox, _ => true);
-            if (ReferenceEquals(scrollViewer, nextScrollViewer))
-                return;
+            if (!ReferenceEquals(scrollViewer, nextScrollViewer))
+            {
+                DetachScrollViewer();
+                scrollViewer = nextScrollViewer;
+                if (scrollViewer is not null)
+                    scrollViewer.ScrollChanged += ScrollViewer_OnScrollChanged;
+            }
 
-            DetachScrollViewer();
-            scrollViewer = nextScrollViewer;
-            if (scrollViewer is not null)
-                scrollViewer.ScrollChanged += ScrollViewer_OnScrollChanged;
+            // ItemsPresenter 的模板可能晚于 ListBox 模板生成，每次挂载都重新查找。
+            itemsPresenter = scrollViewer is null
+                ? null
+                : VisualTreeSearch.FindDescendant<ItemsPresenter>(listBox, _ => true);
         }
 
         private void TryApplyPendingScrollReset()
@@ -309,10 +586,15 @@ public static class VirtualizedListItemStateBehavior
 
             scrollViewer.ScrollChanged -= ScrollViewer_OnScrollChanged;
             scrollViewer = null;
+            itemsPresenter = null;
         }
 
         private void ScrollViewer_OnScrollChanged(object sender, ScrollChangedEventArgs e)
         {
+            // 用户滚动时继续保留补偿位移会让行粘在旧位置，直接结束布局补偿动画。
+            if (e.VerticalChange != 0)
+                CancelLayoutShifts();
+
             QueueRenderedItemStateRefresh();
         }
 
@@ -338,7 +620,7 @@ public static class VirtualizedListItemStateBehavior
 
         private void EntranceAnimationTimer_OnTick(object? sender, EventArgs e)
         {
-            if (!isEntranceAnimationPending)
+            if (!isGlobalEntrancePending)
             {
                 entranceAnimationTimer.Stop();
                 return;
@@ -350,8 +632,11 @@ public static class VirtualizedListItemStateBehavior
             if (entranceAnimationPassesRemaining > 0)
                 return;
 
-            isEntranceAnimationPending = false;
-            ClearEntrancePendingStates();
+            isGlobalEntrancePending = false;
+            if (targetedEntranceItems.Count == 0)
+                ClearEntrancePendingStates();
+            else
+                QueueRenderedItemStateRefresh();
             entranceAnimationTimer.Stop();
         }
 
@@ -381,13 +666,14 @@ public static class VirtualizedListItemStateBehavior
 
         private void PlayPendingEntranceAnimations()
         {
-            if (!isEntranceAnimationPending || listBox is null)
+            if (listBox is null || (!isGlobalEntrancePending && targetedEntranceItems.Count == 0))
                 return;
 
             if (listBox.Items.Count == 0)
             {
-                isEntranceAnimationPending = false;
+                isGlobalEntrancePending = false;
                 ClearEntrancePendingStates();
+                ReleaseTargetedEntranceItems();
                 entranceAnimationTimer.Stop();
                 return;
             }
@@ -400,7 +686,7 @@ public static class VirtualizedListItemStateBehavior
         /// </summary>
         private void PreparePendingEntranceAnimationStates()
         {
-            if (!isEntranceAnimationPending || listBox is null)
+            if (listBox is null || (!isGlobalEntrancePending && targetedEntranceItems.Count == 0))
                 return;
 
             var containers = FindRealizedContainers(listBox);
@@ -411,23 +697,39 @@ public static class VirtualizedListItemStateBehavior
                     continue;
 
                 // 按数据项身份记录播放状态，而不是按可回收容器记录，防止滚动后同一项重复入场。
-                if (container.DataContext is not { } item || animatedEntranceItems.Contains(item))
+                if (container.DataContext is not { } item)
                     continue;
+
+                var isTargeted = targetedEntranceItems.TryGetValue(item, out var targetedIndex);
+                if (!isTargeted && !isGlobalEntrancePending)
+                    continue;
+
+                if (animatedEntranceItems.Contains(item))
+                {
+                    if (!isTargeted || item is not IListEntrancePendingItem { IsGroupEntrancePending: true }
+                        || EnsureItemState(container).ShouldPlayEnterAnimation)
+                        continue;
+
+                    // 上一容器在播放前被回收，允许新容器接过尚未消费的入场请求。
+                    animatedEntranceItems.Remove(item);
+                }
 
                 if (!IsContainerInUsableViewport(container))
                     continue;
 
                 var state = EnsureItemState(container);
                 state.IsEntranceAnimationPending = true;
-                state.EnterAnimationIndex = index;
+                state.EnterAnimationIndex = isTargeted ? targetedIndex : index;
                 state.ShouldPlayEnterAnimation = true;
                 animatedEntranceItems.Add(item);
+                if (isTargeted && item is IListEntrancePendingItem { IsGroupEntrancePending: false })
+                    targetedEntranceItems.Remove(item);
             }
         }
 
         private void MarkEntrancePendingContainers()
         {
-            if (!isEntranceAnimationPending || listBox is null)
+            if (listBox is null || (!isGlobalEntrancePending && targetedEntranceItems.Count == 0))
                 return;
 
             foreach (var container in FindRealizedContainers(listBox))
@@ -441,10 +743,13 @@ public static class VirtualizedListItemStateBehavior
 
         private bool ShouldHoldForEntranceAnimation(ListBoxItem container)
         {
-            if (!isEntranceAnimationPending || listBox is null)
+            if (listBox is null || (!isGlobalEntrancePending && targetedEntranceItems.Count == 0))
                 return false;
 
             if (container.DataContext is not { } item || animatedEntranceItems.Contains(item))
+                return false;
+
+            if (!isGlobalEntrancePending && !targetedEntranceItems.ContainsKey(item))
                 return false;
 
             // 未映射到数据索引的临时容器不参与动画，防止得到无效 stagger 序号。
@@ -459,6 +764,15 @@ public static class VirtualizedListItemStateBehavior
 
             foreach (var container in FindRealizedContainers(listBox))
                 EnsureItemState(container).IsEntranceAnimationPending = false;
+        }
+
+        private void ReleaseTargetedEntranceItems()
+        {
+            foreach (var item in targetedEntranceItems.Keys)
+                if (item is IListEntrancePendingItem pendingItem)
+                    pendingItem.IsGroupEntrancePending = false;
+
+            targetedEntranceItems.Clear();
         }
 
         /// <summary>
@@ -548,6 +862,12 @@ public static class VirtualizedListItemStateBehavior
                 && (ReferenceEquals(item, hoveredItem) || ReferenceEquals(item, listBox?.SelectedItem));
         }
     }
+}
+
+/// <summary>允许虚拟化列表在动画扫描结束后显示未进入视口的数据项。</summary>
+public interface IListEntrancePendingItem
+{
+    bool IsGroupEntrancePending { get; set; }
 }
 
 public sealed class VirtualizedListItemState : INotifyPropertyChanged

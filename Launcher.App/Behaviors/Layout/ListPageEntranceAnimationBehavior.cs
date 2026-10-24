@@ -167,11 +167,13 @@ public static class ListPageEntranceAnimationBehavior
         AnimationState state,
         VirtualizedListItemState itemState)
     {
-        var delay = TimeSpan.FromMilliseconds(Math.Min(Math.Max(itemState.EnterAnimationIndex, 0), 12) * 30);
-        var duration = TimeSpan.FromMilliseconds(330);
+        var delay = ListEntranceAnimationDefaults.GetStaggerDelay(itemState.EnterAnimationIndex);
+        var duration = ListEntranceAnimationDefaults.Duration;
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var scaleTransform = new ScaleTransform(0.96, 0.96);
-        var translateTransform = new TranslateTransform(0, 14);
+        var scaleTransform = new ScaleTransform(
+            ListEntranceAnimationDefaults.StartScale,
+            ListEntranceAnimationDefaults.StartScale);
+        var translateTransform = new TranslateTransform(0, ListEntranceAnimationDefaults.OffsetY);
 
         element.BeginAnimation(UIElement.OpacityProperty, null);
         element.RenderTransform = new TransformGroup
@@ -230,13 +232,13 @@ public static class ListPageEntranceAnimationBehavior
             fade);
         scaleTransform.BeginAnimation(
             ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(0.96, 1, duration) { BeginTime = delay, EasingFunction = easing });
+            new DoubleAnimation(ListEntranceAnimationDefaults.StartScale, 1, duration) { BeginTime = delay, EasingFunction = easing });
         scaleTransform.BeginAnimation(
             ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(0.96, 1, duration) { BeginTime = delay, EasingFunction = easing });
+            new DoubleAnimation(ListEntranceAnimationDefaults.StartScale, 1, duration) { BeginTime = delay, EasingFunction = easing });
         translateTransform.BeginAnimation(
             TranslateTransform.YProperty,
-            new DoubleAnimation(14, 0, duration) { BeginTime = delay, EasingFunction = easing });
+            new DoubleAnimation(ListEntranceAnimationDefaults.OffsetY, 0, duration) { BeginTime = delay, EasingFunction = easing });
     }
 
     private static void HoldPendingVisual(FrameworkElement element)

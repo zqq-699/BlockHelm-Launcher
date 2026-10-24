@@ -215,6 +215,12 @@
                 </controls:ListPageItemButton>
             </DataTemplate>
 
+            <DataTemplate DataType="{x:Type viewModels:ResourcesGroupCollapseSpacerItem}">
+                <Border Height="{Binding Height}"
+                        IsHitTestVisible="False"
+                        Loaded="CollapseSpacer_OnLoaded" />
+            </DataTemplate>
+
             <DataTemplate DataType="{x:Type viewModels:ResourcesModVersionItemViewModel}">
                 <controls:ListPageItemButton Title="{Binding Title}"
                                              Subtitle="{Binding Subtitle}"
@@ -224,6 +230,7 @@
                                              IsFirstVisible="{Binding Tag.IsFirstVisible, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                                              IsLastVisible="{Binding Tag.IsLastVisible, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                                              IsPreviousItemHighlighted="{Binding Tag.IsPreviousItemHighlighted, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
+                                             IsGroupEntrancePending="{Binding IsGroupEntrancePending, Mode=TwoWay}"
                                              ShouldPlayEnterAnimation="{Binding Tag.ShouldPlayEnterAnimation, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}, Mode=TwoWay}"
                                              EnterAnimationIndex="{Binding Tag.EnterAnimationIndex, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                                              Command="{Binding DataContext.Versions.InstallVersionCommand, RelativeSource={RelativeSource AncestorType={x:Type views:ResourcesModPageView}}}"

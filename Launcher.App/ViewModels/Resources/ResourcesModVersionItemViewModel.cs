@@ -19,11 +19,21 @@
 
 using Launcher.App.Resources;
 using Launcher.Domain.Models;
+using CommunityToolkit.Mvvm.ComponentModel;
+using Launcher.App.Behaviors;
 
 namespace Launcher.App.ViewModels.Resources;
 
-public sealed class ResourcesModVersionItemViewModel
+public sealed class ResourcesModVersionItemViewModel : ObservableObject, IListEntrancePendingItem
 {
+    private bool isGroupEntrancePending;
+
+    public bool IsGroupEntrancePending
+    {
+        get => isGroupEntrancePending;
+        set => SetProperty(ref isGroupEntrancePending, value);
+    }
+
     public ResourcesModVersionItemViewModel(
         ResourceProjectVersion version,
         ResourcesModProjectItemViewModel? project,

@@ -107,6 +107,11 @@ public partial class ListPageItemButton : UserControl
     public static readonly DependencyProperty EnterAnimationIndexProperty =
         DependencyProperty.Register(nameof(EnterAnimationIndex), typeof(int), typeof(ListPageItemButton), new PropertyMetadata(0));
 
+    public static readonly DependencyProperty IsGroupEntrancePendingProperty =
+        DependencyProperty.Register(
+            nameof(IsGroupEntrancePending), typeof(bool), typeof(ListPageItemButton),
+            new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnIsGroupEntrancePendingChanged));
+
     public static readonly DependencyProperty ItemMarginProperty =
         DependencyProperty.Register(nameof(ItemMargin), typeof(Thickness), typeof(ListPageItemButton), new PropertyMetadata(new Thickness(0, 0, 12, 0)));
 
@@ -166,11 +171,21 @@ public partial class ListPageItemButton : UserControl
         InitializeComponent();
         // Loaded 时虚拟化容器已获得本轮状态，构造阶段直接检查会误用默认值。
         Loaded += (_, _) => PlayEnterAnimationIfNeeded();
+        Unloaded += (_, _) =>
+        {
+            visualAnimationGeneration++;
+            isPlayingEnterAnimation = false;
+            isPlayingExitAnimation = false;
+            ResetVisual();
+        };
     }
 
     public Button InnerButton => PART_Button;
 
     private bool isPreparingEnterAnimation;
+    private bool isPlayingEnterAnimation;
+    private bool isPlayingExitAnimation;
+    private int visualAnimationGeneration;
 
     public string Title
     {
@@ -278,6 +293,12 @@ public partial class ListPageItemButton : UserControl
     {
         get => (int)GetValue(EnterAnimationIndexProperty);
         set => SetValue(EnterAnimationIndexProperty, value);
+    }
+
+    public bool IsGroupEntrancePending
+    {
+        get => (bool)GetValue(IsGroupEntrancePendingProperty);
+        set => SetValue(IsGroupEntrancePendingProperty, value);
     }
 
     public Thickness ItemMargin
@@ -413,10 +434,16 @@ public partial class ListPageItemButton : UserControl
 
     private void PlayEnterAnimationIfNeeded()
     {
+        if (isPlayingExitAnimation)
+            return;
+
         // Recycling 会复用控件，是否播放由数据身份对应的 VirtualizedListItemState 决定。
         if (!ShouldPlayEnterAnimation)
         {
-            if (IsEnterAnimationPending)
+            if (isPlayingEnterAnimation)
+                return;
+
+            if (IsEnterAnimationPending || IsGroupEntrancePending)
             {
                 HoldEntrancePendingVisual();
                 return;
@@ -427,13 +454,17 @@ public partial class ListPageItemButton : UserControl
         }
 
         // 延迟设置上限，长列表只为首批可见项形成阶梯，不让后续条目等待过久。
-        var delay = TimeSpan.FromMilliseconds(Math.Min(EnterAnimationIndex, 12) * 30);
-        var duration = TimeSpan.FromMilliseconds(330);
+        var delay = ListEntranceAnimationDefaults.GetStaggerDelay(EnterAnimationIndex);
+        var duration = ListEntranceAnimationDefaults.Duration;
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
 
-        var scaleTransform = new ScaleTransform(0.96, 0.96);
-        var translateTransform = new TranslateTransform(0, 14);
+        var scaleTransform = new ScaleTransform(
+            ListEntranceAnimationDefaults.StartScale,
+            ListEntranceAnimationDefaults.StartScale);
+        var offsetY = ListEntranceAnimationDefaults.OffsetY;
+        var translateTransform = new TranslateTransform(0, offsetY);
         AnimatedRoot.BeginAnimation(OpacityProperty, null);
+        AnimatedRoot.RenderTransformOrigin = new Point(0, 0);
         AnimatedRoot.RenderTransform = new TransformGroup
         {
             Children =
@@ -444,6 +475,10 @@ public partial class ListPageItemButton : UserControl
         };
 
         AnimatedRoot.Opacity = 0;
+        isPlayingEnterAnimation = true;
+        var generation = ++visualAnimationGeneration;
+        SetCurrentValue(IsGroupEntrancePendingProperty, false);
+        BindingOperations.GetBindingExpression(this, IsGroupEntrancePendingProperty)?.UpdateSource();
 
         // 开播前消费一次性标记；更新源时会触发依赖属性回调，抑制标记防止其立即重置视觉。
         isPreparingEnterAnimation = true;
@@ -479,7 +514,72 @@ public partial class ListPageItemButton : UserControl
                 translateTransform,
                 delay,
                 duration,
-                easing));
+                easing,
+                offsetY,
+                generation));
+    }
+
+    /// <summary>按入场动画的反向参数播放退出动画；返回本次动画的标称完成时间。</summary>
+    public Task PlayExitAnimation(int index)
+    {
+        if (!AnimatedRoot.IsLoaded)
+            return Task.CompletedTask;
+
+        var delay = ListEntranceAnimationDefaults.GetStaggerDelay(index);
+        var duration = ListEntranceAnimationDefaults.Duration;
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var scaleTransform = new ScaleTransform(1, 1);
+        var translateTransform = new TranslateTransform();
+        var generation = ++visualAnimationGeneration;
+
+        isPlayingEnterAnimation = false;
+        isPlayingExitAnimation = true;
+        AnimatedRoot.BeginAnimation(OpacityProperty, null);
+        AnimatedRoot.RenderTransformOrigin = new Point(0, 0);
+        AnimatedRoot.RenderTransform = new TransformGroup
+        {
+            Children =
+            {
+                scaleTransform,
+                translateTransform
+            }
+        };
+        AnimatedRoot.Opacity = 1;
+
+        var fade = new DoubleAnimation(1, 0, duration)
+        {
+            BeginTime = delay,
+            EasingFunction = easing
+        };
+        fade.Completed += (_, _) =>
+        {
+            if (generation == visualAnimationGeneration)
+                isPlayingExitAnimation = false;
+        };
+        AnimatedRoot.BeginAnimation(OpacityProperty, fade);
+        scaleTransform.BeginAnimation(
+            ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(1, ListEntranceAnimationDefaults.StartScale, duration)
+            {
+                BeginTime = delay,
+                EasingFunction = easing
+            });
+        scaleTransform.BeginAnimation(
+            ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(1, ListEntranceAnimationDefaults.StartScale, duration)
+            {
+                BeginTime = delay,
+                EasingFunction = easing
+            });
+        translateTransform.BeginAnimation(
+            TranslateTransform.YProperty,
+            new DoubleAnimation(0, ListEntranceAnimationDefaults.OffsetY, duration)
+            {
+                BeginTime = delay,
+                EasingFunction = easing
+            });
+
+        return Task.Delay(delay + duration);
     }
 
     private static void OnIconSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -506,7 +606,24 @@ public partial class ListPageItemButton : UserControl
             return;
         }
 
-        if (!button.isPreparingEnterAnimation && !button.ShouldPlayEnterAnimation && button.IsLoaded)
+        if (!button.isPreparingEnterAnimation && !button.isPlayingEnterAnimation
+            && !button.isPlayingExitAnimation
+            && !button.IsGroupEntrancePending
+            && !button.ShouldPlayEnterAnimation && button.IsLoaded)
+            button.ResetVisual();
+    }
+
+    private static void OnIsGroupEntrancePendingChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not ListPageItemButton button)
+            return;
+
+        if (e.NewValue is true)
+            button.HoldEntrancePendingVisual();
+        else if (!button.isPlayingEnterAnimation
+            && !button.isPlayingExitAnimation
+            && !button.ShouldPlayEnterAnimation
+            && !button.IsEnterAnimationPending && button.IsLoaded)
             button.ResetVisual();
     }
 
@@ -525,6 +642,7 @@ public partial class ListPageItemButton : UserControl
         AnimatedRoot.BeginAnimation(OpacityProperty, null);
         AnimatedRoot.Opacity = 1;
         AnimatedRoot.RenderTransform = null;
+        AnimatedRoot.RenderTransformOrigin = new Point(0, 0);
         TrailingContentPresenter.BeginAnimation(OpacityProperty, null);
     }
 
@@ -533,23 +651,32 @@ public partial class ListPageItemButton : UserControl
         TranslateTransform translateTransform,
         TimeSpan delay,
         TimeSpan duration,
-        IEasingFunction easing)
+        IEasingFunction easing,
+        double offsetY,
+        int generation)
     {
         // 延迟期间容器可能已被回收或卸载，此时不再向离开视觉树的对象挂动画时钟。
-        if (!AnimatedRoot.IsLoaded)
+        if (!AnimatedRoot.IsLoaded || generation != visualAnimationGeneration)
             return;
 
-        AnimatedRoot.BeginAnimation(
-            OpacityProperty,
-            new DoubleAnimation(0, 1, duration)
-            {
-                BeginTime = delay,
-                EasingFunction = easing
-            });
+        var fade = new DoubleAnimation(0, 1, duration)
+        {
+            BeginTime = delay,
+            EasingFunction = easing
+        };
+        fade.Completed += (_, _) =>
+        {
+            if (generation != visualAnimationGeneration)
+                return;
+
+            isPlayingEnterAnimation = false;
+            ResetVisual();
+        };
+        AnimatedRoot.BeginAnimation(OpacityProperty, fade);
 
         scaleTransform.BeginAnimation(
             ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(0.96, 1, duration)
+            new DoubleAnimation(ListEntranceAnimationDefaults.StartScale, 1, duration)
             {
                 BeginTime = delay,
                 EasingFunction = easing
@@ -557,7 +684,7 @@ public partial class ListPageItemButton : UserControl
 
         scaleTransform.BeginAnimation(
             ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(0.96, 1, duration)
+            new DoubleAnimation(ListEntranceAnimationDefaults.StartScale, 1, duration)
             {
                 BeginTime = delay,
                 EasingFunction = easing
@@ -565,7 +692,7 @@ public partial class ListPageItemButton : UserControl
 
         translateTransform.BeginAnimation(
             TranslateTransform.YProperty,
-            new DoubleAnimation(14, 0, duration)
+            new DoubleAnimation(offsetY, 0, duration)
             {
                 BeginTime = delay,
                 EasingFunction = easing

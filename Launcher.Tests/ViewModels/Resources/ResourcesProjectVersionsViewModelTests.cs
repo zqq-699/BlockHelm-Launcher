@@ -43,6 +43,13 @@ public sealed class ResourcesProjectVersionsViewModelTests
         Assert.False(viewModel.CanAutoLoadMoreVersions);
 
         var notified = false;
+        var entranceWasPreparedBeforeInsertion = false;
+        viewModel.GroupEntranceRequested += children =>
+        {
+            entranceWasPreparedBeforeInsertion = children.OfType<ResourcesModVersionItemViewModel>()
+                .All(child => child.IsGroupEntrancePending)
+                && !viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Any();
+        };
         headers[0].PropertyChanged += (_, args) =>
             notified |= args.PropertyName == nameof(ResourcesModVersionListHeaderItem.IsExpanded);
         headers[0].ToggleExpandedCommand.Execute(null);
@@ -53,6 +60,7 @@ public sealed class ResourcesProjectVersionsViewModelTests
         Assert.Same(headers[0], expandedHeader);
         Assert.Same(headers[1], viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().Last());
         Assert.True(notified);
+        Assert.True(entranceWasPreparedBeforeInsertion);
         Assert.True(expandedHeader.IsExpanded);
         Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
         Assert.True(viewModel.CanAutoLoadMoreVersions);
@@ -60,6 +68,139 @@ public sealed class ResourcesProjectVersionsViewModelTests
         expandedHeader.ToggleExpandedCommand.Execute(null);
         Assert.Same(expandedHeader, viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First());
         Assert.Empty(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+    }
+
+    [Fact]
+    public async Task CollapseWaitsForReverseEntranceBeforeRemovingChildren()
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(CreateGroupedVersionsResult()));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+        await viewModel.RefreshAsync();
+
+        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        header.ToggleExpandedCommand.Execute(null);
+        Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+
+        Action? completeCollapse = null;
+        viewModel.GroupCollapseRequested += (_, complete) => completeCollapse = complete;
+        header.ToggleExpandedCommand.Execute(null);
+
+        // 真实行控件先播放退出动画，动画结束后才移除。
+        Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+        Assert.NotNull(completeCollapse);
+        completeCollapse!();
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+        Assert.Equal(52, Assert.Single(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>()).Height);
+
+        await Task.Delay(400);
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>());
+
+        header.ToggleExpandedCommand.Execute(null);
+        Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+    }
+
+    [Fact]
+    public async Task LargeGroupKeepsAllChildrenUntilTheExitAnimationCompletes()
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(CreateLargeGroupedVersionsResult()));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+        await viewModel.RefreshAsync();
+
+        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        var queuedChildren = 0;
+        viewModel.GroupEntranceRequested += children =>
+        {
+            queuedChildren = children.Count;
+            Assert.All(children.OfType<ResourcesModVersionItemViewModel>(), child =>
+                Assert.True(child.IsGroupEntrancePending));
+        };
+        header.ToggleExpandedCommand.Execute(null);
+        Assert.Equal(25, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+        Assert.Equal(25, queuedChildren);
+
+        Action? completeCollapse = null;
+        viewModel.GroupCollapseRequested += (_, complete) => completeCollapse = complete;
+        header.ToggleExpandedCommand.Execute(null);
+        Assert.Equal(25, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+        Assert.NotNull(completeCollapse);
+        completeCollapse!();
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+        Assert.Equal(1040, Assert.Single(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>()).Height);
+
+        await Task.Delay(400);
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>());
+
+        header.ToggleExpandedCommand.Execute(null);
+        Assert.Equal(25, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+    }
+
+    [Fact]
+    public async Task LargeGroupStagesNormalRowsBeforeAddingOffscreenChildren()
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(CreateLargeGroupedVersionsResult()));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+        await viewModel.RefreshAsync();
+        viewModel.IsGroupExpansionStagingEnabled = true;
+
+        var queuedChildren = 0;
+        viewModel.GroupEntranceRequested += children => queuedChildren = children.Count;
+        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        header.ToggleExpandedCommand.Execute(null);
+
+        var firstRows = viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().ToList();
+        Assert.Equal(20, firstRows.Count);
+        Assert.Equal(20, queuedChildren);
+        Assert.All(firstRows, row => Assert.True(row.IsGroupEntrancePending));
+
+        await Task.Delay(700);
+        var allRows = viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().ToList();
+        Assert.Equal(25, allRows.Count);
+        Assert.Same(firstRows[0], allRows[0]);
+
+        Action? completeCollapse = null;
+        viewModel.GroupCollapseRequested += (_, complete) => completeCollapse = complete;
+        header.ToggleExpandedCommand.Execute(null);
+        Assert.Equal(25, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+        completeCollapse!();
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+        Assert.Equal(1040, Assert.Single(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>()).Height);
+    }
+
+    [Fact]
+    public async Task LargeGroupStagesOnlyEnoughRowsToMoveFollowingContentPastViewport()
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(CreateLargeGroupedVersionsResult()));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+        await viewModel.RefreshAsync();
+        viewModel.IsGroupExpansionStagingEnabled = true;
+        viewModel.GroupExpansionViewportHeight = 220;
+
+        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        header.ToggleExpandedCommand.Execute(null);
+
+        Assert.Equal(7, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+        await Task.Delay(600);
+        Assert.Equal(25, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+
+        Action? completeCollapse = null;
+        viewModel.GroupCollapseRequested += (_, complete) => completeCollapse = complete;
+        header.ToggleExpandedCommand.Execute(null);
+        Assert.Equal(25, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+        completeCollapse!();
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+        Assert.Equal(364, Assert.Single(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>()).Height);
     }
 
     [Fact]
@@ -183,6 +324,37 @@ public sealed class ResourcesProjectVersionsViewModelTests
                 }
             ]
         };
+    }
+
+    private static ResourceProjectVersionsResult CreateLargeGroupedVersionsResult()
+    {
+        var versions = new List<ResourceProjectVersion>();
+        for (var index = 0; index < 25; index++)
+        {
+            versions.Add(new ResourceProjectVersion
+            {
+                Kind = ResourceProjectKind.Mod,
+                VersionId = $"sodium-fabric-{index}",
+                Name = $"Sodium Fabric {index}",
+                VersionNumber = $"1.{index}",
+                FileName = $"sodium-fabric-{index}.jar",
+                GameVersions = ["1.21.3"],
+                Loaders = ["fabric"]
+            });
+        }
+
+        versions.Add(new ResourceProjectVersion
+        {
+            Kind = ResourceProjectKind.Mod,
+            VersionId = "sodium-neoforge",
+            Name = "Sodium NeoForge",
+            VersionNumber = "1.0",
+            FileName = "sodium-neoforge.jar",
+            GameVersions = ["1.21.6"],
+            Loaders = ["neoforge"]
+        });
+
+        return new ResourceProjectVersionsResult { Versions = versions };
     }
 
     private static ResourceProjectVersionsResult CreateVersionsResult()
