@@ -24,7 +24,10 @@ namespace Launcher.App.ViewModels.Resources;
 
 internal sealed partial class ResourcesAvailableVersionListBuilder
 {
-public AvailableVersionListBuildResult Build(
+    private static readonly IComparer<string> MinecraftGroupVersionComparer =
+        Comparer<string>.Create(CompareMinecraftGroupVersions);
+
+    public AvailableVersionListBuildResult Build(
         IReadOnlyList<ResourceProjectVersion> versions,
         string title,
         ResourcesModProjectItemViewModel? selectedProject,
@@ -40,7 +43,7 @@ public AvailableVersionListBuildResult Build(
         var filteredVersions = versions
             .Where(version => MatchesFilters(version, selectedVersionId, selectedLoaderId, searchQuery))
             .ToList();
-        var visibleCount = AddGroupedItems(
+        var (visibleCount, groupVersions) = AddGroupedItems(
             items,
             filteredVersions,
             title,
@@ -50,7 +53,7 @@ public AvailableVersionListBuildResult Build(
             selectedLoaderId,
             groupExpansionStates,
             expansionChanged);
-        return new AvailableVersionListBuildResult(items, visibleCount);
+        return new AvailableVersionListBuildResult(items, visibleCount, groupVersions);
     }
 
     public int Append(
@@ -105,7 +108,7 @@ public AvailableVersionListBuildResult Build(
             && MatchesLoaderFilter(version, selectedLoaderId);
     }
 
-    private int AddGroupedItems(
+    private (int VisibleCount, IReadOnlyDictionary<string, IReadOnlyList<ResourceProjectVersion>> GroupVersions) AddGroupedItems(
         ICollection<object> items,
         IReadOnlyList<ResourceProjectVersion> versions,
         string title,
@@ -138,12 +141,14 @@ public AvailableVersionListBuildResult Build(
         if (groups.Count == 0)
         {
             items.Add(new ResourcesModVersionListHeaderItem(title));
-            return 0;
+            return (0, new Dictionary<string, IReadOnlyList<ResourceProjectVersion>>(StringComparer.OrdinalIgnoreCase));
         }
 
         var visibleCount = 0;
         var defaultExpanded = groups.Count == 1;
-        foreach (var group in groups)
+        // 分组首次出现的顺序取决于模组文件的发布时间，不能用它表示 Minecraft 版本顺序。
+        // 稳定排序保留同一 Minecraft 版本下 Loader 原有的相对顺序。
+        foreach (var group in groups.OrderByDescending(group => group.Title, MinecraftGroupVersionComparer))
         {
             var isExpanded = groupExpansionStates.TryGetValue(group.Title, out var explicitState)
                 ? explicitState
@@ -164,7 +169,10 @@ public AvailableVersionListBuildResult Build(
             }
         }
 
-        return visibleCount;
+        return (visibleCount, groupsByTitle.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<ResourceProjectVersion>)pair.Value.Versions,
+            StringComparer.OrdinalIgnoreCase));
     }
 
     private IEnumerable<string> CreateFilteredCompatibilityGroupTitles(
@@ -284,5 +292,50 @@ public AvailableVersionListBuildResult Build(
 
         items.Add(new ResourcesModVersionListHeaderItem(title));
         return items.Count;
+    }
+
+    private static int CompareMinecraftGroupVersions(string left, string right)
+    {
+        var leftParts = ParseMinecraftVersionPrefix(left);
+        var rightParts = ParseMinecraftVersionPrefix(right);
+        if (leftParts is null)
+            return rightParts is null ? 0 : -1;
+        if (rightParts is null)
+            return 1;
+
+        for (var index = 0; index < Math.Max(leftParts.Count, rightParts.Count); index++)
+        {
+            var leftPart = index < leftParts.Count ? leftParts[index] : 0;
+            var rightPart = index < rightParts.Count ? rightParts[index] : 0;
+            var comparison = leftPart.CompareTo(rightPart);
+            if (comparison != 0)
+                return comparison;
+        }
+
+        return 0;
+    }
+
+    private static IReadOnlyList<int>? ParseMinecraftVersionPrefix(string title)
+    {
+        var parts = new List<int>(3);
+        var text = title.AsSpan();
+        var index = 0;
+        while (index < text.Length)
+        {
+            var start = index;
+            while (index < text.Length && char.IsAsciiDigit(text[index]))
+                index++;
+            if (start == index || !int.TryParse(text[start..index], out var part))
+                return null;
+
+            parts.Add(part);
+            if (index == text.Length || text[index] is '-' or '_')
+                break;
+            if (text[index] != '.')
+                return null;
+            index++;
+        }
+
+        return parts.Count > 0 ? parts : null;
     }
 }

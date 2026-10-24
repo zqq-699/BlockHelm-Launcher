@@ -34,6 +34,12 @@ public sealed class ResourcesModVersionItemViewModel : ObservableObject, IListEn
         set => SetProperty(ref isGroupEntrancePending, value);
     }
 
+    bool IListEntrancePendingItem.IsEntrancePending
+    {
+        get => IsGroupEntrancePending;
+        set => IsGroupEntrancePending = value;
+    }
+
     public ResourcesModVersionItemViewModel(
         ResourceProjectVersion version,
         ResourcesModProjectItemViewModel? project,

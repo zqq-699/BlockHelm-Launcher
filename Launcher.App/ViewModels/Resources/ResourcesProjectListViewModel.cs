@@ -35,7 +35,7 @@ public sealed partial class ResourcesProjectListViewModel : ObservableObject, ID
 {
     private const int SearchDebounceMilliseconds = 250;
     private const int CatalogPageSize = 20;
-    private const int InitialProjectBatchSize = 12;
+    private const int InitialProjectBatchSize = 20;
     private const int AppendProjectBatchSize = 8;
 
     private readonly ResourcesOnlineProjectPageOptions options;

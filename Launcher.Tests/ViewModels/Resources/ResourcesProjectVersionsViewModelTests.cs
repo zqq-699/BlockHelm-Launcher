@@ -71,6 +71,47 @@ public sealed class ResourcesProjectVersionsViewModelTests
     }
 
     [Fact]
+    public async Task CompatibilityGroupsSortByMinecraftVersionInsteadOfFileOrder()
+    {
+        static ResourceProjectVersion Version(string id, string minecraftVersion, string loader) => new()
+        {
+            Kind = ResourceProjectKind.Mod,
+            VersionId = id,
+            Name = id,
+            VersionNumber = id,
+            FileName = $"{id}.jar",
+            GameVersions = [minecraftVersion],
+            Loaders = [loader]
+        };
+
+        var versions = new ResourceProjectVersionsResult
+        {
+            Versions =
+            [
+                Version("old", "1.12.2", "forge"),
+                Version("nine", "1.21.9", "fabric"),
+                Version("early", "26.1.1", "neoforge"),
+                Version("legacy", "1.20.1", "forge"),
+                Version("fabric", "26.1.2", "fabric"),
+                Version("neoforge", "26.1.2", "neoforge"),
+                Version("eleven", "1.21.11", "neoforge")
+            ]
+        };
+        var service = new SequencedResourceCatalogService(() => Task.FromResult(versions));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(
+            ["26.1.2-fabric", "26.1.2-neoforge", "26.1.1-neoforge", "1.21.11-neoforge",
+                "1.21.9-fabric", "1.20.1-forge", "1.12.2-forge"],
+            viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().Select(header => header.Title));
+        Assert.Equal("old", viewModel.SourceVersions[0].VersionId);
+    }
+
+    [Fact]
     public async Task CollapseWaitsForReverseEntranceBeforeRemovingChildren()
     {
         var service = new SequencedResourceCatalogService(
@@ -103,6 +144,32 @@ public sealed class ResourcesProjectVersionsViewModelTests
     }
 
     [Fact]
+    public async Task ReexpandBeforeCollapseCompletesIgnoresStaleRemoval()
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(CreateGroupedVersionsResult()));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+        await viewModel.RefreshAsync();
+
+        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        header.ToggleExpandedCommand.Execute(null);
+        var firstChild = Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+        Action? finishOldCollapse = null;
+        viewModel.GroupCollapseRequested += (_, complete) => finishOldCollapse = complete;
+
+        header.ToggleExpandedCommand.Execute(null);
+        header.ToggleExpandedCommand.Execute(null);
+
+        var currentChild = Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
+        Assert.NotSame(firstChild, currentChild);
+        finishOldCollapse!();
+        Assert.Same(currentChild, Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>()));
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>());
+    }
+
+    [Fact]
     public async Task LargeGroupKeepsAllChildrenUntilTheExitAnimationCompletes()
     {
         var service = new SequencedResourceCatalogService(
@@ -112,7 +179,8 @@ public sealed class ResourcesProjectVersionsViewModelTests
         PrepareLocalDownloadTarget(viewModel);
         await viewModel.RefreshAsync();
 
-        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        var header = Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>(),
+            item => item.Title == "1.21.3-fabric");
         var queuedChildren = 0;
         viewModel.GroupEntranceRequested += children =>
         {
@@ -156,7 +224,8 @@ public sealed class ResourcesProjectVersionsViewModelTests
 
         var queuedChildren = 0;
         viewModel.GroupEntranceRequested += children => queuedChildren = children.Count;
-        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        var header = Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>(),
+            item => item.Title == "1.21.3-fabric");
         header.ToggleExpandedCommand.Execute(null);
 
         var firstRows = viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().ToList();
@@ -190,7 +259,8 @@ public sealed class ResourcesProjectVersionsViewModelTests
         viewModel.IsGroupExpansionStagingEnabled = true;
         viewModel.GroupExpansionViewportHeight = 220;
 
-        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        var header = Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>(),
+            item => item.Title == "1.21.3-fabric");
         header.ToggleExpandedCommand.Execute(null);
 
         Assert.Equal(7, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
@@ -204,6 +274,62 @@ public sealed class ResourcesProjectVersionsViewModelTests
         completeCollapse!();
         Assert.Empty(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
         Assert.Equal(364, Assert.Single(viewModel.ListItems.OfType<ResourcesGroupCollapseSpacerItem>()).Height);
+    }
+
+    [Fact]
+    public async Task ReexpandedLargeGroupIgnoresPreviousStagedCompletion()
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(CreateLargeGroupedVersionsResult()));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+        await viewModel.RefreshAsync();
+        viewModel.IsGroupExpansionStagingEnabled = true;
+        viewModel.GroupExpansionViewportHeight = 220;
+
+        var header = Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>(),
+            item => item.Title == "1.21.3-fabric");
+        header.ToggleExpandedCommand.Execute(null);
+        var firstChild = viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().First();
+        Action? completeCollapse = null;
+        viewModel.GroupCollapseRequested += (_, complete) => completeCollapse = complete;
+        header.ToggleExpandedCommand.Execute(null);
+        completeCollapse!();
+        header.ToggleExpandedCommand.Execute(null);
+
+        var currentChild = viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().First();
+        Assert.NotSame(firstChild, currentChild);
+        await Task.Delay(650);
+        var children = viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().ToList();
+        Assert.Equal(25, children.Count);
+        Assert.Same(currentChild, children[0]);
+        Assert.Equal(25, children.Select(child => child.Version.VersionId).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task FilterPreservesGroupChoiceButRefreshResetsIt()
+    {
+        var service = new SequencedResourceCatalogService(
+            () => Task.FromResult(CreateGroupedVersionsResult()),
+            () => Task.FromResult(CreateGroupedVersionsResult()));
+        using var page = new ResourcesPageViewModel(service).ModPage;
+        var viewModel = page.Versions;
+        PrepareLocalDownloadTarget(viewModel);
+        await viewModel.RefreshAsync();
+
+        var header = viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>().First();
+        header.ToggleExpandedCommand.Execute(null);
+        viewModel.SearchQuery = "NeoForge";
+        Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>());
+        viewModel.SearchQuery = string.Empty;
+        Assert.True(Assert.Single(viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>(),
+            item => item.Title == header.Title).IsExpanded);
+
+        await viewModel.RefreshAsync();
+        Assert.All(viewModel.ListItems.OfType<ResourcesModVersionListHeaderItem>(),
+            item => Assert.False(item.IsExpanded));
+        Assert.Empty(viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>());
     }
 
     [Fact]

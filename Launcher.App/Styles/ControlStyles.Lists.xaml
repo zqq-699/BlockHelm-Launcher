@@ -292,6 +292,9 @@
            TargetType="{x:Type controls:ListPageItemButton}">
         <Setter Property="IsEnterAnimationPending" Value="True" />
         <Style.Triggers>
+            <DataTrigger Binding="{Binding IsGroupEntrancePending, RelativeSource={RelativeSource Self}}" Value="True">
+                <Setter Property="Opacity" Value="0" />
+            </DataTrigger>
             <DataTrigger Binding="{Binding Tag.IsEntranceAnimationPending, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="False">
                 <Setter Property="IsEnterAnimationPending" Value="False" />
             </DataTrigger>

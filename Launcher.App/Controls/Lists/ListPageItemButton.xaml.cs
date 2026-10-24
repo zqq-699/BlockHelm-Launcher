@@ -181,6 +181,17 @@ public partial class ListPageItemButton : UserControl
             isPlayingExitAnimation = false;
             ResetVisual();
         };
+        DataContextChanged += (_, args) =>
+        {
+            if (ReferenceEquals(args.OldValue, args.NewValue))
+                return;
+
+            // Recycling 可能在退场时把同一控件交给新行，旧动画不能延续到新数据项。
+            visualAnimationGeneration++;
+            isPlayingEnterAnimation = false;
+            isPlayingExitAnimation = false;
+            ResetVisual();
+        };
     }
 
     public Button InnerButton => PART_Button;
@@ -528,17 +539,27 @@ public partial class ListPageItemButton : UserControl
                 generation));
     }
 
-    /// <summary>按入场动画的反向参数播放退出动画；返回本次动画的标称完成时间。</summary>
-    public Task PlayExitAnimation(int index)
+    /// <summary>按入场动画的反向参数播放退出动画。</summary>
+    public void PlayExitAnimation(int index)
     {
         if (!AnimatedRoot.IsLoaded)
-            return Task.CompletedTask;
+            return;
 
         var delay = ListEntranceAnimationDefaults.GetStaggerDelay(index);
         var duration = ListEntranceAnimationDefaults.Duration;
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var scaleTransform = new ScaleTransform(1, 1);
-        var translateTransform = new TranslateTransform();
+        // 入场尚未完成时，从当前画面接续，避免先跳到完全可见状态再退场。
+        var opacity = AnimatedRoot.Opacity;
+        var currentScale = AnimatedRoot.RenderTransform is TransformGroup { Children: { Count: >= 2 } transforms }
+            && transforms[0] is ScaleTransform scale
+            ? scale.ScaleX
+            : 1d;
+        var currentOffsetY = AnimatedRoot.RenderTransform is TransformGroup { Children: { Count: >= 2 } offsets }
+            && offsets[1] is TranslateTransform offset
+            ? offset.Y
+            : 0d;
+        var scaleTransform = new ScaleTransform(currentScale, currentScale);
+        var translateTransform = new TranslateTransform(0, currentOffsetY);
         var generation = ++visualAnimationGeneration;
 
         isPlayingEnterAnimation = false;
@@ -553,9 +574,9 @@ public partial class ListPageItemButton : UserControl
                 translateTransform
             }
         };
-        AnimatedRoot.Opacity = 1;
+        AnimatedRoot.Opacity = opacity;
 
-        var fade = new DoubleAnimation(1, 0, duration)
+        var fade = new DoubleAnimation(opacity, 0, duration)
         {
             BeginTime = delay,
             EasingFunction = easing
@@ -568,27 +589,25 @@ public partial class ListPageItemButton : UserControl
         AnimatedRoot.BeginAnimation(OpacityProperty, fade);
         scaleTransform.BeginAnimation(
             ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(1, ListEntranceAnimationDefaults.StartScale, duration)
+            new DoubleAnimation(currentScale, ListEntranceAnimationDefaults.StartScale, duration)
             {
                 BeginTime = delay,
                 EasingFunction = easing
             });
         scaleTransform.BeginAnimation(
             ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(1, ListEntranceAnimationDefaults.StartScale, duration)
+            new DoubleAnimation(currentScale, ListEntranceAnimationDefaults.StartScale, duration)
             {
                 BeginTime = delay,
                 EasingFunction = easing
             });
         translateTransform.BeginAnimation(
             TranslateTransform.YProperty,
-            new DoubleAnimation(0, ListEntranceAnimationDefaults.OffsetY, duration)
+            new DoubleAnimation(currentOffsetY, ListEntranceAnimationDefaults.OffsetY, duration)
             {
                 BeginTime = delay,
                 EasingFunction = easing
             });
-
-        return Task.Delay(delay + duration);
     }
 
     private static void OnIconSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

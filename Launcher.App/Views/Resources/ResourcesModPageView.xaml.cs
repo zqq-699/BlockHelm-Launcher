@@ -63,8 +63,6 @@ public partial class ResourcesModPageView : UserControl
             AttachScrollViewers();
             stepTransition.Sync(IsProjectContentStep());
             detailsTransition.Sync(IsProjectVersionsStep());
-            if (DataContext is ResourcesModPageViewModel viewModel)
-                viewModel.Versions.IsGroupExpansionStagingEnabled = true;
         };
         Unloaded += (_, _) =>
         {
@@ -169,7 +167,7 @@ public partial class ResourcesModPageView : UserControl
         }
     }
 
-    private void Versions_OnGroupEntranceRequested(IReadOnlyList<object> children)
+    private void Versions_OnGroupEntranceRequested(IReadOnlyList<ResourcesModVersionItemViewModel> children)
     {
         VirtualizedListItemStateBehavior.QueueLayoutShiftAnimation(ResourcesModVersionListBox);
         VirtualizedListItemStateBehavior.QueueItemEntranceAnimation(ResourcesModVersionListBox, children);
@@ -198,7 +196,7 @@ public partial class ResourcesModPageView : UserControl
 
             // 从最下面的可见行开始，依次向上错峰淡出。
             for (var index = 0; index < buttons.Count; index++)
-                _ = buttons[buttons.Count - 1 - index].PlayExitAnimation(index);
+                buttons[buttons.Count - 1 - index].PlayExitAnimation(index);
 
             if (buttons.Count > 0)
             {
@@ -213,8 +211,9 @@ public partial class ResourcesModPageView : UserControl
         }
         finally
         {
-            // 最后一行淡出结束前约 100ms 就开始收回下方内容，让两段动画轻微重叠。
+            // 收尾批次先完成布局，让占位项以完整高度进入视觉树，避免先闪一帧最终位置。
             complete();
+            ResourcesModVersionListBox.UpdateLayout();
         }
     }
 

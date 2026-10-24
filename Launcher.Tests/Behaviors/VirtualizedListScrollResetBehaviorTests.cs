@@ -22,8 +22,8 @@ public sealed class VirtualizedListScrollResetBehaviorTests
     {
         RunOnStaThread(() =>
         {
-            var visibleItem = new PendingItem { IsGroupEntrancePending = true };
-            var item = new PendingItem { IsGroupEntrancePending = true };
+            var visibleItem = new PendingItem { IsEntrancePending = true };
+            var item = new PendingItem { IsEntrancePending = true };
             var listBox = new ListBox
             {
                 Width = 360,
@@ -59,8 +59,8 @@ public sealed class VirtualizedListScrollResetBehaviorTests
                 var visibleContainer = Assert.IsType<ListBoxItem>(
                     listBox.ItemContainerGenerator.ContainerFromItem(visibleItem));
                 Assert.True(Assert.IsType<VirtualizedListItemState>(visibleContainer.Tag).ShouldPlayEnterAnimation);
-                Assert.True(visibleItem.IsGroupEntrancePending);
-                Assert.False(item.IsGroupEntrancePending);
+                Assert.True(visibleItem.IsEntrancePending);
+                Assert.False(item.IsEntrancePending);
                 var frame = new DispatcherFrame();
                 var wait = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
                 wait.Tick += (_, _) =>
@@ -70,7 +70,7 @@ public sealed class VirtualizedListScrollResetBehaviorTests
                 };
                 wait.Start();
                 Dispatcher.PushFrame(frame);
-                Assert.False(item.IsGroupEntrancePending);
+                Assert.False(item.IsEntrancePending);
 
                 listBox.ScrollIntoView(item);
                 listBox.UpdateLayout();
@@ -95,14 +95,14 @@ public sealed class VirtualizedListScrollResetBehaviorTests
     {
         RunOnStaThread(() =>
         {
-            var item = new PendingItem { IsGroupEntrancePending = true };
+            var item = new PendingItem { IsEntrancePending = true };
             var listBox = new ListBox();
             listBox.Items.Add(item);
             VirtualizedListItemStateBehavior.SetIsEnabled(listBox, true);
             try
             {
                 VirtualizedListItemStateBehavior.QueueItemEntranceAnimation(listBox, [item]);
-                Assert.True(item.IsGroupEntrancePending);
+                Assert.True(item.IsEntrancePending);
 
                 var frame = new DispatcherFrame();
                 var wait = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
@@ -115,10 +115,10 @@ public sealed class VirtualizedListScrollResetBehaviorTests
                 Dispatcher.PushFrame(frame);
 
                 // 旧的固定八轮扫描会在约 360 ms 后放弃这些尚未生成容器的项。
-                Assert.True(item.IsGroupEntrancePending);
+                Assert.True(item.IsEntrancePending);
                 listBox.Items.Remove(item);
                 PumpDispatcher(DispatcherPriority.ApplicationIdle);
-                Assert.False(item.IsGroupEntrancePending);
+                Assert.False(item.IsEntrancePending);
             }
             finally
             {
@@ -251,6 +251,64 @@ public sealed class VirtualizedListScrollResetBehaviorTests
     }
 
     [Fact]
+    public void DetachingBeforeQueuedLayoutShiftDoesNotRunStaleCallback()
+    {
+        RunOnStaThread(() =>
+        {
+            var items = new ObservableCollection<string>(
+                Enumerable.Range(0, 30).Select(index => $"Version {index}"));
+            var listBox = new ListBox
+            {
+                Width = 360,
+                Height = 220,
+                ItemsSource = items,
+                ItemContainerStyle = new Style(typeof(ListBoxItem))
+                {
+                    Setters = { new Setter(FrameworkElement.HeightProperty, 52d) }
+                }
+            };
+            VirtualizingPanel.SetIsVirtualizing(listBox, true);
+            VirtualizingPanel.SetVirtualizationMode(listBox, VirtualizationMode.Recycling);
+            VirtualizedListItemStateBehavior.SetIsEnabled(listBox, true);
+            var window = new Window
+            {
+                Width = 360,
+                Height = 220,
+                Content = listBox,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.None,
+                AllowsTransparency = true,
+                Opacity = 0
+            };
+
+            try
+            {
+                window.Show();
+                PumpDispatcher(DispatcherPriority.ApplicationIdle);
+                listBox.UpdateLayout();
+                Assert.NotNull(listBox.ItemContainerGenerator.ContainerFromItem("Version 0"));
+
+                VirtualizedListItemStateBehavior.QueueLayoutShiftAnimation(listBox);
+                VirtualizedListItemStateBehavior.SetIsEnabled(listBox, false);
+                PumpDispatcher(DispatcherPriority.Loaded);
+                VirtualizedListItemStateBehavior.SetIsEnabled(listBox, true);
+                VirtualizedListItemStateBehavior.QueueLayoutShiftAnimation(listBox);
+                items.Insert(0, "Inserted");
+                PumpDispatcher(DispatcherPriority.Loaded);
+
+                var shiftedContainer = Assert.IsType<ListBoxItem>(
+                    listBox.ItemContainerGenerator.ContainerFromItem("Version 0"));
+                Assert.IsType<TranslateTransform>(shiftedContainer.RenderTransform);
+            }
+            finally
+            {
+                window.Close();
+                VirtualizedListItemStateBehavior.SetIsEnabled(listBox, false);
+            }
+        });
+    }
+
+    [Fact]
     public void NewScrollResetTokenReturnsRetainedListToTopOnlyOnce()
     {
         RunOnStaThread(() =>
@@ -349,6 +407,6 @@ public sealed class VirtualizedListScrollResetBehaviorTests
 
     private sealed class PendingItem : IListEntrancePendingItem
     {
-        public bool IsGroupEntrancePending { get; set; }
+        public bool IsEntrancePending { get; set; }
     }
 }
