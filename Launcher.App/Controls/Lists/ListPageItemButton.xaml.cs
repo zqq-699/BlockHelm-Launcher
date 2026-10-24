@@ -81,6 +81,9 @@ public partial class ListPageItemButton : UserControl
     public static readonly DependencyProperty IsFirstVisibleProperty =
         DependencyProperty.Register(nameof(IsFirstVisible), typeof(bool), typeof(ListPageItemButton), new PropertyMetadata(false));
 
+    public static readonly DependencyProperty IsFirstInGroupProperty =
+        DependencyProperty.Register(nameof(IsFirstInGroup), typeof(bool), typeof(ListPageItemButton), new PropertyMetadata(false));
+
     public static readonly DependencyProperty IsLastVisibleProperty =
         DependencyProperty.Register(nameof(IsLastVisible), typeof(bool), typeof(ListPageItemButton), new PropertyMetadata(false));
 
@@ -257,6 +260,12 @@ public partial class ListPageItemButton : UserControl
     {
         get => (bool)GetValue(IsFirstVisibleProperty);
         set => SetValue(IsFirstVisibleProperty, value);
+    }
+
+    public bool IsFirstInGroup
+    {
+        get => (bool)GetValue(IsFirstInGroupProperty);
+        set => SetValue(IsFirstInGroupProperty, value);
     }
 
     public bool IsLastVisible

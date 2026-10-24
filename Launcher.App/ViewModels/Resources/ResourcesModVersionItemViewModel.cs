@@ -48,6 +48,9 @@ public sealed class ResourcesModVersionItemViewModel : ObservableObject, IListEn
 
     public ResourceProjectVersion Version { get; }
 
+    /// <summary>是否为该兼容分组的第一个子项；用于隐藏其顶部重复分割线。</summary>
+    public bool IsFirstInGroup { get; init; }
+
     public string? IconSource { get; }
 
     public string IconKey { get; }

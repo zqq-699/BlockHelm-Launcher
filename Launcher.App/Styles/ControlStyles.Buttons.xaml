@@ -1,4 +1,4 @@
-﻿<!--
+<!--
   BlockHelm Launcher
   Copyright (C) 2026 Quan Zhou
 
@@ -131,6 +131,9 @@
                             <Setter TargetName="TopSeparator" Property="Opacity" Value="0" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsFirstVisible, RelativeSource={RelativeSource AncestorType={x:Type controls:ListPageItemButton}}}" Value="True">
+                            <Setter TargetName="TopSeparator" Property="Opacity" Value="0" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsFirstInGroup, RelativeSource={RelativeSource AncestorType={x:Type controls:ListPageItemButton}}}" Value="True">
                             <Setter TargetName="TopSeparator" Property="Opacity" Value="0" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsLastVisible, RelativeSource={RelativeSource AncestorType={x:Type controls:ListPageItemButton}}}" Value="True">

@@ -93,17 +93,16 @@
             </Style>
 
             <DataTemplate DataType="{x:Type viewModels:ResourcesModVersionListHeaderItem}">
-                <Button Margin="0,0,0,12"
-                        Padding="8,4"
+                <StackPanel behaviors:ListPageEntranceAnimationBehavior.IsEnabled="True"
+                            behaviors:ListPageEntranceAnimationBehavior.ItemState="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}">
+                <Button Padding="8,10"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         Background="Transparent"
                         BorderThickness="0"
                         RenderTransformOrigin="0.5,0.5"
                         Command="{Binding ToggleExpandedCommand}"
-                        Cursor="Hand"
-                        behaviors:ListPageEntranceAnimationBehavior.IsEnabled="True"
-                        behaviors:ListPageEntranceAnimationBehavior.ItemState="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}">
+                        Cursor="Hand">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="HeaderBackground"
@@ -182,6 +181,10 @@
                         </controls:SvgIcon>
                     </Grid>
                 </Button>
+                <Border Height="1"
+                        Margin="10,0,20,0"
+                        Background="{DynamicResource Brush.14FFFFFF}" />
+                </StackPanel>
             </DataTemplate>
 
             <DataTemplate DataType="{x:Type viewModels:ResourcesListFooterStatusItem}">
@@ -228,6 +231,7 @@
                                              IconSource="{Binding IconSource}"
                                              IconKey="{Binding IconKey}"
                                              IsFirstVisible="{Binding Tag.IsFirstVisible, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
+                                             IsFirstInGroup="{Binding IsFirstInGroup}"
                                              IsLastVisible="{Binding Tag.IsLastVisible, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                                              IsPreviousItemHighlighted="{Binding Tag.IsPreviousItemHighlighted, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                                              IsGroupEntrancePending="{Binding IsGroupEntrancePending, Mode=TwoWay}"

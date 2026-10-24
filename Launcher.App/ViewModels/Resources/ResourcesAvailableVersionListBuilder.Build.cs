@@ -153,9 +153,14 @@ public AvailableVersionListBuildResult Build(
             if (!isExpanded)
                 continue;
 
+            var isFirstVersionInGroup = true;
             foreach (var version in group.Versions)
             {
-                items.Add(new ResourcesModVersionItemViewModel(version, selectedProject, fallbackIconKey));
+                items.Add(new ResourcesModVersionItemViewModel(version, selectedProject, fallbackIconKey)
+                {
+                    IsFirstInGroup = isFirstVersionInGroup
+                });
+                isFirstVersionInGroup = false;
             }
         }
 

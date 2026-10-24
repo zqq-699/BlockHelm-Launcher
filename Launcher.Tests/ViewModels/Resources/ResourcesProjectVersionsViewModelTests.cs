@@ -121,7 +121,10 @@ public sealed class ResourcesProjectVersionsViewModelTests
                 Assert.True(child.IsGroupEntrancePending));
         };
         header.ToggleExpandedCommand.Execute(null);
-        Assert.Equal(25, viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().Count());
+        var expandedChildren = viewModel.ListItems.OfType<ResourcesModVersionItemViewModel>().ToList();
+        Assert.Equal(25, expandedChildren.Count);
+        Assert.True(expandedChildren[0].IsFirstInGroup);
+        Assert.False(expandedChildren[1].IsFirstInGroup);
         Assert.Equal(25, queuedChildren);
 
         Action? completeCollapse = null;
