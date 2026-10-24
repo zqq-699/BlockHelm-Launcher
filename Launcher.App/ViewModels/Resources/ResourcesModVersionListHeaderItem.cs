@@ -19,12 +19,38 @@
 
 namespace Launcher.App.ViewModels.Resources;
 
-public sealed class ResourcesModVersionListHeaderItem
+using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.ComponentModel;
+
+public sealed class ResourcesModVersionListHeaderItem : ObservableObject
 {
-    public ResourcesModVersionListHeaderItem(string title)
+    private readonly Action<string, bool>? expansionChanged;
+    private bool isExpanded;
+
+    public ResourcesModVersionListHeaderItem(
+        string title,
+        bool isExpanded = true,
+        Action<string, bool>? expansionChanged = null)
     {
         Title = title;
+        this.isExpanded = isExpanded;
+        this.expansionChanged = expansionChanged;
+        ToggleExpandedCommand = new RelayCommand(ToggleExpanded, () => expansionChanged is not null);
     }
 
     public string Title { get; }
+
+    public bool IsExpanded
+    {
+        get => isExpanded;
+        private set => SetProperty(ref isExpanded, value);
+    }
+
+    public IRelayCommand ToggleExpandedCommand { get; }
+
+    private void ToggleExpanded()
+    {
+        IsExpanded = !IsExpanded;
+        expansionChanged?.Invoke(Title, IsExpanded);
+    }
 }

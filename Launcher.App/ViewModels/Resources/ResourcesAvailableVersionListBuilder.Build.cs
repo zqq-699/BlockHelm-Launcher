@@ -31,7 +31,9 @@ public AvailableVersionListBuildResult Build(
         string fallbackIconKey,
         string? selectedVersionId,
         string? selectedLoaderId,
-        string searchQuery)
+        string searchQuery,
+        IReadOnlyDictionary<string, bool> groupExpansionStates,
+        Action<string, bool> expansionChanged)
     {
         // UI 集合同时包含标题和版本项；先完成筛选，再生成不会出现空组的扁平投影。
         var items = new List<object>();
@@ -45,7 +47,9 @@ public AvailableVersionListBuildResult Build(
             selectedProject,
             fallbackIconKey,
             selectedVersionId,
-            selectedLoaderId);
+            selectedLoaderId,
+            groupExpansionStates,
+            expansionChanged);
         return new AvailableVersionListBuildResult(items, visibleCount);
     }
 
@@ -108,7 +112,9 @@ public AvailableVersionListBuildResult Build(
         ResourcesModProjectItemViewModel? selectedProject,
         string fallbackIconKey,
         string? selectedVersionId,
-        string? selectedLoaderId)
+        string? selectedLoaderId,
+        IReadOnlyDictionary<string, bool> groupExpansionStates,
+        Action<string, bool> expansionChanged)
     {
         // 标题只在至少存在一个可见子项时加入，避免留下无法解释的空分组。
         var groups = new List<AvailableVersionCompatibilityGroup>();
@@ -136,13 +142,20 @@ public AvailableVersionListBuildResult Build(
         }
 
         var visibleCount = 0;
+        var defaultExpanded = groups.Count == 1;
         foreach (var group in groups)
         {
-            items.Add(new ResourcesModVersionListHeaderItem(group.Title));
+            var isExpanded = groupExpansionStates.TryGetValue(group.Title, out var explicitState)
+                ? explicitState
+                : defaultExpanded;
+            items.Add(new ResourcesModVersionListHeaderItem(group.Title, isExpanded, expansionChanged));
+            visibleCount += group.Versions.Count;
+            if (!isExpanded)
+                continue;
+
             foreach (var version in group.Versions)
             {
                 items.Add(new ResourcesModVersionItemViewModel(version, selectedProject, fallbackIconKey));
-                visibleCount++;
             }
         }
 

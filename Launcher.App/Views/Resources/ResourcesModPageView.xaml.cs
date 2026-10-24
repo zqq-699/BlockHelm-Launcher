@@ -141,7 +141,8 @@ public partial class ResourcesModPageView : UserControl
             && e.PropertyName is nameof(ResourcesProjectVersionsViewModel.IsLoading)
                 or nameof(ResourcesProjectVersionsViewModel.IsLoadingMore)
                 or nameof(ResourcesProjectVersionsViewModel.HasMore)
-                or nameof(ResourcesProjectVersionsViewModel.VisibleVersionCount))
+                or nameof(ResourcesProjectVersionsViewModel.VisibleVersionCount)
+                or nameof(ResourcesProjectVersionsViewModel.CanAutoLoadMoreVersions))
         {
             QueueVersionAutoLoadIfNeeded();
         }
@@ -248,7 +249,8 @@ public partial class ResourcesModPageView : UserControl
             || viewModel.CurrentStep is not ResourcesModPageStep.ProjectVersions
             || !viewModel.Versions.HasMore
             || viewModel.Versions.IsLoading
-            || viewModel.Versions.IsLoadingMore)
+            || viewModel.Versions.IsLoadingMore
+            || !viewModel.Versions.CanAutoLoadMoreVersions)
         {
             return;
         }

@@ -37,6 +37,8 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
 
     // 分页来源可能返回重叠结果，稳定 ID 集合确保同一版本只进入页面一次。
     private readonly HashSet<string> loadedVersionIds = new(StringComparer.OrdinalIgnoreCase);
+    // 只记录用户主动切换过的分组；未操作分组始终根据当前分组数量应用默认状态。
+    private readonly Dictionary<string, bool> groupExpansionStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ResourcesOnlineProjectPageOptions options;
     private readonly IResourceCatalogService? resourceCatalogService;
     private readonly Func<IReadOnlyList<GameInstance>>? getInstanceCatalogSnapshot;
@@ -147,6 +149,17 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
     public bool HasLoadErrorMessage => !string.IsNullOrWhiteSpace(LoadErrorMessage);
 
     public bool HasVisibleVersions => VisibleVersionCount > 0;
+
+    public bool CanAutoLoadMoreVersions
+    {
+        get
+        {
+            var groups = ListItems.OfType<ResourcesModVersionListHeaderItem>()
+                .Where(header => header.ToggleExpandedCommand.CanExecute(null))
+                .ToList();
+            return groups.Count == 0 || groups.Any(header => header.IsExpanded);
+        }
+    }
 
     public bool HasFilters => !string.IsNullOrWhiteSpace(SearchQuery)
         || SelectedVersionFilter?.Id is { } versionId && !string.Equals(versionId, "all", StringComparison.OrdinalIgnoreCase)
@@ -537,6 +550,7 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
         SourceVersions = [];
         NextPageOffset = 0;
         loadedVersionIds.Clear();
+        groupExpansionStates.Clear();
         ListItems.Clear();
         VisibleVersionCount = 0;
         HasMore = false;
@@ -630,7 +644,9 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
             options.FallbackIconKey,
             SelectedVersionFilter?.Id,
             SelectedLoaderFilter?.Id,
-            SearchQuery);
+            SearchQuery,
+            groupExpansionStates,
+            SetGroupExpanded);
         foreach (var item in result.Items)
             ListItems.Add(item);
         VisibleVersionCount = result.VisibleVersionCount;
@@ -638,6 +654,64 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
         if (playEntranceAnimation)
             ListEntranceAnimationToken++;
         UpdateFooter();
+        RaiseStateChanged();
+    }
+
+    private void SetGroupExpanded(string title, bool isExpanded)
+    {
+        groupExpansionStates[title] = isExpanded;
+        var groupIndex = -1;
+        for (var index = 0; index < ListItems.Count; index++)
+        {
+            if (ListItems[index] is ResourcesModVersionListHeaderItem header
+                && string.Equals(header.Title, title, StringComparison.OrdinalIgnoreCase))
+            {
+                groupIndex = index;
+                break;
+            }
+        }
+
+        if (groupIndex < 0)
+            return;
+
+        // 保留标题对象和虚拟化容器，使箭头能在同一控件上完成旋转。
+        var result = Builder.Build(
+            SourceVersions,
+            Title,
+            currentProject,
+            options.FallbackIconKey,
+            SelectedVersionFilter?.Id,
+            SelectedLoaderFilter?.Id,
+            SearchQuery,
+            groupExpansionStates,
+            SetGroupExpanded);
+        var rebuiltGroupIndex = -1;
+        for (var index = 0; index < result.Items.Count; index++)
+        {
+            if (result.Items[index] is ResourcesModVersionListHeaderItem header
+                && string.Equals(header.Title, title, StringComparison.OrdinalIgnoreCase))
+            {
+                rebuiltGroupIndex = index;
+                break;
+            }
+        }
+        if (rebuiltGroupIndex < 0)
+            return;
+
+        var firstChildIndex = groupIndex + 1;
+        while (firstChildIndex < ListItems.Count
+            && ListItems[firstChildIndex] is not ResourcesModVersionListHeaderItem
+            && ListItems[firstChildIndex] is not ResourcesListFooterStatusItem)
+        {
+            ListItems.RemoveAt(firstChildIndex);
+        }
+
+        for (var index = rebuiltGroupIndex + 1; index < result.Items.Count
+            && result.Items[index] is not ResourcesModVersionListHeaderItem; index++)
+        {
+            ListItems.Insert(firstChildIndex++, result.Items[index]);
+        }
+
         RaiseStateChanged();
     }
 
@@ -670,6 +744,7 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
         OnPropertyChanged(nameof(CanShowEmptyState));
         OnPropertyChanged(nameof(CanShowLoadErrorState));
         OnPropertyChanged(nameof(CanShowLoadMoreState));
+        OnPropertyChanged(nameof(CanAutoLoadMoreVersions));
     }
 
     private void CancelTargetsLoad()

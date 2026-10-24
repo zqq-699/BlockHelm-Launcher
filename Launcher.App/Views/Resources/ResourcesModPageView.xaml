@@ -93,8 +93,95 @@
             </Style>
 
             <DataTemplate DataType="{x:Type viewModels:ResourcesModVersionListHeaderItem}">
-                <TextBlock Text="{Binding Title}"
-                           Style="{StaticResource ResourcesModVersionsTitleTextStyle}" />
+                <Button Margin="0,0,0,12"
+                        Padding="8,4"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        RenderTransformOrigin="0.5,0.5"
+                        Command="{Binding ToggleExpandedCommand}"
+                        Cursor="Hand"
+                        behaviors:ListPageEntranceAnimationBehavior.IsEnabled="True"
+                        behaviors:ListPageEntranceAnimationBehavior.ItemState="{Binding Tag, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="HeaderBackground"
+                                    Padding="{TemplateBinding Padding}"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="6">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="HeaderBackground"
+                                            Property="Background"
+                                            Value="{DynamicResource Brush.List.Item.Hover}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Margin="0"
+                                   Text="{Binding Title}"
+                                   Style="{StaticResource ResourcesModVersionsTitleTextStyle}" />
+                        <controls:SvgIcon Grid.Column="1"
+                                          Width="20"
+                                          Height="20"
+                                          Margin="12,0,2,0"
+                                          HorizontalAlignment="Right"
+                                          VerticalAlignment="Center"
+                                          Foreground="{DynamicResource Brush.A8FFFFFF}"
+                                          IconKey="general/general_arrow_down"
+                                          RenderTransformOrigin="0.5,0.5">
+                            <controls:SvgIcon.Style>
+                                <Style TargetType="controls:SvgIcon">
+                                    <Setter Property="RenderTransform">
+                                        <Setter.Value>
+                                            <RotateTransform Angle="-90" />
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                                                         To="0"
+                                                                         Duration="0:0:0.18">
+                                                            <DoubleAnimation.EasingFunction>
+                                                                <CubicEase EasingMode="EaseOut" />
+                                                            </DoubleAnimation.EasingFunction>
+                                                        </DoubleAnimation>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                            <DataTrigger.ExitActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                                                         To="-90"
+                                                                         Duration="0:0:0.18">
+                                                            <DoubleAnimation.EasingFunction>
+                                                                <CubicEase EasingMode="EaseOut" />
+                                                            </DoubleAnimation.EasingFunction>
+                                                        </DoubleAnimation>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.ExitActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </controls:SvgIcon.Style>
+                        </controls:SvgIcon>
+                    </Grid>
+                </Button>
             </DataTemplate>
 
             <DataTemplate DataType="{x:Type viewModels:ResourcesListFooterStatusItem}">
