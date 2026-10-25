@@ -316,6 +316,7 @@
 {"mcmodId":338,"chineseName":"超级马里奥","englishName":"Super Mario Mod","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["mario","mod_Mario"]}
 {"mcmodId":339,"chineseName":"更好的字体","englishName":"BetterFonts","abbreviation":null,"curseForgeSlugs":["betterfonts"],"modrinthSlugs":[],"modIds":["BetterFonts"]}
 {"mcmodId":340,"chineseName":"塞尔达剑技","englishName":"ZELDA SWORD SKILLS","abbreviation":"ZSS","curseForgeSlugs":["zelda-sword-skills"],"modrinthSlugs":[],"modIds":["zeldaswordskills"]}
+{"mcmodId":341,"chineseName":"工业时代2","englishName":"Industrial Craft 2","abbreviation":"IC2","curseForgeSlugs":["industrial-craft"],"modrinthSlugs":["industrial-craft"],"modIds":[]}
 {"mcmodId":342,"chineseName":"我的菜单","englishName":"MineMenu","abbreviation":null,"curseForgeSlugs":["minemenu"],"modrinthSlugs":[],"modIds":["minemenu"]}
 {"mcmodId":343,"chineseName":"对称度运算仪","englishName":"Symcalc","abbreviation":null,"curseForgeSlugs":["symcalc"],"modrinthSlugs":[],"modIds":["symcalc"]}
 {"mcmodId":344,"chineseName":"枫树","englishName":"MapleTree","abbreviation":"MT","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["mod_ecru_MapleTree"]}
@@ -351,6 +352,8 @@
 {"mcmodId":379,"chineseName":"高级排斥系统","englishName":"Advanced Repulsion Systems","abbreviation":"ARS","curseForgeSlugs":[],"modrinthSlugs":["advanced-repulsion-systems"],"modIds":["AdvancedRepulsionSystems"]}
 {"mcmodId":380,"chineseName":"稀有精英怪","englishName":"AtomicStryker's Infernal Mobs","abbreviation":null,"curseForgeSlugs":["atomicstrykers-infernal-mobs"],"modrinthSlugs":[],"modIds":["InfernalMobs","infernalmobs"]}
 {"mcmodId":381,"chineseName":"苹果核","englishName":"AppleCore","abbreviation":null,"curseForgeSlugs":["applecore"],"modrinthSlugs":[],"modIds":["AppleCore","applecore"]}
+{"mcmodId":383,"chineseName":"飞艇与汽船","englishName":"SteamShip - SteamBoat and Pirates","abbreviation":"PChan3","curseForgeSlugs":["pchan3-steamship-steamboat-pirates"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":384,"chineseName":"更多生存要素","englishName":"EnviroMine","abbreviation":null,"curseForgeSlugs":["enviromine"],"modrinthSlugs":[],"modIds":[]}
 {"mcmodId":385,"chineseName":"神秘能源","englishName":"Thaumic Energistics","abbreviation":null,"curseForgeSlugs":["thaumic-energistics"],"modrinthSlugs":[],"modIds":["thaumicenergistics"]}
 {"mcmodId":386,"chineseName":"豆腐工艺","englishName":"TofuCraft","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["TofuCraft"]}
 {"mcmodId":387,"chineseName":"凿子","englishName":"Chisel","abbreviation":null,"curseForgeSlugs":["chisel"],"modrinthSlugs":[],"modIds":["chisel"]}
@@ -850,7 +853,7 @@
 {"mcmodId":906,"chineseName":"格鲁","englishName":"Grue","abbreviation":null,"curseForgeSlugs":["grue"],"modrinthSlugs":[],"modIds":["grue"]}
 {"mcmodId":907,"chineseName":"亡兄","englishName":"The Dead Brother","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["TheDeadBrother"]}
 {"mcmodId":908,"chineseName":"金鱼眼","englishName":"GooglyEyes","abbreviation":null,"curseForgeSlugs":["googlyeyes"],"modrinthSlugs":[],"modIds":["googlyeyes"]}
-{"mcmodId":909,"chineseName":"恐怖生物","englishName":"Lycanites Mobs","abbreviation":"LM","curseForgeSlugs":["lycanites-mobs"],"modrinthSlugs":[],"modIds":["lycanitesmobs","swampmobs","saltwatermobs","plainsmobs","mountainmobs","junglemobs","infernomobs","freshwatermobs","forestmobs","desertmobs"]}
+{"mcmodId":909,"chineseName":"恐怖生物","englishName":"Lycanites Mobs","abbreviation":"LM","curseForgeSlugs":["lycanites-mobs"],"modrinthSlugs":["lycanites-mobs"],"modIds":["lycanitesmobs","swampmobs","saltwatermobs","plainsmobs","mountainmobs","junglemobs","infernomobs","freshwatermobs","forestmobs","desertmobs"]}
 {"mcmodId":910,"chineseName":"生态回归","englishName":"Back to Eco","abbreviation":null,"curseForgeSlugs":["back-to-eco"],"modrinthSlugs":[],"modIds":["backtoeco"]}
 {"mcmodId":911,"chineseName":"魔兽世界","englishName":"World Of Warcraft","abbreviation":null,"curseForgeSlugs":["world-of-warcraft"],"modrinthSlugs":[],"modIds":["wow"]}
 {"mcmodId":912,"chineseName":"猎魔人","englishName":"The Witcher Adventure","abbreviation":null,"curseForgeSlugs":["the-witcher-adventure"],"modrinthSlugs":[],"modIds":["thewitcheradventure"]}
@@ -2582,7 +2585,7 @@
 {"mcmodId":2696,"chineseName":"Coffee Time!","englishName":null,"abbreviation":null,"curseForgeSlugs":["coffee-time"],"modrinthSlugs":[],"modIds":["coffeetime"]}
 {"mcmodId":2697,"chineseName":"饮料模组","englishName":"Drink Mod","abbreviation":null,"curseForgeSlugs":["drink-mod"],"modrinthSlugs":[],"modIds":["drinksmod"]}
 {"mcmodId":2698,"chineseName":"更多僵尸村民","englishName":"More Zombie Villagers","abbreviation":null,"curseForgeSlugs":["more-zombie-villagers"],"modrinthSlugs":["more-zombie-villagers"],"modIds":["morezombievillagers"]}
-{"mcmodId":2699,"chineseName":"自然生成闪电苦力怕","englishName":"Naturally Charged Creepers","abbreviation":null,"curseForgeSlugs":["naturally-charged-creepers"],"modrinthSlugs":["naturally-charged-creepers"],"modIds":["naturallychargedcreepers"]}
+{"mcmodId":2699,"chineseName":"自然生成闪电苦力怕","englishName":"Naturally Charged Creepers","abbreviation":null,"curseForgeSlugs":["naturally-charged-creepers","naturally-charged-creepers-fabric"],"modrinthSlugs":["naturally-charged-creepers"],"modIds":["naturallychargedcreepers"]}
 {"mcmodId":2700,"chineseName":"皮肤移植","englishName":"SkinPort","abbreviation":null,"curseForgeSlugs":["skinport"],"modrinthSlugs":[],"modIds":["skinport"]}
 {"mcmodId":2701,"chineseName":"动态环境：音效控制","englishName":"Dynamic Surroundings: SoundControl","abbreviation":null,"curseForgeSlugs":["dynamic-surroundings-soundcontrol"],"modrinthSlugs":[],"modIds":["sndctrl"]}
 {"mcmodId":2702,"chineseName":"无盐:创造毁灭者","englishName":"No More Salt:Cheat Ban","abbreviation":"CB","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["cheat_ban"]}
@@ -22682,7 +22685,7 @@
 {"mcmodId":23039,"chineseName":"Alex的洞穴：维度","englishName":"Dimensions-of-Alex's-Caves","abbreviation":"DAC","curseForgeSlugs":["dimensions-of-alexs-caves"],"modrinthSlugs":["dimensions-of-alexs-caves"],"modIds":["alex_caves_dimensions"]}
 {"mcmodId":23040,"chineseName":"更好的战斗粒子","englishName":"Better Combat Particle","abbreviation":null,"curseForgeSlugs":["better-combat-particle"],"modrinthSlugs":["better-combat-particle"],"modIds":["malfu-mods"]}
 {"mcmodId":23041,"chineseName":"V裂","englishName":"VSplit","abbreviation":null,"curseForgeSlugs":["vsplit"],"modrinthSlugs":["vsplit"],"modIds":["vsplit"]}
-{"mcmodId":23042,"chineseName":"Tacz饰品","englishName":"TaczCurios","abbreviation":"TCC","curseForgeSlugs":["taczcurios"],"modrinthSlugs":["taczcurios"],"modIds":["tcc"]}
+{"mcmodId":23042,"chineseName":"TaCZ饰品","englishName":"TaczCurios","abbreviation":"TCC","curseForgeSlugs":["taczcurios"],"modrinthSlugs":["taczcurios"],"modIds":["tcc"]}
 {"mcmodId":23043,"chineseName":"Just Enough Artificial Intelligence","englishName":null,"abbreviation":"JEAI","curseForgeSlugs":["jeai"],"modrinthSlugs":["jeai"],"modIds":["jeai"]}
 {"mcmodId":23044,"chineseName":"UtilityCraft","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
 {"mcmodId":23045,"chineseName":"魔金革新","englishName":"Metal Revolution","abbreviation":"MR","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["metal_revolution"]}
@@ -27865,7 +27868,7 @@
 {"mcmodId":28277,"chineseName":"Sable x Little Tiles","englishName":null,"abbreviation":null,"curseForgeSlugs":["sable-x-little-tiles-create-aeronautics"],"modrinthSlugs":[],"modIds":["ltsable"]}
 {"mcmodId":28278,"chineseName":"再见？预生成！","englishName":"Bye?Pregen!","abbreviation":null,"curseForgeSlugs":["bye-pregen"],"modrinthSlugs":[],"modIds":["byepregen"]}
 {"mcmodId":28279,"chineseName":"树洞Forge版","englishName":"Tree Hollows Forge","abbreviation":"THF","curseForgeSlugs":["tree-hollows-forge"],"modrinthSlugs":[],"modIds":["treehollows"]}
-{"mcmodId":28280,"chineseName":"帕斯特之梦：重生","englishName":"PasterDream: Reborn","abbreviation":"PDR","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["pasterdream"]}
+{"mcmodId":28280,"chineseName":"帕斯特之梦：重生","englishName":"PasterDream: Reborn","abbreviation":"PDR","curseForgeSlugs":["pasterdream-reborn"],"modrinthSlugs":[],"modIds":["pasterdream"]}
 {"mcmodId":28281,"chineseName":"体位性低血压","englishName":"Orthostatic Hypotension","abbreviation":"xiamo-OH","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["orthostatichypotension"]}
 {"mcmodId":28282,"chineseName":"未至之域","englishName":"Yetrealm","abbreviation":null,"curseForgeSlugs":["yetrealm"],"modrinthSlugs":[],"modIds":["yetrealm"]}
 {"mcmodId":28283,"chineseName":"AutoEat","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["autoeat"],"modIds":["autoeat"]}
@@ -28780,7 +28783,7 @@
 {"mcmodId":29200,"chineseName":"Create Ages","englishName":null,"abbreviation":null,"curseForgeSlugs":["create-ages"],"modrinthSlugs":[],"modIds":["createages"]}
 {"mcmodId":29201,"chineseName":"Super Factory Manager Wireless Node","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["super_factory_addon_1785065217"]}
 {"mcmodId":29202,"chineseName":"Roguelike Dungeons: Arcana Edition","englishName":null,"abbreviation":null,"curseForgeSlugs":["roguelike-dungeons-arcana-edition"],"modrinthSlugs":[],"modIds":[]}
-{"mcmodId":29203,"chineseName":"TinkersConstruct NeoForge1.21.1","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["tconstruct"]}
+{"mcmodId":29203,"chineseName":"匠魂3 NeoForge 1.21.1","englishName":"TinkersConstruct NeoForge 1.21.1","abbreviation":"Tic","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["tconstruct"]}
 {"mcmodId":29204,"chineseName":"游侠学徒","englishName":"Ranger's Apprentice","abbreviation":"RA","curseForgeSlugs":["rangers-apprentice-mod"],"modrinthSlugs":["rangers-apprentice"],"modIds":["ranger"]}
 {"mcmodId":29205,"chineseName":"全能升级","englishName":"Omni Upgrades","abbreviation":null,"curseForgeSlugs":["omni-upgrades"],"modrinthSlugs":["omni-upgrades"],"modIds":["omni_upgrades"]}
 {"mcmodId":29206,"chineseName":"更多箱子修复","englishName":"Iron Chest Fix","abbreviation":"ICF","curseForgeSlugs":["iron-chest-fix"],"modrinthSlugs":["iron-chest-fix"],"modIds":["ironchestfix"]}
@@ -29415,7 +29418,7 @@
 {"mcmodId":29838,"chineseName":"TGZJDV的聊天","englishName":"TGZJDV's Chat","abbreviation":null,"curseForgeSlugs":["tgzjdvs-chat"],"modrinthSlugs":["tgzjdvs-chat"],"modIds":["tgzjdvchat"]}
 {"mcmodId":29839,"chineseName":"Project Expansion : Arcanum","englishName":null,"abbreviation":null,"curseForgeSlugs":["project-expansion-arcanum"],"modrinthSlugs":[],"modIds":["projectexa"]}
 {"mcmodId":29840,"chineseName":"Rinku","englishName":null,"abbreviation":null,"curseForgeSlugs":["rinku"],"modrinthSlugs":["rinku"],"modIds":["rinku"]}
-{"mcmodId":29841,"chineseName":"PianoLib","englishName":null,"abbreviation":"PL","curseForgeSlugs":["pianolib"],"modrinthSlugs":[],"modIds":["pianolib"]}
+{"mcmodId":29841,"chineseName":"PianoLib","englishName":null,"abbreviation":"PL","curseForgeSlugs":["pianolib"],"modrinthSlugs":["pianolib"],"modIds":["pianolib"]}
 {"mcmodId":29842,"chineseName":"Twilight Iris Xe Fix","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["twilight-iris-xe-fix"],"modIds":["twilight_iris_xe_fix"]}
 {"mcmodId":29843,"chineseName":"Anti Spectator Noclip","englishName":null,"abbreviation":null,"curseForgeSlugs":["anti-spectator-noclip"],"modrinthSlugs":["anti-spectator-noclip"],"modIds":["anti-spectator-noclip"]}
 {"mcmodId":29844,"chineseName":"Not So Hardcore","englishName":null,"abbreviation":null,"curseForgeSlugs":["not-so-hardcore"],"modrinthSlugs":["notsohardcore"],"modIds":["notsohardcore"]}
@@ -30493,7 +30496,7 @@
 {"mcmodId":30928,"chineseName":"Advanced Apples","englishName":null,"abbreviation":null,"curseForgeSlugs":["advanced-apples"],"modrinthSlugs":[],"modIds":[]}
 {"mcmodId":30929,"chineseName":"灵巧闪避","englishName":"Flexible Dodge","abbreviation":null,"curseForgeSlugs":["flexible-dodge"],"modrinthSlugs":[],"modIds":["flexibledodge"]}
 {"mcmodId":30930,"chineseName":"米西娅UI","englishName":"Misia UI","abbreviation":"MUI","curseForgeSlugs":[],"modrinthSlugs":["misia-ui"],"modIds":["misiaui"]}
-{"mcmodId":30931,"chineseName":"气动工艺：气幕工坊","englishName":"PneumaticCraft: Air Curtain Works","abbreviation":"PnCA","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["pnca"]}
+{"mcmodId":30931,"chineseName":"气动工艺：拓展","englishName":"PneumaticCraft: Extras","abbreviation":"PnCE","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["pnca"]}
 {"mcmodId":30932,"chineseName":"搬运开关","englishName":"Carry On Toggle","abbreviation":null,"curseForgeSlugs":["carry-on-toggle"],"modrinthSlugs":[],"modIds":["carryon_toggle"]}
 {"mcmodId":30933,"chineseName":"鸡粪盘","englishName":"Manure Tray","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":["manure_tray"]}
 {"mcmodId":30934,"chineseName":"黑土乐事","englishName":"Blacksoil Delight","abbreviation":null,"curseForgeSlugs":["blacksoil-delight"],"modrinthSlugs":[],"modIds":["blacksoil_delight"]}
@@ -31466,3 +31469,158 @@
 {"mcmodId":31907,"chineseName":"Tetra兼容是，史蒂夫模型","englishName":"Tetra - Yes Steve Model Compatl","abbreviation":null,"curseForgeSlugs":["tetra-yes-steve-model-compatl"],"modrinthSlugs":[],"modIds":[]}
 {"mcmodId":31908,"chineseName":"Definitive Cannons","englishName":null,"abbreviation":null,"curseForgeSlugs":["definitive-cannons"],"modrinthSlugs":[],"modIds":[]}
 {"mcmodId":31909,"chineseName":"TFC Registry API","englishName":null,"abbreviation":null,"curseForgeSlugs":["tfc-registry-api"],"modrinthSlugs":["tfc-registry-api"],"modIds":[]}
+{"mcmodId":31910,"chineseName":"神秘附加","englishName":"Thaumaturge Additions","abbreviation":"TA","curseForgeSlugs":["thaumaturge-additions"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31911,"chineseName":"Iron的趣味法术拓展","englishName":"Iron's Fun Spell Expansion","abbreviation":"IE","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31912,"chineseName":"Thaumaturge Tweaks","englishName":null,"abbreviation":null,"curseForgeSlugs":["thaumaturge-tweaks"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31913,"chineseName":"Spear Effects","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["spear-effects"],"modIds":[]}
+{"mcmodId":31914,"chineseName":"全部运气奖励","englishName":"Luck All Bonus","abbreviation":null,"curseForgeSlugs":["luck-all-bonus"],"modrinthSlugs":["luck-all-bonus"],"modIds":[]}
+{"mcmodId":31915,"chineseName":"匠魂合金附加：非官方移植版","englishName":"Tinkers Alloying Addon Unofficial Port","abbreviation":"TAIGAUP","curseForgeSlugs":["taiga-tconstruct3-port"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31916,"chineseName":"Refined Fluid Substitution","englishName":null,"abbreviation":null,"curseForgeSlugs":["refined-fluid-substitution"],"modrinthSlugs":["refined-fluid-substitution"],"modIds":[]}
+{"mcmodId":31917,"chineseName":"Refined Wireless Upgrades","englishName":null,"abbreviation":null,"curseForgeSlugs":["refined-wireless-upgrades"],"modrinthSlugs":["refined-wireless-upgrades"],"modIds":[]}
+{"mcmodId":31918,"chineseName":"精致存储：无线合成终端","englishName":"Refined Storage - Wireless Crafting","abbreviation":"RSWC","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31919,"chineseName":"Hyper 'N Hiei's Shenanigans - Iron's Spells Addon","englishName":null,"abbreviation":null,"curseForgeSlugs":["hyper-n-hieis-shenanigans"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31920,"chineseName":"Infinity Gauntlet Core","englishName":null,"abbreviation":null,"curseForgeSlugs":["infinity-gauntlet-core"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31921,"chineseName":"精准坐垫放置","englishName":"Precise Cushion Placement","abbreviation":null,"curseForgeSlugs":["precise-cushion-placement"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31922,"chineseName":"Reactions","englishName":null,"abbreviation":null,"curseForgeSlugs":["playerreactions"],"modrinthSlugs":["playereactions"],"modIds":[]}
+{"mcmodId":31923,"chineseName":"元素反应","englishName":"Elemental Reaction","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31924,"chineseName":"ModularGrid","englishName":null,"abbreviation":"MG","curseForgeSlugs":["modulargrid"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31925,"chineseName":"Unjank","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["unjank"],"modIds":[]}
+{"mcmodId":31926,"chineseName":"传说 Boss","englishName":"Legendary Bosses","abbreviation":null,"curseForgeSlugs":["legendary-bosses"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31927,"chineseName":"无限加点系统","englishName":"Infinite Stat System","abbreviation":"ISS","curseForgeSlugs":["infinite-stat-system"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31928,"chineseName":"Legendary Herobrine","englishName":null,"abbreviation":null,"curseForgeSlugs":["legendary-herobrine"],"modrinthSlugs":["legendary-herobrine"],"modIds":[]}
+{"mcmodId":31929,"chineseName":"PSI Legacy","englishName":null,"abbreviation":null,"curseForgeSlugs":["psi-legacy"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31930,"chineseName":"实体碰撞性能优化","englishName":"Entity Collision Optimization","abbreviation":"ECOpt","curseForgeSlugs":["entity-collision-optimization"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31931,"chineseName":"[Let's Do] Every Compat","englishName":null,"abbreviation":null,"curseForgeSlugs":["lets-do-every-compat"],"modrinthSlugs":["letsdoeverycompat"],"modIds":[]}
+{"mcmodId":31932,"chineseName":"Bacterium","englishName":null,"abbreviation":null,"curseForgeSlugs":["bacterium"],"modrinthSlugs":["bacterium"],"modIds":[]}
+{"mcmodId":31933,"chineseName":"Integrated Superheroes","englishName":null,"abbreviation":null,"curseForgeSlugs":["integrated-superheroes"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31934,"chineseName":"流体透视","englishName":"Fluid X-ray","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31935,"chineseName":"Orbital Bowcanon","englishName":null,"abbreviation":null,"curseForgeSlugs":["orbital-bowcanon"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31936,"chineseName":"神の附魔","englishName":"Shen Enchantments","abbreviation":null,"curseForgeSlugs":["shen-enchantments"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31937,"chineseName":"史诗战斗-武道无穷","englishName":"Epic Fight -Wu Dao Wu Qiong","abbreviation":null,"curseForgeSlugs":["wu-dao-wu-qiong"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31938,"chineseName":"第二次生命","englishName":"Second Chapter","abbreviation":null,"curseForgeSlugs":["second-chapter"],"modrinthSlugs":["second-chapter"],"modIds":[]}
+{"mcmodId":31939,"chineseName":"The Slopstrocity","englishName":null,"abbreviation":null,"curseForgeSlugs":["the-slopstrosity"],"modrinthSlugs":["the-slopstrosity"],"modIds":[]}
+{"mcmodId":31940,"chineseName":"Void Titans","englishName":null,"abbreviation":null,"curseForgeSlugs":["void-titans-titanes-del-vacio"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31941,"chineseName":"TNT: Reforged","englishName":null,"abbreviation":null,"curseForgeSlugs":["tnt-reforged"],"modrinthSlugs":["tnt-reforged"],"modIds":[]}
+{"mcmodId":31942,"chineseName":"DE More Compat","englishName":null,"abbreviation":null,"curseForgeSlugs":["de-powah-compat"],"modrinthSlugs":["de_more_compat"],"modIds":[]}
+{"mcmodId":31943,"chineseName":"EEEAB's Mobs | Nameless Guardian is back!","englishName":null,"abbreviation":null,"curseForgeSlugs":["eeeabs-mobs-nameless-guardian-is-back"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31944,"chineseName":"Linkart Overhaul","englishName":null,"abbreviation":null,"curseForgeSlugs":["linkart-overhaul"],"modrinthSlugs":["linkart-overhaul"],"modIds":[]}
+{"mcmodId":31945,"chineseName":"Debugify Reforge","englishName":null,"abbreviation":null,"curseForgeSlugs":["debugify-reforge"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31946,"chineseName":"Ziplines Legacy","englishName":null,"abbreviation":null,"curseForgeSlugs":["ziplines-legacy"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31947,"chineseName":"Wishful Recipes","englishName":null,"abbreviation":null,"curseForgeSlugs":["wishful-recipes"],"modrinthSlugs":["wishful-recipes"],"modIds":[]}
+{"mcmodId":31948,"chineseName":"Bellows","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["smithed-bellows"],"modIds":[]}
+{"mcmodId":31949,"chineseName":"傀儡生成修复","englishName":"Golem Spawn Fix","abbreviation":null,"curseForgeSlugs":["golem-spawn-fix"],"modrinthSlugs":["golem-spawn-fix"],"modIds":[]}
+{"mcmodId":31950,"chineseName":"AutoJS","englishName":null,"abbreviation":"AJS","curseForgeSlugs":["autojs"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31951,"chineseName":"职业：命运抉择","englishName":"Class: Fate Choice","abbreviation":"CFCH","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31952,"chineseName":"车万女仆：更好的隙间","englishName":"Touhou Little Maid：BetterGap","abbreviation":null,"curseForgeSlugs":["touhoulittlemaid-bettergap"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31953,"chineseName":"Nins创意","englishName":"Nins Innovation","abbreviation":"NI","curseForgeSlugs":["nins-innovation"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31954,"chineseName":"至高术士","englishName":"Supreme Sorcerer(Imitation of Supreme Witch, Calamitas BOSS battle)","abbreviation":"SS","curseForgeSlugs":["ss-supreme-sorcerer-imitation-of-supreme-witch"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31955,"chineseName":"花仪绽放","englishName":"Floral Rite Bloom","abbreviation":"FRB","curseForgeSlugs":["frb-floral-rite-bloom-curios"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31956,"chineseName":"村民交易满级附魔","englishName":"VillagerTradesMaxEnchant","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31957,"chineseName":"Ws Effect Lib","englishName":null,"abbreviation":null,"curseForgeSlugs":["ws-effect-lib"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31958,"chineseName":"铭刻台","englishName":"InscriptionTable","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31959,"chineseName":"变废为宝","englishName":"FindValueInTheValueless","abbreviation":"FVTV","curseForgeSlugs":[],"modrinthSlugs":["findvalueinthevalueless"],"modIds":[]}
+{"mcmodId":31960,"chineseName":"钟楼军工","englishName":"Bell Tower Military Industry","abbreviation":"BTMI","curseForgeSlugs":["bell-tower-military-industry"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31961,"chineseName":"Safe Leash","englishName":null,"abbreviation":null,"curseForgeSlugs":["safe-leash"],"modrinthSlugs":["safe-leash"],"modIds":[]}
+{"mcmodId":31962,"chineseName":"Nora Lib","englishName":null,"abbreviation":null,"curseForgeSlugs":["noralib"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31963,"chineseName":"机械动力：锈迹斑斑","englishName":"Create: Rusty Copper","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["create-rusty-copper"],"modIds":[]}
+{"mcmodId":31964,"chineseName":"禁止蝙蝠","englishName":"Simple NoBats","abbreviation":null,"curseForgeSlugs":["nobats-for-1-21-1"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31965,"chineseName":"泰拉瑞亚：回响","englishName":"Terraria: Echoes","abbreviation":"Echoes","curseForgeSlugs":["terraria-echoes"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31966,"chineseName":"Mob Farming Supplies","englishName":null,"abbreviation":null,"curseForgeSlugs":["mobfarmingsupplies"],"modrinthSlugs":["mobfarmingsupplies"],"modIds":[]}
+{"mcmodId":31967,"chineseName":"物品阶段","englishName":"Item Stage JS","abbreviation":"ISJS","curseForgeSlugs":["item-stage-js"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31968,"chineseName":"真菌感染：JEI兼容","englishName":"Spore: JEI","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["spore_jei"],"modIds":[]}
+{"mcmodId":31969,"chineseName":"辉夜姬的五难题：重铸","englishName":"ThKaguyaMod: Reborn","abbreviation":"TKMRB","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31970,"chineseName":"Blood Bits: Flow","englishName":null,"abbreviation":null,"curseForgeSlugs":["blood-bits-flow"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31971,"chineseName":"自定义枪械永续兼容：救援","englishName":"CGC Compat: Revive","abbreviation":null,"curseForgeSlugs":["cgc-compat-revive"],"modrinthSlugs":["cgc-compat-revive"],"modIds":[]}
+{"mcmodId":31972,"chineseName":"物品分裂修复","englishName":"Item Split Bug Fix","abbreviation":"ISBF","curseForgeSlugs":["item-split-bug-fix"],"modrinthSlugs":["item-split-bug-fix"],"modIds":[]}
+{"mcmodId":31973,"chineseName":"千年村庄：更多JEI","englishName":"Millenaire JEIm","abbreviation":null,"curseForgeSlugs":["millenaire-jeim"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31974,"chineseName":"Reset Controls Confirmation","englishName":null,"abbreviation":null,"curseForgeSlugs":["reset-controls-confirmation"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31975,"chineseName":"额外盔甲栏","englishName":"Armor Curio","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31976,"chineseName":"MTRLED","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31977,"chineseName":"Lymonite Horse Armor","englishName":null,"abbreviation":null,"curseForgeSlugs":["lymonite-horse-armor"],"modrinthSlugs":["lymonite-horse-armor"],"modIds":[]}
+{"mcmodId":31978,"chineseName":"MCG's Guidebook: Aquamirae","englishName":null,"abbreviation":null,"curseForgeSlugs":["mcgs-guidebook-aquamirae"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31979,"chineseName":"网络音乐机：SPlayer桥","englishName":"Net Music: SPlayer Bridge","abbreviation":null,"curseForgeSlugs":["net-music-splayer-bridge"],"modrinthSlugs":["net-music-splayer-bridge"],"modIds":[]}
+{"mcmodId":31980,"chineseName":"TogetherForever","englishName":null,"abbreviation":null,"curseForgeSlugs":["togetherforever"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31981,"chineseName":"Netherite Tweaks","englishName":null,"abbreviation":null,"curseForgeSlugs":["netherite-tweaks"],"modrinthSlugs":["netherite_tweaks"],"modIds":[]}
+{"mcmodId":31982,"chineseName":"健康饮食","englishName":"Healthy Diet","abbreviation":"HD","curseForgeSlugs":[],"modrinthSlugs":["healthy_diet"],"modIds":[]}
+{"mcmodId":31983,"chineseName":"终焉之龙","englishName":"Eschaton Dragon Addon","abbreviation":null,"curseForgeSlugs":["eschaton-dragon-addon"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31984,"chineseName":"传说生存感染兼容层","englishName":"The Hordes x LSO Compat","abbreviation":"HIC","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31985,"chineseName":"Mysterious Spells","englishName":null,"abbreviation":null,"curseForgeSlugs":["mysterious-spells"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31986,"chineseName":"MCG 核心","englishName":"MCG Core [API]","abbreviation":null,"curseForgeSlugs":["mcg-core-api"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31987,"chineseName":"Hybrid API","englishName":null,"abbreviation":"HAPI","curseForgeSlugs":["hybrid-api"],"modrinthSlugs":["hybrid-api"],"modIds":[]}
+{"mcmodId":31988,"chineseName":"永无止境：装饰","englishName":"Limitless Decoration","abbreviation":"LD","curseForgeSlugs":["limitless-decoration"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31989,"chineseName":"人与忠犬","englishName":"Human and Dog","abbreviation":null,"curseForgeSlugs":["human-and-dog"],"modrinthSlugs":["human-and-dog"],"modIds":[]}
+{"mcmodId":31990,"chineseName":"Chained Fate","englishName":null,"abbreviation":null,"curseForgeSlugs":["chained-fate"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31991,"chineseName":"Union's Upgrade Scrolls Port","englishName":null,"abbreviation":null,"curseForgeSlugs":["unions-upgrade-scrolls-port"],"modrinthSlugs":["unions-upgrade-scrolls-port"],"modIds":[]}
+{"mcmodId":31992,"chineseName":"简单崩溃界面","englishName":"Simple Crash Menu","abbreviation":"SCM","curseForgeSlugs":["simple-crash-menu"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31993,"chineseName":"MzycBetterMTR","englishName":null,"abbreviation":"MBM","curseForgeSlugs":["mzycbettermtr"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31994,"chineseName":"貂关","englishName":"Sablework","abbreviation":null,"curseForgeSlugs":["sablework-clockworkvs-unofficial"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31995,"chineseName":"XBridge Auth","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["xbridge-auth"],"modIds":[]}
+{"mcmodId":31996,"chineseName":"奥术合成终端","englishName":"Arcane Crafting Terminal","abbreviation":null,"curseForgeSlugs":["arcane-crafting-terminal"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31997,"chineseName":"能量核心扩展","englishName":"Energy Core Extend","abbreviation":"ECE","curseForgeSlugs":["energy-core-extend"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31998,"chineseName":"回放界面","englishName":"Replay UI","abbreviation":"RUI","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":31999,"chineseName":"CompixelUI","englishName":null,"abbreviation":null,"curseForgeSlugs":["compixel"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32000,"chineseName":"Cinematic Interactions","englishName":null,"abbreviation":null,"curseForgeSlugs":["cinematic-interactions"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32001,"chineseName":"可视化实体技能编辑器","englishName":"Visual Entity Skill Edit","abbreviation":"VESE","curseForgeSlugs":["visual-entity-skill-edit"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32002,"chineseName":"破限","englishName":"Limit Breaker","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32003,"chineseName":"禁锢结界","englishName":"Stasis Ward","abbreviation":null,"curseForgeSlugs":["stasis-ward"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32004,"chineseName":"Baka 弹幕","englishName":"Baka Danmaku","abbreviation":null,"curseForgeSlugs":["baka-danmaku"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32005,"chineseName":"Enchantment Effects","englishName":null,"abbreviation":null,"curseForgeSlugs":["sb-enchantment-effects"],"modrinthSlugs":["sb-enchantment-effects"],"modIds":[]}
+{"mcmodId":32006,"chineseName":"Immersive Pillagers","englishName":null,"abbreviation":null,"curseForgeSlugs":["immersive-pillagers"],"modrinthSlugs":["immersive-pillagers"],"modIds":[]}
+{"mcmodId":32007,"chineseName":"Titan Spawn","englishName":null,"abbreviation":null,"curseForgeSlugs":["titan-spawn"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32008,"chineseName":"FNAF Management Wanted: More Decor","englishName":null,"abbreviation":null,"curseForgeSlugs":["management-wanted-more-decor"],"modrinthSlugs":["management-wanted-more-decor"],"modIds":[]}
+{"mcmodId":32009,"chineseName":"银色武士：战损红刃","englishName":"Silver Samurai: Battle-Damaged Red Blade","abbreviation":null,"curseForgeSlugs":["silver-samurai-battle-damaged-red-blade"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32010,"chineseName":"Blackey's Boss Battle","englishName":null,"abbreviation":null,"curseForgeSlugs":["blackeys-boss-battle"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32012,"chineseName":"挎包移植版","englishName":"Satchels Port","abbreviation":null,"curseForgeSlugs":["satchels-port"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32013,"chineseName":"Player Animation Legacy","englishName":null,"abbreviation":null,"curseForgeSlugs":["player-animation-legacy"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32014,"chineseName":"更好的TaCZ碰撞箱","englishName":"Better TaCZ hitbox","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32015,"chineseName":"开拓者核心","englishName":"ZQ_pumpkin's DND Editor for Curios & TiC3","abbreviation":null,"curseForgeSlugs":["zq-pumpkins-dnd-editor-for-curios-tic3"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32016,"chineseName":"奇思妙想","englishName":"Whimsical Ideas","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32017,"chineseName":"机械动力：曲柄苦力","englishName":null,"abbreviation":"Crc","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32018,"chineseName":"特摄饰品","englishName":"Special Ornaments","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32019,"chineseName":"天生伤害吸收保护","englishName":"FGH Absorption","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32020,"chineseName":"Evil Robots","englishName":null,"abbreviation":null,"curseForgeSlugs":["evil-robots"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32021,"chineseName":"大千录 / 道诡异仙","englishName":"Daqianlu","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32022,"chineseName":"指令翻译/补全助手","englishName":"CommandTranslation","abbreviation":"CT","curseForgeSlugs":["command-translation"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32023,"chineseName":"解锁区块生存","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32024,"chineseName":"法术连携","englishName":"Spell Relay","abbreviation":null,"curseForgeSlugs":["spell-relay"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32025,"chineseName":"金源工艺：工业时代","englishName":"OriGolds: Industrial Age","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32026,"chineseName":"万象武库","englishName":"Equipment Vault","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32027,"chineseName":"MTR地图叠加","englishName":"MTR Map Overlay","abbreviation":null,"curseForgeSlugs":["mtr-map-overlay"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32028,"chineseName":"更好的原版","englishName":"Better Vallina","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32029,"chineseName":"指路石代付储罐","englishName":"Waystone XP Payment","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["waystone-xp-payment"],"modIds":[]}
+{"mcmodId":32030,"chineseName":"InSight Chests","englishName":null,"abbreviation":null,"curseForgeSlugs":["insight-chests"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32031,"chineseName":"如我们所期望的结局","englishName":"honkaiLimpact3","abbreviation":"BBB3","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32032,"chineseName":"仙法","englishName":"Immortal Arts","abbreviation":"IMA","curseForgeSlugs":["immortal-arts"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32033,"chineseName":"重铸宝可梦光影兼容","englishName":"PixelmonShaderCompat","abbreviation":null,"curseForgeSlugs":["pixelmonshadercompat"],"modrinthSlugs":["pixelmonshadercompat"],"modIds":[]}
+{"mcmodId":32034,"chineseName":"韩立的小绿瓶","englishName":"Nature in a Bottle","abbreviation":null,"curseForgeSlugs":["nature-in-a-bottle"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32035,"chineseName":"更好的血魔法药水","englishName":"Better Blood Magic 3 Potions","abbreviation":null,"curseForgeSlugs":["better-blood-magic-3-potions-guide"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32036,"chineseName":"血魔法指南书中文译本","englishName":"Blood Magic Guide Book Chinese Translation","abbreviation":null,"curseForgeSlugs":["blood-magic-guide-book-chinese-translation"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32037,"chineseName":"Frozen Dominion Spells","englishName":null,"abbreviation":null,"curseForgeSlugs":["frozen-dominion-spells"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32038,"chineseName":"Panoramic","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["panoramic"],"modIds":[]}
+{"mcmodId":32039,"chineseName":"P2P Compat","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32040,"chineseName":"Lean Object","englishName":null,"abbreviation":null,"curseForgeSlugs":["lean-object"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32041,"chineseName":"Truly Bright","englishName":null,"abbreviation":null,"curseForgeSlugs":["truly-bright"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32042,"chineseName":"Amos' Mobs","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["amos-mobs"],"modIds":[]}
+{"mcmodId":32043,"chineseName":"原版失控","englishName":"Vanilla Gone Wrong","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32044,"chineseName":"奥林匹斯残响","englishName":"Olympian Echoes","abbreviation":null,"curseForgeSlugs":["olympian-echoes"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32045,"chineseName":"Vanilla Backport：装备增补","englishName":"Vanilla Backport：Equipment Complement","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32046,"chineseName":"村民式短语","englishName":"Villager Phrase","abbreviation":"VP","curseForgeSlugs":["villager-phrases"],"modrinthSlugs":["villager-phrases"],"modIds":[]}
+{"mcmodId":32047,"chineseName":"森罗物语：烟火——重织","englishName":"Kaleidoscope Grilling Refabricated","abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":["kaleidoscopegrillingrefabricated"],"modIds":[]}
+{"mcmodId":32048,"chineseName":"森罗万象","englishName":"Kaleidoscope Lib","abbreviation":null,"curseForgeSlugs":["kaleidoscope-lib"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32050,"chineseName":"Void Lords","englishName":null,"abbreviation":null,"curseForgeSlugs":["void-lords"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32051,"chineseName":"循环-非官方移植版","englishName":"Cyclic-Unofficial Port","abbreviation":null,"curseForgeSlugs":["cyclic-unofficial-port"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32052,"chineseName":"AFK Station [Cinematic & More]","englishName":null,"abbreviation":null,"curseForgeSlugs":["afkstation"],"modrinthSlugs":["afkstation"],"modIds":[]}
+{"mcmodId":32053,"chineseName":"Cinch's Lost Mob Grinders","englishName":null,"abbreviation":null,"curseForgeSlugs":["cinchs-lost-mob-grinders"],"modrinthSlugs":["cinchs-lost-mob-grinders"],"modIds":[]}
+{"mcmodId":32054,"chineseName":"Vanilla Backport Compat","englishName":null,"abbreviation":null,"curseForgeSlugs":["vb-compat"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32055,"chineseName":"月光魔法","englishName":"Moonlight Magic","abbreviation":"MoM","curseForgeSlugs":["moonlight-magic"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32056,"chineseName":"龙之生存：快速表情","englishName":"Dragon Survival Quick Emotes","abbreviation":"DSQE","curseForgeSlugs":["dragon-survival-quick-emotes"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32057,"chineseName":"禁魔结界","englishName":"MagicZone","abbreviation":null,"curseForgeSlugs":["magiczone"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32058,"chineseName":"Alloy Smelter Js","englishName":null,"abbreviation":"ASJ","curseForgeSlugs":["alloy-smelter-js"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32059,"chineseName":"WJY的修复补丁","englishName":"WJY's Fix Patch","abbreviation":null,"curseForgeSlugs":["wjys-fix-patch"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32060,"chineseName":"应激生物","englishName":"Overreacting Mobs","abbreviation":null,"curseForgeSlugs":["overreacting-mobs"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32061,"chineseName":"模块化机械：延续","englishName":"Modular Machinery: Continuum","abbreviation":"MMC","curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32062,"chineseName":"Binnie's Mods: CE","englishName":null,"abbreviation":null,"curseForgeSlugs":["binnies-mods-ce"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32063,"chineseName":"林业：社区版 - 邮件","englishName":"Forestry: CE - Mail","abbreviation":null,"curseForgeSlugs":["forestry-ce-mail"],"modrinthSlugs":["forestry-ce-mail"],"modIds":[]}
+{"mcmodId":32064,"chineseName":"魔法蜜蜂：社区版","englishName":"Magic Bees: CE","abbreviation":null,"curseForgeSlugs":["magic-bees-ce"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32065,"chineseName":"车万女仆：这很精妙","englishName":"Touhou Little Maid：Sophisticated","abbreviation":null,"curseForgeSlugs":["touhou-little-maid-sophisticated"],"modrinthSlugs":[],"modIds":[]}
+{"mcmodId":32066,"chineseName":"Create: Rubberworks Compat","englishName":null,"abbreviation":null,"curseForgeSlugs":[],"modrinthSlugs":[],"modIds":[]}
