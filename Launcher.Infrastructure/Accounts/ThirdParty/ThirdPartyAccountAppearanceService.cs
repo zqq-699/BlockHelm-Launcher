@@ -159,9 +159,9 @@ internal sealed class ThirdPartyAccountAppearanceService : IThirdPartyAccountApp
         catch (Exception exception)
         {
             logger.LogWarning(
-                exception,
-                "Third-party account profile could not be loaded. AccountId={AccountId}",
-                accountId);
+                "Third-party account profile could not be loaded. AccountId={AccountId} ErrorType={ErrorType}",
+                accountId,
+                exception.GetType().FullName);
             return ThirdPartyAccountProfileSnapshot.Unavailable;
         }
     }

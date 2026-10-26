@@ -172,9 +172,9 @@ internal sealed class MicrosoftAccountFactory
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(
-                exception,
-                "Current Microsoft skin could not be synchronized to the shared library. AccountId={AccountId}",
-                account.Id);
+                "Current Microsoft skin could not be synchronized to the shared library. AccountId={AccountId} ErrorType={ErrorType}",
+                account.Id,
+                exception.GetType().FullName);
             return account;
         }
     }

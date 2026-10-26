@@ -123,10 +123,10 @@ public sealed partial class AccountProfileViewModel : ObservableObject
         catch (Exception exception)
         {
             logger.LogWarning(
-                exception,
-                "Account profile refresh failed. AccountId={AccountId} AccountKind={AccountKind}",
+                "Account profile refresh failed. AccountId={AccountId} AccountKind={AccountKind} ErrorType={ErrorType}",
                 account.Id,
-                account.Kind);
+                account.Kind,
+                exception.GetType().FullName);
             SetError(exception, GetRefreshFailureMessage(exception, Strings.Status_AccountProfileRefreshFailed), showFloating: true);
         }
         finally
@@ -159,10 +159,10 @@ public sealed partial class AccountProfileViewModel : ObservableObject
             catch (Exception exception)
             {
                 logger.LogDebug(
-                    exception,
-                    "Silent account refresh failed. AccountId={AccountId} AccountKind={AccountKind}",
+                    "Silent account refresh failed. AccountId={AccountId} AccountKind={AccountKind} ErrorType={ErrorType}",
                     account.Id,
-                    account.Kind);
+                    account.Kind,
+                    exception.GetType().FullName);
                 continue;
             }
 
@@ -183,7 +183,8 @@ public sealed partial class AccountProfileViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Persisting silently refreshed accounts failed.");
+            logger.LogWarning("Persisting silently refreshed accounts failed. ErrorType={ErrorType}",
+                exception.GetType().FullName);
         }
     }
 

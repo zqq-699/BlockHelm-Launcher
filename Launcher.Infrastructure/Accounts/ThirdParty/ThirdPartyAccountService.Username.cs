@@ -121,7 +121,6 @@ internal sealed partial class ThirdPartyAccountService
         catch (ThirdPartyAccountLoginException exception)
         {
             logger.LogWarning(
-                exception,
                 "Third-party username login failed. AuthenticationServerHost={AuthenticationServerHost} Reason={Reason}",
                 initialUri.Host,
                 exception.Reason);

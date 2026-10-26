@@ -111,7 +111,7 @@ public sealed partial class ThirdPartyAccountDialogViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogError(exception, "Third-party email login failed.");
+            logger.LogError("Third-party email login failed. ErrorType={ErrorType}", exception.GetType().FullName);
             AuthenticationServerError = Strings.Account_ThirdPartyServerInvalidResponse;
             return false;
         }
@@ -158,7 +158,8 @@ public sealed partial class ThirdPartyAccountDialogViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Third-party email profile import failed. ProfileUuid={ProfileUuid}", profile.Uuid);
+            logger.LogWarning("Third-party email profile import failed. ProfileUuid={ProfileUuid} ErrorType={ErrorType}",
+                profile.Uuid, exception.GetType().FullName);
             if (isNewAccount && importedAccount is not null)
                 await TryRollbackCredentialsAsync(importedAccount.Id);
             return null;
@@ -177,7 +178,8 @@ public sealed partial class ThirdPartyAccountDialogViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Unable to clean up third-party email login attempt.");
+            logger.LogDebug("Unable to clean up third-party email login attempt. ErrorType={ErrorType}",
+                exception.GetType().FullName);
         }
     }
 
@@ -216,7 +218,8 @@ public sealed partial class ThirdPartyAccountDialogViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogError(exception, "Third-party account login or persistence failed.");
+            logger.LogError("Third-party account login or persistence failed. ErrorType={ErrorType}",
+                exception.GetType().FullName);
             PasswordError = Strings.Account_ThirdPartyLoginFailed;
             if (isNewAccount && authenticatedAccount is not null)
                 await TryRollbackCredentialsAsync(authenticatedAccount.Id);
@@ -244,7 +247,8 @@ public sealed partial class ThirdPartyAccountDialogViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogError(exception, "Third-party account reauthentication failed. AccountId={AccountId}", account.Id);
+            logger.LogError("Third-party account reauthentication failed. AccountId={AccountId} ErrorType={ErrorType}",
+                account.Id, exception.GetType().FullName);
             PasswordError = Strings.Account_ThirdPartyLoginFailed;
             return null;
         }
@@ -338,7 +342,8 @@ public sealed partial class ThirdPartyAccountDialogViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Third-party credential rollback failed. AccountId={AccountId}", accountId);
+            logger.LogWarning("Third-party credential rollback failed. AccountId={AccountId} ErrorType={ErrorType}",
+                accountId, exception.GetType().FullName);
         }
     }
 }

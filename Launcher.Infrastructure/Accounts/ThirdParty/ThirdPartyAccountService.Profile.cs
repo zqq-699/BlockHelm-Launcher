@@ -78,9 +78,9 @@ internal sealed partial class ThirdPartyAccountService
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 logger.LogWarning(
-                    exception,
-                    "Unable to clean credentials returned for a mismatched third-party account. AccountId={AccountId}",
-                    authenticated.Id);
+                    "Unable to clean credentials returned for a mismatched third-party account. AccountId={AccountId} ErrorType={ErrorType}",
+                    authenticated.Id,
+                    exception.GetType().FullName);
             }
             throw new ThirdPartyAccountLoginException(
                 ThirdPartyAccountLoginFailureReason.AccountMismatch,

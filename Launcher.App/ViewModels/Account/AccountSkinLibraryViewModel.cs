@@ -257,11 +257,11 @@ public sealed partial class AccountSkinLibraryViewModel : ObservableObject
         catch (Exception exception)
         {
             logger.LogWarning(
-                exception,
-                "Account skin apply failed. AccountId={AccountId} AccountKind={AccountKind} SkinId={SkinId}",
+                "Account skin apply failed. AccountId={AccountId} AccountKind={AccountKind} SkinId={SkinId} ErrorType={ErrorType}",
                 account.Id,
                 account.Kind,
-                skin.Id);
+                skin.Id,
+                exception.GetType().FullName);
             profile.SetError(exception, Strings.Status_SkinUpdateFailed, showFloating: true);
         }
         finally
@@ -315,11 +315,11 @@ public sealed partial class AccountSkinLibraryViewModel : ObservableObject
         catch (Exception exception)
         {
             logger.LogWarning(
-                exception,
-                "Account skin delete failed. AccountId={AccountId} AccountKind={AccountKind} SkinId={SkinId}",
+                "Account skin delete failed. AccountId={AccountId} AccountKind={AccountKind} SkinId={SkinId} ErrorType={ErrorType}",
                 account.Id,
                 account.Kind,
-                skin.Id);
+                skin.Id,
+                exception.GetType().FullName);
             profile.SetError(exception, Strings.Status_SkinDeleteFailed);
         }
         finally
@@ -388,10 +388,10 @@ public sealed partial class AccountSkinLibraryViewModel : ObservableObject
         catch (Exception exception)
         {
             logger.LogWarning(
-                exception,
-                "Account skin import failed. AccountId={AccountId} AccountKind={AccountKind}",
+                "Account skin import failed. AccountId={AccountId} AccountKind={AccountKind} ErrorType={ErrorType}",
                 account.Id,
-                account.Kind);
+                account.Kind,
+                exception.GetType().FullName);
             profile.SetError(exception, Strings.Status_SkinUpdateFailed);
         }
         finally

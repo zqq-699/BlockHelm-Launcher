@@ -209,7 +209,8 @@ internal sealed class OfflineSkinYggdrasilService : IOfflineSkinLaunchService, I
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Offline skin Yggdrasil accept loop stopped unexpectedly.");
+            logger.LogError("Offline skin Yggdrasil accept loop stopped unexpectedly. ErrorType={ErrorType}",
+                exception.GetType().FullName);
         }
     }
 
@@ -245,7 +246,8 @@ internal sealed class OfflineSkinYggdrasilService : IOfflineSkinLaunchService, I
             }
             catch (Exception exception)
             {
-                logger.LogDebug(exception, "Offline skin Yggdrasil request failed.");
+                logger.LogDebug("Offline skin Yggdrasil request failed. ErrorType={ErrorType}",
+                    exception.GetType().FullName);
             }
         }
     }

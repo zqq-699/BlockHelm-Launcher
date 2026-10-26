@@ -78,7 +78,8 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
             }
             catch (Exception exception)
             {
-                logger.LogWarning(exception, "Unable to prepare the latest authlib-injector build; checking verified cache.");
+                logger.LogWarning("Unable to prepare the latest authlib-injector build; checking verified cache. ErrorType={ErrorType}",
+                    exception.GetType().FullName);
                 var fallback = await FindVerifiedFallbackAsync(cancellationToken).ConfigureAwait(false);
                 if (fallback is not null)
                     return fallback;
@@ -237,7 +238,8 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
             }
             catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException or InvalidDataException)
             {
-                logger.LogDebug(exception, "Ignoring invalid authlib-injector cache manifest. ManifestPath={ManifestPath}", manifestPath);
+                logger.LogDebug("Ignoring invalid authlib-injector cache manifest. ManifestPath={ManifestPath} ErrorType={ErrorType}",
+                    manifestPath, exception.GetType().FullName);
             }
         }
 

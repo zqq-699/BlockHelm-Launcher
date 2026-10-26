@@ -129,7 +129,8 @@ public sealed partial class AccountCapeViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Microsoft account cape load failed. AccountId={AccountId}", account.Id);
+            logger.LogWarning("Microsoft account cape load failed. AccountId={AccountId} ErrorType={ErrorType}",
+                account.Id, exception.GetType().FullName);
             profile.SetError(
                 exception,
                 AccountProfileViewModel.GetRefreshFailureMessage(exception, Strings.Status_LoadAccountProfileFailed),
@@ -171,7 +172,8 @@ public sealed partial class AccountCapeViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Microsoft account cape change failed. AccountId={AccountId}", account.Id);
+            logger.LogWarning("Microsoft account cape change failed. AccountId={AccountId} ErrorType={ErrorType}",
+                account.Id, exception.GetType().FullName);
             profile.SetMessage(Strings.Status_CapeChangeFailed, showFloating: true);
         }
         finally

@@ -132,11 +132,10 @@ public sealed partial class AccountDialogViewModel
         catch (Exception ex)
         {
             logger.LogWarning(
-                ex,
-                "Account rename failed. AccountId={AccountId} IsOffline={IsOffline} ErrorCode={ErrorCode}",
+                "Account rename failed. AccountId={AccountId} IsOffline={IsOffline} ErrorType={ErrorType}",
                 account.Id,
                 account.IsOffline,
-                AccountErrorCodeMessageFormatter.Format(ex));
+                ex.GetType().FullName);
             var message = GetRenameFailureMessage(ex);
             var errorCodeMessage = AccountErrorCodeMessageFormatter.Format(ex);
             ReportStatus(message);

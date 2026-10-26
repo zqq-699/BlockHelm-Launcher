@@ -67,7 +67,8 @@ public sealed partial class AccountDialogViewModel
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Account delete cleanup failed. AccountId={AccountId} IsOffline={IsOffline}", account.Id, account.IsOffline);
+            logger.LogWarning("Account delete cleanup failed. AccountId={AccountId} IsOffline={IsOffline} ErrorType={ErrorType}",
+                account.Id, account.IsOffline, exception.GetType().FullName);
             ReportStatus(string.Format(Strings.Status_AccountDeletedCacheCleanupFailedFormat, deletedName));
         }
     }

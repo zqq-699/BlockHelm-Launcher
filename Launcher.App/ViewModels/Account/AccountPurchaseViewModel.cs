@@ -52,7 +52,8 @@ public sealed partial class AccountPurchaseViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Failed to open the official Minecraft purchase page.");
+            logger.LogWarning("Failed to open the official Minecraft purchase page. ErrorType={ErrorType}",
+                exception.GetType().FullName);
             ReportFailure();
             return;
         }

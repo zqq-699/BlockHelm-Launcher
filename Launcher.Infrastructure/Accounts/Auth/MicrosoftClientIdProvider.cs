@@ -69,9 +69,9 @@ internal sealed class MicrosoftClientIdProvider
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 logger.LogDebug(
-                    exception,
-                    "Failed to read Microsoft application client ID configuration. ConfigurationPath={ConfigurationPath}",
-                    path);
+                    "Failed to read Microsoft application client ID configuration. ConfigurationPath={ConfigurationPath} ErrorType={ErrorType}",
+                    path,
+                    exception.GetType().FullName);
             }
         }
 

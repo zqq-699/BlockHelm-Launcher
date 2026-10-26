@@ -90,7 +90,8 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MicrosoftCredentialStorageException exception)
         {
-            logger.LogError(exception, "Encrypted Microsoft account credentials could not be loaded.");
+            logger.LogError("Encrypted Microsoft account credentials could not be loaded. ErrorType={ErrorType}",
+                exception.GetType().FullName);
             return accounts;
         }
 
@@ -355,7 +356,7 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MinecraftProfileRequestException ex)
         {
-            logger.LogWarning(ex, "Microsoft account capes load failed. AccountId={AccountId} ErrorCode={ErrorCode}", account.Id, ex.ErrorCode);
+            LogProfileRequestFailure("CapesLoad", account.Id, ex);
             throw new MicrosoftAccountProfileRefreshException(ex.ErrorCode, ex);
         }
     }
@@ -382,7 +383,7 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MinecraftProfileRequestException ex)
         {
-            logger.LogWarning(ex, "Microsoft account profile refresh failed. AccountId={AccountId} ErrorCode={ErrorCode}", account.Id, ex.ErrorCode);
+            LogProfileRequestFailure("ProfileRefresh", account.Id, ex);
             throw new MicrosoftAccountProfileRefreshException(ex.ErrorCode, ex);
         }
     }
@@ -411,7 +412,7 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MinecraftProfileRequestException ex)
         {
-            logger.LogWarning(ex, "Microsoft account skin upload failed. AccountId={AccountId} SkinModel={SkinModel} ErrorCode={ErrorCode}", account.Id, skinModel, ex.ErrorCode);
+            LogProfileRequestFailure("SkinUpload", account.Id, ex);
             throw new MicrosoftAccountSkinUpdateException(ex.ErrorCode, ex);
         }
     }
@@ -438,7 +439,7 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MinecraftProfileRequestException ex)
         {
-            logger.LogWarning(ex, "Microsoft account active cape update failed. AccountId={AccountId} HasCape={HasCape} ErrorCode={ErrorCode}", account.Id, !string.IsNullOrWhiteSpace(capeId), ex.ErrorCode);
+            LogProfileRequestFailure("ActiveCapeUpdate", account.Id, ex);
             throw new MicrosoftAccountProfileRefreshException(ex.ErrorCode, ex);
         }
     }
@@ -479,17 +480,26 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MinecraftProfileRequestException ex)
         {
-            logger.LogWarning(
-                ex,
-                "Microsoft account name change failed. AccountId={AccountId} Reason={Reason} ErrorCode={ErrorCode}",
-                account.Id,
-                MapNameChangeFailure(ex.ErrorKind),
-                ex.ErrorCode);
+            LogProfileRequestFailure("NameChange", account.Id, ex);
             throw new MicrosoftAccountNameChangeException(
                 MapNameChangeFailure(ex.ErrorKind),
                 ex.ErrorCode,
                 ex);
         }
+    }
+
+    private void LogProfileRequestFailure(
+        string operation,
+        string accountId,
+        MinecraftProfileRequestException exception)
+    {
+        // ErrorCode and Message may contain untrusted response text from Minecraft services.
+        logger.LogWarning(
+            "Microsoft account profile request failed. Operation={Operation} AccountId={AccountId} HttpStatus={HttpStatus} ErrorKind={ErrorKind}",
+            operation,
+            accountId,
+            (int)exception.StatusCode,
+            exception.ErrorKind);
     }
 
     private static MicrosoftAccountNameChangeFailureReason MapNameChangeFailure(MinecraftProfileErrorKind errorKind)

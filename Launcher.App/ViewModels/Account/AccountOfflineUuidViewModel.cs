@@ -212,7 +212,8 @@ public sealed partial class AccountOfflineUuidViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Offline UUID mode change failed. AccountId={AccountId} Mode={Mode}", account.Id, option.Mode);
+            logger.LogWarning("Offline UUID mode change failed. AccountId={AccountId} Mode={Mode} ErrorType={ErrorType}",
+                account.Id, option.Mode, exception.GetType().FullName);
             RefreshSelection();
             statusService.Report(Strings.Status_OfflineUuidModeChangeFailed);
         }
@@ -252,7 +253,8 @@ public sealed partial class AccountOfflineUuidViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Manual offline UUID apply failed. AccountId={AccountId}", account.Id);
+            logger.LogWarning("Manual offline UUID apply failed. AccountId={AccountId} ErrorType={ErrorType}",
+                account.Id, exception.GetType().FullName);
             RefreshSelection();
             statusService.Report(Strings.Status_OfflineUuidModeChangeFailed);
         }

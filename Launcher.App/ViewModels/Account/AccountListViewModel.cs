@@ -67,7 +67,8 @@ public sealed partial class AccountListViewModel : ObservableObject
         catch (Exception exception)
         {
             // 预热在窗口显示之前运行，读不出记录也只能让首屏空着，绝不能连累启动。
-            logger.LogWarning(exception, "Priming accounts from the local account state failed.");
+            logger.LogWarning("Priming accounts from the local account state failed. ErrorType={ErrorType}",
+                exception.GetType().FullName);
             return;
         }
 

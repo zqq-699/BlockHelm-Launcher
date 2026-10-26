@@ -63,9 +63,9 @@ internal sealed partial class ThirdPartyAccountService
                         catch (Exception exception)
                         {
                             logger.LogDebug(
-                                exception,
-                                "Could not load a third-party profile avatar during email login. AuthenticationServerHost={AuthenticationServerHost}",
-                                apiRoot.Host);
+                                "Could not load a third-party profile avatar during email login. AuthenticationServerHost={AuthenticationServerHost} ErrorType={ErrorType}",
+                                apiRoot.Host,
+                                exception.GetType().FullName);
                         }
                     }
                     snapshots[profile.Uuid] = snapshot;
@@ -203,7 +203,8 @@ internal sealed partial class ThirdPartyAccountService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Unable to invalidate an unused third-party email login token.");
+            logger.LogDebug("Unable to invalidate an unused third-party email login token. ErrorType={ErrorType}",
+                exception.GetType().FullName);
         }
     }
 }
