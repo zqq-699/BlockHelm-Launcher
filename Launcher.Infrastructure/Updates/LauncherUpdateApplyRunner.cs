@@ -726,12 +726,14 @@ internal sealed class LauncherUpdateApplyLogger
     public void Info(string message) => Write("INF", message);
 
     public void Error(string message, Exception? exception = null) =>
-        Write("ERR", exception is null ? message : $"{message}{Environment.NewLine}{exception}");
+        Write("ERR", exception is null
+            ? message
+            : $"{message} ErrorType={exception.GetType().Name} HResult={exception.HResult}");
 
     private void Write(string level, string message)
     {
         File.AppendAllText(
             logPath,
-            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] {message}{Environment.NewLine}");
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] {Launcher.Application.Services.SensitiveLogText.Redact(message)}{Environment.NewLine}");
     }
 }

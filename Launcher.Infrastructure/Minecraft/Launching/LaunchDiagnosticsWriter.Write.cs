@@ -71,7 +71,10 @@ private static async Task<DiagnosticWriteResult> WriteDiagnosticAsync(
         AppendAnalysisSection(builder, analysis, context.SensitiveValues);
         appendSections(builder);
 
-        await File.WriteAllTextAsync(diagnosticPath, builder.ToString(), cancellationToken);
+        await File.WriteAllTextAsync(
+            diagnosticPath,
+            LaunchDiagnosticRedactor.Redact(builder.ToString(), context.SensitiveValues),
+            cancellationToken);
         PruneOldDiagnostics(logsDirectory);
         return new DiagnosticWriteResult(diagnosticPath, allCandidates);
     }

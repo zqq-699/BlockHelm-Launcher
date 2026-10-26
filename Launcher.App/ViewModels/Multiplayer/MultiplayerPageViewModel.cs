@@ -193,14 +193,14 @@ public sealed partial class MultiplayerPageViewModel : ObservableObject
         }
         catch (MultiplayerLobbyCreationException exception)
         {
-            logger.LogWarning(exception,
-                "Failed to create multiplayer lobby. Failure={Failure}",
-                exception.Failure);
+            logger.LogWarning(
+                "Failed to create multiplayer lobby. Failure={Failure} ErrorType={ErrorType}",
+                exception.Failure, exception.InnerException?.GetType().Name ?? exception.GetType().Name);
             ReportFailure(MapCreationFailure(exception.Failure));
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Failed to create multiplayer lobby.");
+            logger.LogWarning("Failed to create multiplayer lobby. ErrorType={ErrorType}", exception.GetType().Name);
             ReportFailure(Strings.Multiplayer_Create_LobbyFailed);
         }
         finally
@@ -274,14 +274,14 @@ public sealed partial class MultiplayerPageViewModel : ObservableObject
         }
         catch (MultiplayerLobbyCreationException exception)
         {
-            logger.LogWarning(exception,
-                "Failed to join multiplayer lobby. Failure={Failure}",
-                exception.Failure);
+            logger.LogWarning(
+                "Failed to join multiplayer lobby. Failure={Failure} ErrorType={ErrorType}",
+                exception.Failure, exception.InnerException?.GetType().Name ?? exception.GetType().Name);
             ReportJoinFailure(MapJoinFailure(exception.Failure));
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Failed to join multiplayer lobby.");
+            logger.LogWarning("Failed to join multiplayer lobby. ErrorType={ErrorType}", exception.GetType().Name);
             ReportJoinFailure(Strings.Multiplayer_Join_Failed);
         }
         finally

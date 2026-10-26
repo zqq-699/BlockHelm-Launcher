@@ -41,7 +41,7 @@ private static void AppendProcessSection(
         }
 
         builder.AppendLine($"FileName: {startInfo.FileName}");
-        builder.AppendLine($"Arguments: {RedactSensitiveText(startInfo.Arguments, sensitiveValues)}");
+        builder.AppendLine($"Arguments: <redacted>");
         builder.AppendLine($"WorkingDirectory: {startInfo.WorkingDirectory}");
     }
 

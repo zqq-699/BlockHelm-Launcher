@@ -59,14 +59,14 @@ internal static class LauncherLogConfiguration
             .MinimumLevel.Override("Microsoft", microsoftLevelSwitch)
             .Enrich.FromLogContext()
             .WriteTo.File(
+                new RedactingLogFormatter(),
                 logPath,
                 rollingInterval: RollingInterval.Infinite,
                 retainedFileCountLimit: null,
                 fileSizeLimitBytes: FileSizeLimitBytes,
                 rollOnFileSizeLimit: RollOnFileSizeLimit,
                 shared: false,
-                hooks: new LauncherLogFileLifecycleHooks(logDirectory),
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext} {Message:lj}{NewLine}{Exception}")
+                hooks: new LauncherLogFileLifecycleHooks(logDirectory))
             .CreateLogger();
     }
 

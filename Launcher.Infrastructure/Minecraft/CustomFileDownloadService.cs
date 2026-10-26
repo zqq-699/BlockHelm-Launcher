@@ -101,11 +101,11 @@ public sealed class CustomFileDownloadService : ICustomFileDownloadService, IDis
         {
             logScope.Fail(exception, normalizedSourceUrl);
             logger.LogError(
-                exception,
-                "Custom file download failed. FileName={FileName} DestinationPath={DestinationPath} SourceUrl={SourceUrl}",
+                "Custom file download failed. FileName={FileName} DestinationPath={DestinationPath} SourceUrl={SourceUrl} ErrorType={ErrorType}",
                 fileName,
                 normalizedDestination,
-                DownloadUriLogSanitizer.Sanitize(normalizedSourceUrl));
+                DownloadUriLogSanitizer.Sanitize(normalizedSourceUrl),
+                exception.GetType().Name);
             throw;
         }
     }

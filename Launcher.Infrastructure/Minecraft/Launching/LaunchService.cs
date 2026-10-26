@@ -237,13 +237,13 @@ public sealed partial class LaunchService : ILaunchService
             instance.Loader,
             memoryMb);
         logger.LogInformation(
-            "Launch settings resolved. InstanceId={InstanceId} PreLaunchCommand={PreLaunchCommand} WaitForPreLaunchCommand={WaitForPreLaunchCommand} PostExitCommand={PostExitCommand} ExtraJvmArguments={ExtraJvmArguments} ExtraGameArguments={ExtraGameArguments}",
+            "Launch settings resolved. InstanceId={InstanceId} HasPreLaunchCommand={HasPreLaunchCommand} WaitForPreLaunchCommand={WaitForPreLaunchCommand} HasPostExitCommand={HasPostExitCommand} HasExtraJvmArguments={HasExtraJvmArguments} HasExtraGameArguments={HasExtraGameArguments}",
             instance.Id,
-            RedactLaunchSettingText(resolvedSettings.PreLaunchCommand),
+            !string.IsNullOrWhiteSpace(resolvedSettings.PreLaunchCommand),
             resolvedSettings.WaitForPreLaunchCommand,
-            RedactLaunchSettingText(resolvedSettings.PostExitCommand),
-            RedactLaunchSettingText(resolvedSettings.JvmArguments),
-            RedactLaunchSettingText(resolvedSettings.GameArguments));
+            !string.IsNullOrWhiteSpace(resolvedSettings.PostExitCommand),
+            !string.IsNullOrWhiteSpace(resolvedSettings.JvmArguments),
+            !string.IsNullOrWhiteSpace(resolvedSettings.GameArguments));
 
         try
         {

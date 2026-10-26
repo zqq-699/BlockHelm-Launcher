@@ -26,15 +26,16 @@ private static async Task WriteIndexAsync(
         await using var stream = entry.Open();
         await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
         await writer.WriteLineAsync($"CreatedAtUtc: {DateTimeOffset.UtcNow:O}");
-        await writer.WriteLineAsync($"InstanceName: {NormalizeIndexValue(request.InstanceName)}");
-        await writer.WriteLineAsync($"VersionName: {NormalizeIndexValue(request.VersionName)}");
+        await writer.WriteLineAsync($"InstanceName: {LaunchDiagnosticRedactor.Redact(NormalizeIndexValue(request.InstanceName), request.SensitiveValues)}");
+        await writer.WriteLineAsync($"VersionName: {LaunchDiagnosticRedactor.Redact(NormalizeIndexValue(request.VersionName), request.SensitiveValues)}");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("[Diagnostics]");
         foreach (var outcome in outcomes)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await writer.WriteLineAsync(
-                $"Type={outcome.Type}; Status={(outcome.IsExported ? "exported" : "skipped")}; Sanitization={(outcome.IsExported ? "credentials-redacted" : "none")}; FileName={NormalizeIndexValue(outcome.FileName)}; Entry={NormalizeIndexValue(outcome.EntryName ?? "none")}; Reason={NormalizeIndexValue(outcome.Reason ?? "none")}");
+            await writer.WriteLineAsync(LaunchDiagnosticRedactor.Redact(
+                $"Type={outcome.Type}; Status={(outcome.IsExported ? "exported" : "skipped")}; Sanitization={(outcome.IsExported ? "pattern-redacted" : "none")}; FileName={NormalizeIndexValue(outcome.FileName)}; Entry={NormalizeIndexValue(outcome.EntryName ?? "none")}; Reason={NormalizeIndexValue(outcome.Reason ?? "none")}",
+                request.SensitiveValues));
         }
     }
 

@@ -107,7 +107,7 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
         {
             if (downloadPath is not null)
                 cacheCleaner.CleanupCachedUpdater(downloadPath);
-            logger?.LogWarning(exception, "Launcher self update verification or startup failed.");
+            logger?.LogWarning("Launcher self update verification or startup failed. ErrorType={ErrorType} HResult={HResult}", exception.GetType().Name, exception.HResult);
             return LauncherSelfUpdateStartResult.Failed("The launcher update could not be verified or started.");
         }
     }
@@ -133,14 +133,16 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
             {
                 lastUnavailableException = new UpdateSourceUnavailableException(
                     "The update executable source timed out.", exception);
-                logger?.LogWarning(lastUnavailableException,
-                    "Launcher update executable source timed out. Source={Source} Url={Url}", source.Name, uri);
+                logger?.LogWarning(
+                    "Launcher update executable source timed out. Source={Source} Host={Host} ErrorType={ErrorType}",
+                    source.Name, uri.Host, exception.GetType().Name);
             }
             catch (UpdateSourceUnavailableException exception)
             {
                 lastUnavailableException = exception;
-                logger?.LogWarning(exception,
-                    "Launcher update executable source unavailable. Source={Source} Url={Url}", source.Name, uri);
+                logger?.LogWarning(
+                    "Launcher update executable source unavailable. Source={Source} Host={Host} ErrorType={ErrorType}",
+                    source.Name, uri.Host, exception.GetType().Name);
             }
         }
         throw new UpdateSourceUnavailableException("All official update executable sources were unavailable.", lastUnavailableException);

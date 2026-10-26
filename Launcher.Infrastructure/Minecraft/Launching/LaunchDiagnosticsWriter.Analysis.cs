@@ -160,7 +160,7 @@ private static void AppendAnalysisSection(
                 builder.AppendLine();
 
             builder.AppendLine($"[{depth}] {current.GetType().FullName}");
-            builder.AppendLine(current.Message);
+            builder.AppendLine($"HResult: {current.HResult}");
             if (!string.IsNullOrWhiteSpace(current.StackTrace))
                 builder.AppendLine(current.StackTrace.Trim());
             depth++;

@@ -21,14 +21,9 @@ internal static class DownloadUriLogSanitizer
     {
         try
         {
-            var builder = new UriBuilder(uri)
-            {
-                Query = string.Empty,
-                Fragment = string.Empty,
-                UserName = string.Empty,
-                Password = string.Empty
-            };
-            return builder.Uri.AbsoluteUri;
+            if (uri.Scheme is not ("http" or "https"))
+                return InvalidUriPlaceholder;
+            return $"{uri.Scheme}://{uri.Host}{(uri.IsDefaultPort ? string.Empty : $":{uri.Port}")}/<redacted-path>";
         }
         catch (Exception exception) when (exception is ArgumentException or UriFormatException)
         {

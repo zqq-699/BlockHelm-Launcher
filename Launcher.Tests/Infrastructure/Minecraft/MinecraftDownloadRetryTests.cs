@@ -146,7 +146,8 @@ public sealed class MinecraftDownloadRetryTests
         Assert.Equal(LogLevel.Error, summary.Level);
         Assert.Contains("NeoForgeOfficial: ResponseHeadersTimeout x2", summary.Message, StringComparison.Ordinal);
         Assert.Contains("BmclApiNeoForge: HttpStatus (HTTP 404) x1", summary.Message, StringComparison.Ordinal);
-        Assert.Contains(checksumUrl, summary.Message, StringComparison.Ordinal);
+        Assert.Contains("https://maven.neoforged.net/<redacted-path>", summary.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(checksumUrl, summary.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Debug);
     }
 
@@ -497,7 +498,7 @@ public sealed class MinecraftDownloadRetryTests
     [Fact]
     public async Task SuccessNoResultAndFailureLogsRedactSensitiveUriComponents()
     {
-        const string signedUrl = "https://example.test/files/mod.jar?token=super-secret#private-fragment";
+        const string signedUrl = "https://example.test/files/signed-path-secret/mod.jar?token=super-secret#private-fragment";
         var logger = new CollectingLogger();
 
         using (var successClient = CreateClient(new CallbackRequestHandler((_, request, _) =>
@@ -530,17 +531,20 @@ public sealed class MinecraftDownloadRetryTests
                    Task.FromResult(CreateResponse(HttpStatusCode.Forbidden, string.Empty, request)))))
         {
             var executor = CreateExecutor(failureClient, logger: logger);
-            await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
+            var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
                 executor.ExecuteAsync(
                     signedUrl,
                     DownloadSourcePreference.Official,
                     categoryHint: null,
                     static (_, _) => Task.FromResult(true),
                     CancellationToken.None));
+            Assert.DoesNotContain("signed-path-secret", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("super-secret", exception.Message, StringComparison.Ordinal);
         }
 
         Assert.NotEmpty(logger.Messages);
-        Assert.Contains(logger.Messages, message => message.Contains("https://example.test/files/mod.jar", StringComparison.Ordinal));
+        Assert.Contains(logger.Messages, message => message.Contains("https://example.test/<redacted-path>", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Messages, message => message.Contains("signed-path-secret", StringComparison.Ordinal));
         Assert.DoesNotContain(logger.Messages, message => message.Contains("super-secret", StringComparison.Ordinal));
         Assert.DoesNotContain(logger.Messages, message => message.Contains("private-fragment", StringComparison.Ordinal));
     }

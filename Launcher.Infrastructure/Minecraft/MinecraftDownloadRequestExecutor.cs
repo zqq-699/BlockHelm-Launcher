@@ -2041,7 +2041,6 @@ internal sealed class MinecraftDownloadRequestExecutor
     {
         var slowFailure = failure as DownloadBodyTooSlowException;
         logger.LogDebug(
-            failure,
             "Download resource attempt failed. RequestedSourcePreference={RequestedSourcePreference} ResourceCategory={ResourceCategory} OriginalUrl={OriginalUrl} ActualUrl={ActualUrl} ResolvedSourceKind={ResolvedSourceKind} FinalHost={FinalHost} Attempt={Attempt} SourceRound={SourceRound} FailureReason={FailureReason} FailureDisposition={FailureDisposition} StatusCode={StatusCode} RetryCurrentSource={RetryCurrentSource} RetryInLaterRound={RetryInLaterRound} RemainingCandidateCount={RemainingCandidateCount} SlowReadDuration={SlowReadDuration} SlowReadBytes={SlowReadBytes} SlowReadBytesPerSecond={SlowReadBytesPerSecond}",
             resolution.RequestedSourcePreference,
             resolution.ResourceCategory,
@@ -2074,7 +2073,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             ResolvedDownloadRequest resolution,
             Exception innerException,
             IReadOnlyList<Exception>? failures = null)
-            : base($"Download request failed for {resolution.ActualUrl}", innerException)
+            : base($"Download request failed for {DownloadUriLogSanitizer.Sanitize(resolution.ActualUrl)}", innerException)
         {
             Resolution = resolution;
             Failures = failures ?? [innerException];
