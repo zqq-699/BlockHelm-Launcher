@@ -5,6 +5,9 @@
  */
 
 using CmlLib.Core.Auth.Microsoft;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
 using Launcher.Application.Accounts;
 using Launcher.Infrastructure.Accounts;
 
@@ -55,5 +58,74 @@ public sealed class MicrosoftAuthProviderTests
         var translated = MicrosoftAuthProvider.TranslateAuthenticationException(jeException);
 
         Assert.Equal(LaunchAccountSessionFailureReason.InvalidAuthenticationResponse, translated.Reason);
+    }
+
+    [Fact]
+    public void AuthenticationLogDetailsKeepStatusAndExcludeRawAuthenticationResponse()
+    {
+        const string secret = "sensitive-access-token";
+        var original = new JEAuthException($"429: retry; access_token={secret}");
+        var translated = MicrosoftAuthProvider.TranslateAuthenticationException(original);
+        translated.Stage = "InteractiveAuthentication";
+
+        var details = MicrosoftAuthenticationLogDetails.From(translated);
+
+        Assert.Equal("InteractiveAuthentication", details.Stage);
+        Assert.Equal(typeof(JEAuthException).FullName, details.ErrorType);
+        Assert.Equal(429, details.HttpStatus);
+        Assert.DoesNotContain(secret, details.ToString());
+    }
+
+    [Fact]
+    public void AuthenticationLogDetailsKeepNetworkCategoryWithoutExceptionMessage()
+    {
+        const string secret = "sensitive-refresh-token";
+        var networkError = new HttpRequestException(
+            $"Authorization: Bearer {secret}",
+            new SocketException((int)SocketError.HostNotFound),
+            HttpStatusCode.BadGateway);
+        var translated = MicrosoftAuthProvider.TranslateAuthenticationException(networkError);
+        translated.Stage = "EntitlementVerification";
+
+        var details = MicrosoftAuthenticationLogDetails.From(translated);
+
+        Assert.Equal("EntitlementVerification", details.Stage);
+        Assert.Equal(502, details.HttpStatus);
+        Assert.Equal(SocketError.HostNotFound, details.SocketError);
+        Assert.DoesNotContain(secret, details.ToString());
+    }
+
+    [Fact]
+    public void AuthenticationLogDetailsExcludeUntrustedServerErrorFields()
+    {
+        const string secret = "sensitive-authorization-code";
+        var original = new JEAuthException(
+            $"code={secret}",
+            $"error={secret}",
+            $"response={secret}",
+            400);
+        var translated = MicrosoftAuthProvider.TranslateAuthenticationException(original);
+
+        var details = MicrosoftAuthenticationLogDetails.From(translated, "InteractiveAuthentication");
+
+        Assert.Equal(400, details.HttpStatus);
+        Assert.DoesNotContain(secret, details.ToString());
+    }
+
+    [Fact]
+    public void AuthenticationLogDetailsKeepProfileStatusWithoutResponseBody()
+    {
+        const string secret = "sensitive-profile-response";
+        var exception = new MinecraftProfileRequestException(
+            MinecraftProfileErrorKind.Unknown,
+            HttpStatusCode.BadGateway,
+            $"error={secret}",
+            $"response={secret}");
+
+        var details = MicrosoftAuthenticationLogDetails.From(exception, "ProfileLookup");
+
+        Assert.Equal("ProfileLookup", details.Stage);
+        Assert.Equal(502, details.HttpStatus);
+        Assert.DoesNotContain(secret, details.ToString());
     }
 }

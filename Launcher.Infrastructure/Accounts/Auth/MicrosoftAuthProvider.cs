@@ -110,6 +110,7 @@ internal sealed class MicrosoftAuthProvider
     {
         InteractiveAuthentication? authentication = null;
         var committed = false;
+        var stage = "InteractiveAuthentication";
         try
         {
             authentication = await AuthenticateInMemoryAsync(cancellationToken);
@@ -117,10 +118,13 @@ internal sealed class MicrosoftAuthProvider
                 authentication.Account.SessionStorage);
             var profile = refreshedAccount.Profile;
             var accessToken = refreshedAccount.Token?.AccessToken;
+            stage = "EntitlementVerification";
             await entitlementVerifier.EnsureOwnedAsync(
                 accessToken ?? string.Empty,
                 cancellationToken);
+            stage = "AccountIdentity";
             await CaptureMsalAccountIdentityAsync(authentication, cancellationToken);
+            stage = "SessionStorage";
             CommitSession(authentication.Account.SessionStorage);
             committed = true;
             return new MicrosoftLoginResult(
@@ -133,13 +137,16 @@ internal sealed class MicrosoftAuthProvider
         {
             throw;
         }
-        catch (MicrosoftAccountAuthenticationException)
+        catch (MicrosoftAccountAuthenticationException exception)
         {
+            exception.Stage ??= stage;
             throw;
         }
         catch (Exception exception)
         {
-            throw TranslateAuthenticationException(exception);
+            var translated = TranslateAuthenticationException(exception);
+            translated.Stage = stage;
+            throw translated;
         }
         finally
         {
@@ -154,15 +161,18 @@ internal sealed class MicrosoftAuthProvider
     {
         InteractiveAuthentication? authentication = null;
         var committed = false;
+        var stage = "InteractiveAuthentication";
         try
         {
             authentication = await AuthenticateInMemoryAsync(cancellationToken);
             var refreshedAccount = JEGameAccount.FromSessionStorage(
                 authentication.Account.SessionStorage);
             var accessToken = refreshedAccount.Token?.AccessToken;
+            stage = "EntitlementVerification";
             await entitlementVerifier.EnsureOwnedAsync(
                 accessToken ?? string.Empty,
                 cancellationToken);
+            stage = "AccountIdentity";
             var refreshedUuid = MinecraftAccountHelpers.NormalizeUuid(
                 refreshedAccount.Profile?.UUID ?? authentication.Session.UUID);
             if (string.IsNullOrWhiteSpace(existingAccount.Uuid)
@@ -174,6 +184,7 @@ internal sealed class MicrosoftAuthProvider
             }
 
             await CaptureMsalAccountIdentityAsync(authentication, cancellationToken);
+            stage = "SessionStorage";
             CommitSession(authentication.Account.SessionStorage);
             committed = true;
             return new MicrosoftLoginResult(
@@ -186,13 +197,16 @@ internal sealed class MicrosoftAuthProvider
         {
             throw;
         }
-        catch (MicrosoftAccountAuthenticationException)
+        catch (MicrosoftAccountAuthenticationException exception)
         {
+            exception.Stage ??= stage;
             throw;
         }
         catch (Exception exception)
         {
-            throw TranslateAuthenticationException(exception);
+            var translated = TranslateAuthenticationException(exception);
+            translated.Stage = stage;
+            throw translated;
         }
         finally
         {
@@ -446,9 +460,15 @@ internal sealed class MicrosoftAuthProvider
         }
         catch (Exception exception)
         {
+            var details = MicrosoftAuthenticationLogDetails.From(exception, "TokenCacheRollback");
             logger.LogWarning(
-                exception,
-                "Could not roll back the MSAL token-cache account created by a failed interactive login.");
+                "Could not roll back the MSAL token-cache account created by a failed interactive login. Stage={Stage} ErrorType={ErrorType} HttpStatus={HttpStatus} HttpRequestError={HttpRequestError} SocketError={SocketError} NativeErrorCode={NativeErrorCode}",
+                details.Stage,
+                details.ErrorType,
+                details.HttpStatus,
+                details.HttpRequestError,
+                details.SocketError,
+                details.NativeErrorCode);
         }
     }
 
@@ -550,7 +570,7 @@ internal sealed class MicrosoftAuthProvider
             || value?.Contains("Interactive Microsoft OAuth", StringComparison.OrdinalIgnoreCase) == true;
     }
 
-    private static int ResolveStatusCode(JEAuthException exception)
+    internal static int ResolveStatusCode(JEAuthException exception)
     {
         if (exception.StatusCode != 0)
             return exception.StatusCode;

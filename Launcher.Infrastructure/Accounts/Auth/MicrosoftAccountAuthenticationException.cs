@@ -20,4 +20,6 @@ internal sealed class MicrosoftAccountAuthenticationException : Exception
     }
 
     public LaunchAccountSessionFailureReason Reason { get; }
+
+    internal string? Stage { get; set; }
 }

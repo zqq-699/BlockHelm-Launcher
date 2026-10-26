@@ -117,11 +117,14 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
     public async Task<LauncherAccount> LoginInteractivelyAsync(CancellationToken cancellationToken = default)
     {
         // 浏览器登录成功后仍需获取 Minecraft Profile；没有游戏资料的身份不能作为可启动账户。
+        var stage = "Authentication";
         try
         {
             logger.LogInformation("Interactive Microsoft account login started.");
             var login = await authProvider.LoginInteractivelyAsync(cancellationToken);
+            stage = "ProfileLookup";
             var currentProfile = await TryGetCurrentProfileAsync(login, cancellationToken);
+            stage = "AccountCreation";
             if (currentProfile is not null)
             {
                 var account = await accountFactory.CreateAccountFromProfileAsync(
@@ -161,6 +164,7 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MicrosoftAccountAuthenticationException exception)
         {
+            var details = MicrosoftAuthenticationLogDetails.From(exception);
             var reason = exception.Reason switch
             {
                 LaunchAccountSessionFailureReason.AuthenticationNotConfigured
@@ -178,9 +182,14 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
                 _ => MicrosoftAccountLoginFailureReason.Unknown
             };
             logger.LogWarning(
-                "Interactive Microsoft account login failed. Reason={Reason} ErrorType={ErrorType}",
+                "Interactive Microsoft account login failed. Reason={Reason} Stage={Stage} ErrorType={ErrorType} HttpStatus={HttpStatus} HttpRequestError={HttpRequestError} SocketError={SocketError} NativeErrorCode={NativeErrorCode}",
                 reason,
-                exception.InnerException?.GetType().FullName ?? exception.GetType().FullName);
+                details.Stage,
+                details.ErrorType,
+                details.HttpStatus,
+                details.HttpRequestError,
+                details.SocketError,
+                details.NativeErrorCode);
             throw new MicrosoftAccountLoginException(
                 reason,
                 "Microsoft account login failed.",
@@ -188,9 +197,15 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            var details = MicrosoftAuthenticationLogDetails.From(exception, stage);
             logger.LogError(
-                "Interactive Microsoft account login failed. ErrorType={ErrorType}",
-                exception.GetType().FullName);
+                "Interactive Microsoft account login failed. Stage={Stage} ErrorType={ErrorType} HttpStatus={HttpStatus} HttpRequestError={HttpRequestError} SocketError={SocketError} NativeErrorCode={NativeErrorCode}",
+                details.Stage,
+                details.ErrorType,
+                details.HttpStatus,
+                details.HttpRequestError,
+                details.SocketError,
+                details.NativeErrorCode);
             throw;
         }
     }
@@ -206,11 +221,14 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
                 "Only an existing Microsoft account can be reauthenticated.");
         }
 
+        var stage = "Authentication";
         try
         {
             logger.LogInformation("Interactive Microsoft account reauthentication started. AccountId={AccountId}", account.Id);
             var login = await authProvider.ReauthenticateInteractivelyAsync(account, cancellationToken);
+            stage = "ProfileLookup";
             var currentProfile = await TryGetCurrentProfileAsync(login, cancellationToken);
+            stage = "AccountCreation";
             LauncherAccount refreshed;
             if (currentProfile is not null)
             {
@@ -253,6 +271,7 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (MicrosoftAccountAuthenticationException exception)
         {
+            var details = MicrosoftAuthenticationLogDetails.From(exception);
             var reason = exception.Reason switch
             {
                 LaunchAccountSessionFailureReason.AuthenticationNotConfigured
@@ -272,10 +291,15 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
                 _ => MicrosoftAccountReauthenticationFailureReason.Unknown
             };
             logger.LogWarning(
-                "Interactive Microsoft account reauthentication failed. AccountId={AccountId} Reason={Reason} ErrorType={ErrorType}",
+                "Interactive Microsoft account reauthentication failed. AccountId={AccountId} Reason={Reason} Stage={Stage} ErrorType={ErrorType} HttpStatus={HttpStatus} HttpRequestError={HttpRequestError} SocketError={SocketError} NativeErrorCode={NativeErrorCode}",
                 account.Id,
                 reason,
-                exception.InnerException?.GetType().FullName ?? exception.GetType().FullName);
+                details.Stage,
+                details.ErrorType,
+                details.HttpStatus,
+                details.HttpRequestError,
+                details.SocketError,
+                details.NativeErrorCode);
             throw new MicrosoftAccountReauthenticationException(reason, "Microsoft account reauthentication failed.", exception);
         }
         catch (MicrosoftAccountReauthenticationException)
@@ -284,10 +308,16 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            var details = MicrosoftAuthenticationLogDetails.From(exception, stage);
             logger.LogError(
-                "Interactive Microsoft account reauthentication failed. AccountId={AccountId} ErrorType={ErrorType}",
+                "Interactive Microsoft account reauthentication failed. AccountId={AccountId} Stage={Stage} ErrorType={ErrorType} HttpStatus={HttpStatus} HttpRequestError={HttpRequestError} SocketError={SocketError} NativeErrorCode={NativeErrorCode}",
                 account.Id,
-                exception.GetType().FullName);
+                details.Stage,
+                details.ErrorType,
+                details.HttpStatus,
+                details.HttpRequestError,
+                details.SocketError,
+                details.NativeErrorCode);
             throw new MicrosoftAccountReauthenticationException(
                 MicrosoftAccountReauthenticationFailureReason.Unknown,
                 "Microsoft account reauthentication failed.",
@@ -495,8 +525,17 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
         {
             throw;
         }
-        catch
+        catch (Exception exception)
         {
+            var details = MicrosoftAuthenticationLogDetails.From(exception, "ProfileLookup");
+            logger.LogWarning(
+                "Microsoft account profile lookup failed; using the authenticated session profile. Stage={Stage} ErrorType={ErrorType} HttpStatus={HttpStatus} HttpRequestError={HttpRequestError} SocketError={SocketError} NativeErrorCode={NativeErrorCode}",
+                details.Stage,
+                details.ErrorType,
+                details.HttpStatus,
+                details.HttpRequestError,
+                details.SocketError,
+                details.NativeErrorCode);
             return null;
         }
     }
