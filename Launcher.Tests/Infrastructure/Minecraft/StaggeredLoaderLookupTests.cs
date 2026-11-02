@@ -139,6 +139,43 @@ public sealed class StaggeredLoaderLookupTests
     }
 
     [Fact]
+    public async Task CancellationStopsBothSourcesAfterFallbackStarts()
+    {
+        var handler = new ScriptedHandler();
+        using var client = new HttpClient(handler);
+        using var cancellation = new CancellationTokenSource();
+        var delay = NewSignal();
+        var lookup = Lookup(CreateExecutor(client), DownloadSourcePreference.Official, delay.Task, cancellation.Token);
+        await handler.Started(Official).WaitAsync(TimeSpan.FromSeconds(5));
+        delay.SetResult();
+        await handler.Started(Mirror).WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lookup);
+        await Task.WhenAll(handler.Canceled(Official), handler.Canceled(Mirror)).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task WinnerDoesNotWaitForSourceThatIgnoresCancellation()
+    {
+        var handler = new ScriptedHandler(ignoreCancellation: true);
+        using var client = new HttpClient(handler);
+        var delay = NewSignal();
+        var lookup = Lookup(CreateExecutor(client), DownloadSourcePreference.Official, delay.Task);
+        await handler.Started(Official).WaitAsync(TimeSpan.FromSeconds(5));
+        delay.SetResult();
+        await handler.Started(Mirror).WaitAsync(TimeSpan.FromSeconds(5));
+        handler.Reply(Mirror, HttpStatusCode.OK, "mirror version");
+        try
+        {
+            Assert.Equal("mirror version", (await lookup.WaitAsync(TimeSpan.FromSeconds(5))).Value);
+        }
+        finally
+        {
+            handler.Reply(Official, HttpStatusCode.OK, "late version");
+        }
+    }
+
+    [Fact]
     public async Task SingleSourceDoesNotStartAnIdenticalFallback()
     {
         var handler = new ScriptedHandler();
@@ -166,7 +203,7 @@ public sealed class StaggeredLoaderLookupTests
 
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private sealed class ScriptedHandler : HttpMessageHandler
+    private sealed class ScriptedHandler(bool ignoreCancellation = false) : HttpMessageHandler
     {
         private readonly ConcurrentDictionary<string, TaskCompletionSource<HttpResponseMessage>> responses = new();
         private readonly ConcurrentDictionary<string, TaskCompletionSource> starts = new();
@@ -187,7 +224,7 @@ public sealed class StaggeredLoaderLookupTests
             try
             {
                 return await responses.GetOrAdd(host, _ => new(TaskCreationOptions.RunContinuationsAsynchronously))
-                    .Task.WaitAsync(cancellationToken);
+                    .Task.WaitAsync(ignoreCancellation ? CancellationToken.None : cancellationToken);
             }
             catch (OperationCanceledException)
             {

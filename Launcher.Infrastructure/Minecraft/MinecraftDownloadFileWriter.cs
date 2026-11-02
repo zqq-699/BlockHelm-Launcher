@@ -112,6 +112,7 @@ internal static class MinecraftDownloadFileWriter
             ValidateHash(destinationPath, expectedSha1, sha1);
             if (validateFile is not null)
                 await validateFile(tempPath, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             EnsureSafe();
             Commit(tempPath, destinationPath);
             committed = true;

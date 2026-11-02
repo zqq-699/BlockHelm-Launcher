@@ -37,14 +37,26 @@ internal static class LoaderInstallerFallbackValidator
                 && root.TryGetProperty("processors", out var processors)
                 && processors.ValueKind == JsonValueKind.Array;
             var hasLegacyProfile = root.TryGetProperty("install", out var install)
-                && install.ValueKind == JsonValueKind.Object && root.TryGetProperty("versionInfo", out _);
+                && install.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("versionInfo", out var versionInfo)
+                && versionInfo.ValueKind == JsonValueKind.Object;
             if (!hasModernProfile && !hasLegacyProfile)
                 throw new InvalidDataException("Installer profile format is unsupported.");
 
             var versionContainer = hasLegacyProfile ? install : root;
-            if (!versionContainer.TryGetProperty("minecraft", out var version)
-                || version.ValueKind != JsonValueKind.String || version.GetString() != minecraftVersion)
+            if (versionContainer.TryGetProperty("minecraft", out var version))
+            {
+                if (version.ValueKind != JsonValueKind.String || version.GetString() != minecraftVersion)
+                    throw new InvalidDataException("Installer Minecraft version does not match the requested version.");
+            }
+            else if (!hasLegacyProfile
+                || !install.TryGetProperty("path", out var coordinate)
+                || coordinate.ValueKind != JsonValueKind.String
+                || coordinate.GetString()?.Split(':') is not ["net.minecraftforge", "forge", var artifactVersion]
+                || !artifactVersion.StartsWith(minecraftVersion + "-", StringComparison.OrdinalIgnoreCase))
+            {
                 throw new InvalidDataException("Installer Minecraft version does not match the requested version.");
+            }
         }
         catch (Exception exception) when (exception is InvalidDataException or JsonException)
         {

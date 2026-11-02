@@ -85,11 +85,53 @@ public sealed class LoaderInstallerFallbackTests
     }
 
     private static byte[] CreateArchive(string minecraftVersion)
+        => CreateProfileArchive($"{{\"spec\":1,\"minecraft\":\"{minecraftVersion}\",\"processors\":[]}}");
+
+    [Theory]
+    [InlineData("{\"install\":{\"path\":\"net.minecraftforge:forge:1.7.10-10.13.4.1614\"},\"versionInfo\":{}}", true)]
+    [InlineData("{\"install\":{\"path\":\"net.minecraftforge:forge:1.8-11.14.0\"},\"versionInfo\":{}}", false)]
+    [InlineData("{\"install\":{\"minecraft\":\"1.7.10\"},\"versionInfo\":null}", false)]
+    public async Task LegacyProfileUsesCoordinateWhenMinecraftFieldIsMissing(string profile, bool valid)
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(path, CreateProfileArchive(profile));
+            if (valid)
+                await LoaderInstallerFallbackValidator.ValidateAsync(path, "1.7.10", CancellationToken.None);
+            else
+                await Assert.ThrowsAsync<DownloadContentValidationException>(() =>
+                    LoaderInstallerFallbackValidator.ValidateAsync(path, "1.7.10", CancellationToken.None));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task CancellationDuringValidationPreservesDestinationAndCleansTemporaryFile()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bhl-loader-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "installer.jar");
+            await File.WriteAllTextAsync(path, "existing");
+            using var cancellation = new CancellationTokenSource();
+            using var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("replacement") };
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => MinecraftDownloadFileWriter.WriteAsync(
+                response, path, null, null, 1, null, cancellation.Token,
+                validateFile: (_, _) => { cancellation.Cancel(); return Task.CompletedTask; }));
+            Assert.Equal("existing", await File.ReadAllTextAsync(path));
+            Assert.Single(Directory.GetFiles(directory));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    private static byte[] CreateProfileArchive(string profile)
     {
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         using (var writer = new StreamWriter(zip.CreateEntry("install_profile.json").Open()))
-            writer.Write($"{{\"spec\":1,\"minecraft\":\"{minecraftVersion}\",\"processors\":[]}}");
+            writer.Write(profile);
         return stream.ToArray();
     }
 
