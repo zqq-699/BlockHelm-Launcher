@@ -312,7 +312,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         try
         {
             var installerPath = Path.Combine(tempDirectory, "installer.jar");
-            var expectedSha1 = await LoaderInstallerChecksumResolver.ResolveRequiredSha1Async(
+            var expectedSha1 = await LoaderInstallerChecksumResolver.ResolveOptionalSha1Async(
                 httpClient,
                 downloadSpeedLimitState,
                 logger,
@@ -331,7 +331,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 preference,
                 speedLimit,
                 progress,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                (path, token) => LoaderInstallerFallbackValidator.ValidateAsync(path, modpack.MinecraftVersion, token)).ConfigureAwait(false);
 
             var artifactService = new LoaderInstallerArtifactService(
                 httpClient,
@@ -400,7 +401,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         DownloadSourcePreference preference,
         int speedLimit,
         IProgress<LauncherProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task>? validateUnverifiedFile = null)
     {
         var parent = Path.GetDirectoryName(destination);
         if (!string.IsNullOrWhiteSpace(parent))
@@ -418,7 +420,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 ModProgressStages.DownloadingFile,
                 Path.GetFileName(destination),
                 total is > 0 ? transferred * 100d / total.Value : null)),
-            options: new DownloadFileOptions(ManagedRoot: managedRoot),
+            options: new DownloadFileOptions(ManagedRoot: managedRoot, ValidateUnverifiedFile: validateUnverifiedFile),
             speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
     }
 

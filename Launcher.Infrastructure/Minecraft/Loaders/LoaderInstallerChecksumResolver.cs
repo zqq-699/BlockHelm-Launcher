@@ -30,7 +30,7 @@ internal static class LoaderInstallerChecksumResolver
 {
     internal const int MaximumChecksumMetadataBytes = 4 * 1024;
 
-    public static async Task<string> ResolveRequiredSha1Async(
+    public static async Task<string?> ResolveOptionalSha1Async(
         HttpClient httpClient,
         IDownloadSpeedLimitState? downloadSpeedLimitState,
         ILogger logger,
@@ -50,8 +50,17 @@ internal static class LoaderInstallerChecksumResolver
             httpClient,
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-            category: DownloadConcurrencyCategory.Metadata);
+            category: DownloadConcurrencyCategory.Metadata,
+            retryOptions: new DownloadRetryOptions
+            {
+                MaxAttemptsPerSource = 1,
+                ResponseHeadersTimeout = TimeSpan.FromSeconds(3),
+                FirstByteTimeout = TimeSpan.FromSeconds(3),
+                BodyIdleTimeout = TimeSpan.FromSeconds(3)
+            });
 
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(8));
         try
         {
             return await executor.ExecuteAsync(
@@ -71,21 +80,17 @@ internal static class LoaderInstallerChecksumResolver
                         ?? throw new DownloadContentValidationException(
                             "Loader installer SHA1 metadata has an invalid format.");
                 },
-                cancellationToken).ConfigureAwait(false);
+                timeout.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is OperationCanceledException or MinecraftDownloadRequestExecutor.DownloadSourceRequestException)
         {
-            logger.LogDebug(
-                exception,
-                "Loader installer SHA1 metadata was unavailable or invalid. Loader={Loader}",
-                categoryHint);
-            throw new InvalidDataException(
-                $"{categoryHint} installer checksum metadata is unavailable or invalid.",
-                exception);
+            logger.LogWarning("Loader installer SHA1 metadata unavailable; using structural validation. Loader={Loader} FailureType={FailureType}",
+                categoryHint, exception.GetType().Name);
+            return null;
         }
     }
 

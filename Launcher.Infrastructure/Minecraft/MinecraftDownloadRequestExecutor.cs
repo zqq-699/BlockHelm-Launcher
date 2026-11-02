@@ -211,7 +211,8 @@ internal sealed class MinecraftDownloadRequestExecutor
                             reportAttemptProgress,
                             token,
                             managedRoot,
-                            reportTransferredBytes).ConfigureAwait(false);
+                            reportTransferredBytes,
+                            options?.ValidateUnverifiedFile).ConfigureAwait(false);
                         return context.Resolution;
                     },
                     noResultStatus: null,

@@ -39,12 +39,13 @@ public sealed partial class ForgeLoaderProvider
 private async Task DownloadInstallerAsync(
         Uri installerUrl,
         string destinationPath,
+        string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference,
         CancellationToken cancellationToken,
         int downloadSpeedLimitMbPerSecond = 0,
         SpeedMeter? speedMeter = null)
     {
-        var expectedSha1 = await LoaderInstallerChecksumResolver.ResolveRequiredSha1Async(
+        var expectedSha1 = await LoaderInstallerChecksumResolver.ResolveOptionalSha1Async(
             httpClient,
             downloadSpeedLimitState,
             logger,
@@ -75,6 +76,7 @@ private async Task DownloadInstallerAsync(
             expectedSize: null,
             cancellationToken,
             reportAttemptProgress: logScope.BeginSource(),
+            options: new DownloadFileOptions(ValidateUnverifiedFile: (path, token) => LoaderInstallerFallbackValidator.ValidateAsync(path, minecraftVersion, token)),
             speedMeter: speedMeter,
             reportTransferredBytes: logScope.ReportTransferredBytes);
             logScope.Complete(resolution);

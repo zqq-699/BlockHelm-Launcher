@@ -58,7 +58,8 @@ internal static class MinecraftDownloadFileWriter
         Action<int, long, long?>? reportAttemptProgress,
         CancellationToken cancellationToken,
         string? managedRoot = null,
-        Action<long>? reportTransferredBytes = null)
+        Action<long>? reportTransferredBytes = null,
+        Func<string, CancellationToken, Task>? validateFile = null)
     {
         // 临时文件与目标位于同一目录，最终 Move 不跨卷且失败前不会破坏已有文件。
         var tempPath = Path.Combine(
@@ -109,6 +110,8 @@ internal static class MinecraftDownloadFileWriter
             await FlushAndCloseAsync(destination, tempPath, cancellationToken).ConfigureAwait(false);
             ValidateLength(response, expectedSize, totalRead);
             ValidateHash(destinationPath, expectedSha1, sha1);
+            if (validateFile is not null)
+                await validateFile(tempPath, cancellationToken).ConfigureAwait(false);
             EnsureSafe();
             Commit(tempPath, destinationPath);
             committed = true;
