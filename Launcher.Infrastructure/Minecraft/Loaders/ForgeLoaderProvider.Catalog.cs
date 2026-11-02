@@ -54,7 +54,7 @@ private async Task<IReadOnlyDictionary<string, ForgeCatalogEntry>> GetCatalogAsy
                 logger,
                 DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
                 category: DownloadConcurrencyCategory.Metadata);
-            var result = await executor.ExecuteLookupAsync(
+            var result = await executor.ExecuteStaggeredLookupAsync(
                 GetForgeIndexUrl(minecraftVersion),
                 downloadSourcePreference,
                 categoryHint: "Forge",

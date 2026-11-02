@@ -112,7 +112,7 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
             category: DownloadConcurrencyCategory.Metadata);
-        var result = await executor.ExecuteLookupAsync(
+        var result = await executor.ExecuteStaggeredLookupAsync(
             catalog.MetadataUrl,
             downloadSourcePreference,
             categoryHint: "NeoForge",

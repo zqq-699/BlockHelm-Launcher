@@ -65,7 +65,7 @@ public sealed class QuiltLoaderProvider : ILoaderProvider, ISeparatedInstallPath
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
             category: DownloadConcurrencyCategory.Metadata);
-        var result = await executor.ExecuteLookupAsync(
+        var result = await executor.ExecuteStaggeredLookupAsync(
             $"https://meta.quiltmc.org/v3/versions/loader/{minecraftVersion}",
             downloadSourcePreference,
             categoryHint: "Quilt",
