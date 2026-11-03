@@ -89,6 +89,78 @@
                    VerticalAlignment="Center" />
     </DataTemplate>
 
+    <!-- A fixed multicolour illustration for the custom-colour option. -->
+    <DrawingBrush x:Key="CustomAccentColorWheelBrush" Stretch="Fill">
+        <DrawingBrush.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Geometry="M50,50 L50,0 100,0 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="50,0" EndPoint="100,0">
+                            <GradientStop Color="#F44336" Offset="0" />
+                            <GradientStop Color="#FF9800" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M50,50 L100,0 100,50 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="100,0" EndPoint="100,50">
+                            <GradientStop Color="#FF9800" Offset="0" />
+                            <GradientStop Color="#FFEB3B" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M50,50 L100,50 100,100 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="100,50" EndPoint="100,100">
+                            <GradientStop Color="#FFEB3B" Offset="0" />
+                            <GradientStop Color="#4CAF50" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M50,50 L100,100 50,100 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="100,100" EndPoint="50,100">
+                            <GradientStop Color="#4CAF50" Offset="0" />
+                            <GradientStop Color="#00BCD4" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M50,50 L50,100 0,100 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="50,100" EndPoint="0,100">
+                            <GradientStop Color="#00BCD4" Offset="0" />
+                            <GradientStop Color="#2196F3" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M50,50 L0,100 0,50 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="0,100" EndPoint="0,50">
+                            <GradientStop Color="#2196F3" Offset="0" />
+                            <GradientStop Color="#673AB7" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M50,50 L0,50 0,0 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="0,50" EndPoint="0,0">
+                            <GradientStop Color="#673AB7" Offset="0" />
+                            <GradientStop Color="#E91E63" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+                <GeometryDrawing Geometry="M50,50 L0,0 50,0 Z">
+                    <GeometryDrawing.Brush>
+                        <LinearGradientBrush MappingMode="Absolute" StartPoint="0,0" EndPoint="50,0">
+                            <GradientStop Color="#E91E63" Offset="0" />
+                            <GradientStop Color="#F44336" Offset="1" />
+                        </LinearGradientBrush>
+                    </GeometryDrawing.Brush>
+                </GeometryDrawing>
+            </DrawingGroup>
+        </DrawingBrush.Drawing>
+    </DrawingBrush>
+
     <Style x:Key="AccentColorPreviewEllipseStyle" TargetType="Ellipse">
         <Setter Property="Width" Value="10" />
         <Setter Property="Height" Value="10" />
@@ -96,6 +168,9 @@
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Fill" Value="{DynamicResource Brush.AccentOption.Blue}" />
         <Style.Triggers>
+            <DataTrigger Binding="{Binding Id}" Value="Custom">
+                <Setter Property="Fill" Value="{StaticResource CustomAccentColorWheelBrush}" />
+            </DataTrigger>
             <DataTrigger Binding="{Binding Id}" Value="Cyan">
                 <Setter Property="Fill" Value="{DynamicResource Brush.AccentOption.Cyan}" />
             </DataTrigger>

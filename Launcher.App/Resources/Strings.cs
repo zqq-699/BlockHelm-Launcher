@@ -542,6 +542,10 @@ public static class Strings
     public static string Settings_AccentColorPinkTitle => Get(nameof(Settings_AccentColorPinkTitle));
     public static string Settings_AccentColorOrangeTitle => Get(nameof(Settings_AccentColorOrangeTitle));
     public static string Settings_AccentColorAmberTitle => Get(nameof(Settings_AccentColorAmberTitle));
+    public static string Settings_AccentColorCustomTitle => Get(nameof(Settings_AccentColorCustomTitle));
+    public static string Settings_CustomAccentColorLabel => Get(nameof(Settings_CustomAccentColorLabel));
+    public static string Settings_CustomAccentColorFormat => Get(nameof(Settings_CustomAccentColorFormat));
+    public static string Settings_CustomAccentColorPlaceholder => Get(nameof(Settings_CustomAccentColorPlaceholder));
     public static string Settings_ControlDemoButtonsSection => Get(nameof(Settings_ControlDemoButtonsSection));
     public static string Settings_ControlDemoInputsSection => Get(nameof(Settings_ControlDemoInputsSection));
     public static string Settings_ControlDemoSelectionSection => Get(nameof(Settings_ControlDemoSelectionSection));

@@ -3153,28 +3153,32 @@
     <value>啟動器強調色</value>
   </data>
   <data name="Settings_AccentColorBlueTitle" xml:space="preserve">
-    <value>藍色 Blue</value>
+    <value>藍色</value>
   </data>
   <data name="Settings_AccentColorCyanTitle" xml:space="preserve">
-    <value>青色 Cyan</value>
+    <value>青色</value>
   </data>
   <data name="Settings_AccentColorGreenTitle" xml:space="preserve">
-    <value>綠色 Green</value>
+    <value>綠色</value>
   </data>
   <data name="Settings_AccentColorEmeraldTitle" xml:space="preserve">
-    <value>翠綠 Emerald</value>
+    <value>翠綠</value>
   </data>
   <data name="Settings_AccentColorPurpleTitle" xml:space="preserve">
-    <value>紫色 Purple</value>
+    <value>紫色</value>
   </data>
   <data name="Settings_AccentColorPinkTitle" xml:space="preserve">
-    <value>粉色 Pink</value>
+    <value>粉色</value>
   </data>
   <data name="Settings_AccentColorOrangeTitle" xml:space="preserve">
-    <value>橙色 Orange</value>
+    <value>橙色</value>
   </data>
+  <data name="Settings_AccentColorCustomTitle" xml:space="preserve"><value>自訂</value></data>
+  <data name="Settings_CustomAccentColorPlaceholder" xml:space="preserve"><value>#RRGGBB</value></data>
+  <data name="Settings_CustomAccentColorFormat" xml:space="preserve"><value>自訂HEX顏色代碼</value></data>
+  <data name="Settings_CustomAccentColorLabel" xml:space="preserve"><value>自訂顏色</value></data>
   <data name="Settings_AccentColorAmberTitle" xml:space="preserve">
-    <value>黃色 Amber</value>
+    <value>黃色</value>
   </data>
   <data name="GameSettings_ModManagementEmptyMessage" xml:space="preserve">
     <value>目前沒有可用模組</value>

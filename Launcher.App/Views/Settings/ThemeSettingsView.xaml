@@ -20,6 +20,7 @@
 <UserControl x:Class="Launcher.App.Views.Settings.ThemeSettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:behaviors="clr-namespace:Launcher.App.Behaviors"
              xmlns:animation="clr-namespace:Launcher.App.Behaviors.Animation"
              xmlns:controls="clr-namespace:Launcher.App.Controls"
              xmlns:res="clr-namespace:Launcher.App.Resources"
@@ -79,22 +80,53 @@
                   Header="{x:Static res:Strings.Settings_AccentSection}"
                   Style="{StaticResource LauncherContentSectionStyle}">
             <Border Style="{StaticResource SectionFieldSurfaceStyle}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="220" />
-                    </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="220" />
+                        </Grid.ColumnDefinitions>
 
-                    <TextBlock Text="{x:Static res:Strings.Settings_AccentSelectionLabel}"
-                               Style="{StaticResource SettingsOptionTextStyle}" />
+                        <TextBlock Text="{x:Static res:Strings.Settings_AccentSelectionLabel}"
+                                   Style="{StaticResource SettingsOptionTextStyle}" />
 
-                    <controls:AnimatedComboBox Grid.Column="1"
-                                               ItemsSource="{Binding AccentColorOptions}"
-                                               SelectedItem="{Binding SelectedAccentColorOption, Mode=TwoWay}"
-                                               ItemTemplate="{StaticResource AccentColorOptionTemplate}"
-                                               SelectionItemTemplate="{StaticResource AccentColorOptionTemplate}"
-                                               Style="{StaticResource LauncherComboBoxStyle}" />
-                </Grid>
+                        <controls:AnimatedComboBox Grid.Column="1"
+                                                   ItemsSource="{Binding AccentColorOptions}"
+                                                   SelectedItem="{Binding SelectedAccentColorOption, Mode=TwoWay}"
+                                                   ItemTemplate="{StaticResource AccentColorOptionTemplate}"
+                                                   SelectionItemTemplate="{StaticResource AccentColorOptionTemplate}"
+                                                   Style="{StaticResource LauncherComboBoxStyle}" />
+                    </Grid>
+                    <Grid Margin="0,18,0,0"
+                          animation:AnimatedCollapse.IsExpanded="{Binding IsCustomAccentColorVisible}"
+                          animation:AnimatedCollapse.Duration="0:0:0.18">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="220" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{x:Static res:Strings.Settings_CustomAccentColorLabel}"
+                                       Style="{StaticResource SettingsOptionTextStyle}" />
+                            <TextBlock Margin="0,4,16,0"
+                                       Text="{x:Static res:Strings.Settings_CustomAccentColorFormat}"
+                                       Style="{StaticResource SettingsDescriptionTextStyle}" />
+                        </StackPanel>
+                        <Grid Grid.Column="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding CustomAccentColorText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     behaviors:TextBoxPlaceholder.Text="{x:Static res:Strings.Settings_CustomAccentColorPlaceholder}"
+                                     Style="{StaticResource LauncherDialogTextBoxStyle}" />
+                            <Button Grid.Column="1"
+                                    Margin="8,0,0,0"
+                                    Content="{x:Static res:Strings.Confirm_Button}"
+                                    Command="{Binding ApplyCustomAccentColorCommand}"
+                                    Style="{StaticResource LauncherPrimaryDialogButtonStyle}" />
+                        </Grid>
+                    </Grid>
+                </StackPanel>
             </Border>
         </GroupBox>
 
