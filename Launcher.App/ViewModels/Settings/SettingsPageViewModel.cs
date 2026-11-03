@@ -18,10 +18,8 @@
  */
 
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Launcher.App.Diagnostics;
 using Launcher.App.Logging;
 using Launcher.App.Resources;
 using Launcher.App.Services;
@@ -219,18 +217,7 @@ public sealed partial class SettingsPageViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        if (!UiPerformanceLog.IsEnabled || ReferenceEquals(SelectedSection, section))
-        {
-            SelectedSection = section;
-            return;
-        }
-
-        var previous = SelectedSection?.Section;
-        var startedAt = Stopwatch.GetTimestamp();
         SelectedSection = section;
-        Serilog.Log.Debug(
-            "Settings section selection measured. From={FromSection} To={ToSection} SelectionMs={SelectionMs:F1}",
-            previous, section.Section, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
     }
 
     partial void OnSelectedSectionChanged(SettingsSectionItem? value)

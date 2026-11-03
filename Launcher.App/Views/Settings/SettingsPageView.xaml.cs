@@ -18,12 +18,10 @@
  */
 
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
-using Launcher.App.Diagnostics;
 using Launcher.App.Services;
 using Launcher.App.ViewModels.Settings;
 
@@ -127,7 +125,6 @@ public partial class SettingsPageView : UserControl
                 // Switching scroll hosts reparents the content. Start the transition only after
                 // Loaded, otherwise Unloaded cancels it before the first frame.
                 transitionPendingAfterReparent = true;
-                var startedAt = UiPerformanceLog.IsEnabled ? Stopwatch.GetTimestamp() : 0L;
                 sectionTransitionService.SyncTo(previous);
                 if (sectionContentRoot is not null)
                     sectionContentRoot.Opacity = PageTransitionService.WarmupOpacity;
@@ -144,9 +141,6 @@ public partial class SettingsPageView : UserControl
                     SettingsListFrame.ScrollViewer.ScrollToVerticalOffset(0);
                     SettingsListFrame.ScrollViewer.UpdateLayout();
                     sectionContentRoot.UpdateLayout();
-                    if (startedAt != 0L)
-                        Serilog.Log.Debug("Settings section host switch measured. Section={Section} ElapsedMs={ElapsedMs:F1}",
-                            nextSectionId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                     sectionTransitionService.MoveTo(nextSectionId);
                 }));
                 return;
@@ -156,26 +150,10 @@ public partial class SettingsPageView : UserControl
             if (sectionContentRoot is null)
                 return;
 
-            var measure = UiPerformanceLog.IsEnabled;
-            var start = measure ? Stopwatch.GetTimestamp() : 0L;
             SettingsListFrame.ScrollViewer.ScrollToVerticalOffset(0);
-            var afterScroll = measure ? Stopwatch.GetTimestamp() : 0L;
             SettingsListFrame.ScrollViewer.UpdateLayout();
-            var afterScrollLayout = measure ? Stopwatch.GetTimestamp() : 0L;
             sectionContentRoot.UpdateLayout();
-            var afterContentLayout = measure ? Stopwatch.GetTimestamp() : 0L;
             sectionTransitionService.MoveTo(viewModel.SelectedSection?.Section.ToString() ?? SectionOrder[0]);
-            if (measure)
-            {
-                var afterTransition = Stopwatch.GetTimestamp();
-                Serilog.Log.Debug(
-                    "Settings section presentation measured. Section={Section} ScrollMs={ScrollMs:F1} ScrollLayoutMs={ScrollLayoutMs:F1} ContentLayoutMs={ContentLayoutMs:F1} TransitionSetupMs={TransitionSetupMs:F1}",
-                    viewModel.SelectedSection?.Section,
-                    Stopwatch.GetElapsedTime(start, afterScroll).TotalMilliseconds,
-                    Stopwatch.GetElapsedTime(afterScroll, afterScrollLayout).TotalMilliseconds,
-                    Stopwatch.GetElapsedTime(afterScrollLayout, afterContentLayout).TotalMilliseconds,
-                    Stopwatch.GetElapsedTime(afterContentLayout, afterTransition).TotalMilliseconds);
-            }
         }
     }
 
