@@ -15,6 +15,7 @@ public sealed class LauncherUpdateApplyLoggerTests : TestTempDirectory
     {
         var logger = new LauncherUpdateApplyLogger(TempRoot);
         logger.Info("Source=https://example.test/signed/path-secret?token=query-secret");
+        logger.Info("id_token=synthetic-id-secret Authorization=Basic synthetic-basic-secret");
         logger.Error("Apply failed.", new InvalidOperationException("unlabelled-exception-secret"));
 
         var output = File.ReadAllText(Assert.Single(Directory.GetFiles(TempRoot, "updater-*.log")));
@@ -22,5 +23,7 @@ public sealed class LauncherUpdateApplyLoggerTests : TestTempDirectory
         Assert.DoesNotContain("path-secret", output, StringComparison.Ordinal);
         Assert.DoesNotContain("query-secret", output, StringComparison.Ordinal);
         Assert.DoesNotContain("unlabelled-exception-secret", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-id-secret", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-basic-secret", output, StringComparison.Ordinal);
     }
 }

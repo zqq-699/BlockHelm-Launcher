@@ -147,6 +147,8 @@ private static async Task<ExportOutcome> TryAddDiagnosticAsync(
             leaveOpen: true);
         var buffer = new char[81920];
         var line = new StringBuilder();
+        var redactor = new SensitiveLogText.LineRedactor(sensitiveValues);
+        var previousWasCarriageReturn = false;
         while (true)
         {
             var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken);
@@ -158,19 +160,21 @@ private static async Task<ExportOutcome> TryAddDiagnosticAsync(
                 var character = buffer[index];
                 if (character is '\r' or '\n')
                 {
-                    await writer.WriteAsync(
-                        LaunchDiagnosticRedactor.Redact(line.ToString(), sensitiveValues));
+                    if (character != '\n' || !previousWasCarriageReturn)
+                        await writer.WriteAsync(redactor.RedactLine(line.ToString()));
                     line.Clear();
                     await writer.WriteAsync(character);
+                    previousWasCarriageReturn = character == '\r';
                     continue;
                 }
 
+                previousWasCarriageReturn = false;
                 line.Append(character);
             }
         }
 
         if (line.Length > 0)
-            await writer.WriteAsync(LaunchDiagnosticRedactor.Redact(line.ToString(), sensitiveValues));
+            await writer.WriteAsync(redactor.RedactLine(line.ToString()));
         await writer.FlushAsync(cancellationToken);
     }
 }
