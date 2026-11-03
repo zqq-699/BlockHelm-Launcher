@@ -142,6 +142,121 @@ internal sealed class MinecraftDownloadRequestExecutor
             cancellationToken: cancellationToken);
     }
 
+    /// <summary>Starts the next catalog source when the preferred source is slow or fails.</summary>
+    internal async Task<DownloadLookupResult<T>> ExecuteStaggeredLookupAsync<T>(
+        string originalUrl,
+        DownloadSourcePreference preference,
+        string? categoryHint,
+        Func<DownloadAttemptContext, CancellationToken, Task<T>> operation,
+        Func<HttpStatusCode, bool> noResultStatus,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task>? fallbackDelay = null)
+    {
+        var candidates = MinecraftDownloadSourceResolver.EnumerateRequests(originalUrl, preference, categoryHint).ToArray();
+        using var pending = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = pending.Token;
+        var firstFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tasks = new List<(ResolvedDownloadRequest Source, Task<DownloadLookupResult<T>> Task)>();
+        var failures = new List<(ResolvedDownloadRequest Source, DownloadSourceRequestException Error)>();
+        var noResults = 0;
+
+        Task<DownloadLookupResult<T>> Start(ResolvedDownloadRequest source, Action? onFailure = null) =>
+            ExecuteCoreAsync(originalUrl, preference, categoryHint, operation, noResultStatus,
+                lookupMode: true, configureRequest: null, allowResponseStatus: null,
+                sensitiveHeaders: null, speedMeter: null, executionMode: DownloadExecutionMode.PerSourceRetries,
+                fileCandidates: null, cancellationToken: token, singleCandidate: source,
+                onRecoverableFailure: onFailure, logExhaustion: false);
+
+        var primary = Start(candidates[0], () => firstFailure.TrySetResult());
+        tasks.Add((candidates[0], primary));
+        var delay = candidates.Length > 1
+            ? (fallbackDelay ?? (ct => Task.Delay(TimeSpan.FromMilliseconds(1500), ct)))(token)
+            : Task.Delay(Timeout.InfiniteTimeSpan, token);
+        var canceled = Task.Delay(Timeout.InfiniteTimeSpan, token);
+        var nextCandidate = 1;
+        try
+        {
+            while (tasks.Count > 0)
+            {
+                var wait = tasks.Select(item => (Task)item.Task).ToList();
+                if (nextCandidate < candidates.Length)
+                {
+                    wait.Add(delay);
+                    wait.Add(firstFailure.Task);
+                }
+                wait.Add(canceled);
+                await Task.WhenAny(wait).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // In a tie, process the preferred source first.
+                for (var index = 0; index < tasks.Count;)
+                {
+                    var item = tasks[index];
+                    if (!item.Task.IsCompleted)
+                    {
+                        index++;
+                        continue;
+                    }
+                    tasks.RemoveAt(index);
+                    try
+                    {
+                        var result = await item.Task.ConfigureAwait(false);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (result.Found)
+                        {
+                            logger.LogInformation("Version catalog loaded. ResourceCategory={ResourceCategory} FinalSource={FinalSource}",
+                                item.Source.ResourceCategory, item.Source.ResolvedSourceKind);
+                            return result;
+                        }
+                        noResults++;
+                        firstFailure.TrySetResult();
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (DownloadSourceRequestException exception)
+                    {
+                        failures.Add((item.Source, exception));
+                        firstFailure.TrySetResult();
+                    }
+                }
+
+                if (nextCandidate < candidates.Length && (delay.IsCompleted || firstFailure.Task.IsCompleted))
+                {
+                    logger.LogInformation("Starting fallback version catalog source. ResourceCategory={ResourceCategory} Source={Source} Trigger={Trigger}",
+                        candidates[nextCandidate].ResourceCategory, candidates[nextCandidate].ResolvedSourceKind,
+                        firstFailure.Task.IsCompleted ? "PreferredSourceFailedOrEmpty" : "PreferredSourceSlow");
+                    tasks.Add((candidates[nextCandidate], Start(candidates[nextCandidate])));
+                    nextCandidate++;
+                }
+            }
+
+            if (noResults == candidates.Length)
+                return DownloadLookupResult<T>.NotFound();
+
+            var last = failures[^1];
+            var allFailures = failures.SelectMany(item => item.Error.Failures).ToArray();
+            LogExhaustedRequest(last.Source, failures.SelectMany(item =>
+                item.Error.Failures.OfType<DownloadAttemptException>()
+                    .Select(error => new SourceFailure(item.Source.ResolvedSourceKind, error.Reason, error.StatusCode))).ToArray());
+            throw new DownloadSourceRequestException(last.Source, last.Error, allFailures);
+        }
+        finally
+        {
+            pending.Cancel();
+            foreach (var item in tasks)
+                _ = ObserveCompletionAsync(item.Task);
+            _ = ObserveCompletionAsync(delay);
+        }
+    }
+
+    private static async Task ObserveCompletionAsync(Task task)
+    {
+        try { await task.ConfigureAwait(false); }
+        catch (Exception) { /* A canceled or losing source must not leak an unobserved exception. */ }
+    }
+
     public Task<ResolvedDownloadRequest> DownloadFileAsync(
         string originalUrl,
         DownloadSourcePreference preference,
@@ -211,7 +326,8 @@ internal sealed class MinecraftDownloadRequestExecutor
                             reportAttemptProgress,
                             token,
                             managedRoot,
-                            reportTransferredBytes).ConfigureAwait(false);
+                            reportTransferredBytes,
+                            options?.ValidateUnverifiedFile).ConfigureAwait(false);
                         return context.Resolution;
                     },
                     noResultStatus: null,
@@ -1314,7 +1430,10 @@ internal sealed class MinecraftDownloadRequestExecutor
         SpeedMeter? speedMeter,
         DownloadExecutionMode executionMode,
         IReadOnlyList<ResolvedDownloadRequest>? fileCandidates,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ResolvedDownloadRequest? singleCandidate = null,
+        Action? onRecoverableFailure = null,
+        bool logExhaustion = true)
     {
         if (executionMode is DownloadExecutionMode.FileSourceRounds)
         {
@@ -1333,9 +1452,9 @@ internal sealed class MinecraftDownloadRequestExecutor
         }
 
         // 候选顺序已经包含用户偏好和镜像回退策略；每个源内部重试耗尽后才切换下一源。
-        var candidates = MinecraftDownloadSourceResolver
-            .EnumerateRequests(originalUrl, preference, categoryHint)
-            .ToList();
+        var candidates = singleCandidate is null
+            ? MinecraftDownloadSourceResolver.EnumerateRequests(originalUrl, preference, categoryHint).ToList()
+            : [singleCandidate];
         var failures = new List<Exception>();
         var sourceFailures = new List<SourceFailure>();
         var noResultSourceCount = 0;
@@ -1388,6 +1507,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 catch (DownloadNoResultException exception)
                 {
                     sourceReportedNoResult = true;
+                    onRecoverableFailure?.Invoke();
                     logger.LogDebug(
                         exception,
                         "Download source explicitly reported no result. RequestedSourcePreference={RequestedSourcePreference} ResourceCategory={ResourceCategory} OriginalUrl={OriginalUrl} ActualUrl={ActualUrl} ResolvedSourceKind={ResolvedSourceKind} Attempt={Attempt}",
@@ -1439,6 +1559,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                     if (failure.Disposition is DownloadFailureDisposition.Abort)
                         throw failure;
 
+                    onRecoverableFailure?.Invoke();
                     failures.Add(failure);
                     sourceFailures.Add(new SourceFailure(resolution.ResolvedSourceKind, failure.Reason, failure.StatusCode));
                     var retryCurrentSource = failure.Disposition is DownloadFailureDisposition.RetryCurrentSource
@@ -1463,7 +1584,8 @@ internal sealed class MinecraftDownloadRequestExecutor
             ?? throw new InvalidOperationException($"No download candidates were available for {originalUrl}.");
         var finalException = failures.LastOrDefault()
             ?? new InvalidOperationException($"No download source returned a usable result for {originalUrl}.");
-        LogExhaustedRequest(finalResolution, sourceFailures);
+        if (logExhaustion)
+            LogExhaustedRequest(finalResolution, sourceFailures);
         throw new DownloadSourceRequestException(finalResolution, finalException, failures);
     }
 

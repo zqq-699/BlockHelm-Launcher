@@ -63,7 +63,7 @@ public sealed class FabricLoaderProvider : ILoaderProvider, ISeparatedInstallPat
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
             category: DownloadConcurrencyCategory.Metadata);
-        var result = await executor.ExecuteLookupAsync(
+        var result = await executor.ExecuteStaggeredLookupAsync(
             $"https://meta.fabricmc.net/v2/versions/loader/{minecraftVersion}",
             downloadSourcePreference,
             categoryHint: "Fabric",
