@@ -83,12 +83,30 @@
                                 Title="{Binding SectionTitle}"
                                 IsSearchVisible="False"
                                 IsListVisible="True"
-                                IsProgressiveBlurEnabled="{DynamicResource Is.ProgressiveBlur.Enabled}"
-                                UseFrameScrollViewer="True">
+                                IsProgressiveBlurEnabled="{DynamicResource Is.ProgressiveBlur.Enabled}">
+            <controls:ListPageFrame.Style>
+                <Style TargetType="{x:Type controls:ListPageFrame}">
+                    <Setter Property="UseFrameScrollViewer" Value="True" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding UsesVirtualizedScrollHost}" Value="True">
+                            <Setter Property="UseFrameScrollViewer" Value="False" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </controls:ListPageFrame.Style>
             <controls:ListPageFrame.ListContent>
-                <Grid Margin="12,0,0,0"
-                      Loaded="SectionContentRoot_OnLoaded"
+                <Grid Loaded="SectionContentRoot_OnLoaded"
                       Unloaded="SectionContentRoot_OnUnloaded">
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Setter Property="Margin" Value="12,0,0,0" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding UsesVirtualizedScrollHost}" Value="True">
+                                    <Setter Property="Margin" Value="0" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
                     <Grid.RenderTransform>
                         <TranslateTransform />
                     </Grid.RenderTransform>

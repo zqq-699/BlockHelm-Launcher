@@ -171,6 +171,7 @@ public sealed partial class SettingsPageViewModel : ObservableObject, IDisposabl
     public bool IsJavaSection => SelectedSection?.Section is SettingsPageSection.Java;
     public bool IsThemeSection => SelectedSection?.Section is SettingsPageSection.Theme;
     public bool IsInfoSection => SelectedSection?.Section is SettingsPageSection.Info;
+    public bool UsesVirtualizedScrollHost => SelectedSection?.Section is SettingsPageSection.Java or SettingsPageSection.Info;
 
     public void PrimeFromSettings(LauncherSettings settings)
     {
@@ -232,6 +233,7 @@ public sealed partial class SettingsPageViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(IsJavaSection));
         OnPropertyChanged(nameof(IsThemeSection));
         OnPropertyChanged(nameof(IsInfoSection));
+        OnPropertyChanged(nameof(UsesVirtualizedScrollHost));
         CurrentSectionViewModel = value?.Section switch
         {
             SettingsPageSection.General => General,
