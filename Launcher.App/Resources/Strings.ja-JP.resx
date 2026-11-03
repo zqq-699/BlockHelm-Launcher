@@ -3173,6 +3173,10 @@
   <data name="Settings_AccentColorOrangeTitle" xml:space="preserve">
     <value>オレンジ Orange</value>
   </data>
+  <data name="Settings_AccentColorCustomTitle" xml:space="preserve"><value>カスタム</value></data>
+  <data name="Settings_CustomAccentColorPlaceholder" xml:space="preserve"><value>#RRGGBB</value></data>
+  <data name="Settings_CustomAccentColorFormat" xml:space="preserve"><value>カスタムHEXカラーコード</value></data>
+  <data name="Settings_CustomAccentColorLabel" xml:space="preserve"><value>カスタムカラー</value></data>
   <data name="Settings_AccentColorAmberTitle" xml:space="preserve">
     <value>アンバー Amber</value>
   </data>

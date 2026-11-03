@@ -44,6 +44,9 @@ public static class LauncherAccentColors
 
     public static string Normalize(string? accentColor)
     {
+        if (TryNormalizeCustom(accentColor, out var customColor))
+            return customColor;
+
         foreach (var knownAccentColor in All)
         {
             if (string.Equals(knownAccentColor, accentColor, StringComparison.OrdinalIgnoreCase))
@@ -51,5 +54,22 @@ public static class LauncherAccentColors
         }
 
         return Blue;
+    }
+
+    public static bool TryNormalizeCustom(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        if (value is null || value.Length != 7 || value[0] != '#')
+            return false;
+
+        for (var i = 1; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')))
+                return false;
+        }
+
+        normalized = value.ToUpperInvariant();
+        return true;
     }
 }

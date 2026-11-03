@@ -29,6 +29,7 @@ namespace Launcher.App.ViewModels.Settings;
 
 public sealed partial class ThemeSettingsViewModel : SettingsSectionViewModelBase
 {
+    private const string CustomAccentColorId = "Custom";
     private readonly IThemeService themeService;
     private readonly LauncherBackgroundViewModel? launcherBackground;
 
@@ -54,7 +55,8 @@ public sealed partial class ThemeSettingsViewModel : SettingsSectionViewModelBas
             new(LauncherAccentColors.Purple, Strings.Settings_AccentColorPurpleTitle),
             new(LauncherAccentColors.Pink, Strings.Settings_AccentColorPinkTitle),
             new(LauncherAccentColors.Orange, Strings.Settings_AccentColorOrangeTitle),
-            new(LauncherAccentColors.Amber, Strings.Settings_AccentColorAmberTitle)
+            new(LauncherAccentColors.Amber, Strings.Settings_AccentColorAmberTitle),
+            new(CustomAccentColorId, Strings.Settings_AccentColorCustomTitle)
         ];
         BackgroundEffectOptions =
         [
@@ -73,12 +75,14 @@ public sealed partial class ThemeSettingsViewModel : SettingsSectionViewModelBas
 
     [ObservableProperty] private SettingsThemeOption? selectedThemeOption;
     [ObservableProperty] private SettingsAccentColorOption? selectedAccentColorOption;
+    [ObservableProperty] private string customAccentColorText = string.Empty;
     [ObservableProperty] private SettingsBackgroundEffectOption? selectedBackgroundEffectOption;
     [ObservableProperty] private bool followSystemTheme = true;
     [ObservableProperty] private int launcherBackgroundOpacityPercent = LauncherDefaults.DefaultLauncherBackgroundOpacityPercent;
     [ObservableProperty] private bool enableImageBackgroundControlBlur = LauncherDefaults.DefaultEnableImageBackgroundControlBlur;
 
     public bool IsThemeSelectionVisible => !FollowSystemTheme;
+    public bool IsCustomAccentColorVisible => SelectedAccentColorOption?.Id == CustomAccentColorId;
     public bool IsBackgroundImageSelectionVisible => SelectedBackgroundEffectOption?.IsImageSelected ?? false;
     public bool IsBackgroundOpacityVisible => SelectedBackgroundEffectOption?.IsAcrylicEnabled ?? true;
     public string LauncherBackgroundOpacityText => $"{LauncherBackgroundOpacityPercent}%";
@@ -90,14 +94,19 @@ public sealed partial class ThemeSettingsViewModel : SettingsSectionViewModelBas
             FollowSystemTheme = settings.ThemeFollowSystem;
             SelectedThemeOption = ThemeOptions.FirstOrDefault(option =>
                 string.Equals(option.Id, settings.Theme, StringComparison.OrdinalIgnoreCase)) ?? ThemeOptions[0];
-            SelectedAccentColorOption = AccentColorOptions.FirstOrDefault(option =>
-                string.Equals(option.Id, settings.AccentColor, StringComparison.OrdinalIgnoreCase)) ?? AccentColorOptions[0];
+            var isCustomAccent = LauncherAccentColors.TryNormalizeCustom(settings.AccentColor, out var customAccent);
+            CustomAccentColorText = isCustomAccent ? customAccent : string.Empty;
+            SelectedAccentColorOption = isCustomAccent
+                ? AccentColorOptions.Last()
+                : AccentColorOptions.FirstOrDefault(option =>
+                    string.Equals(option.Id, settings.AccentColor, StringComparison.OrdinalIgnoreCase)) ?? AccentColorOptions[0];
             var backgroundEffect = LauncherBackgroundEffects.Normalize(settings.LauncherBackgroundEffect);
             SelectedBackgroundEffectOption = BackgroundEffectOptions.First(option =>
                 string.Equals(option.Id, backgroundEffect, StringComparison.Ordinal));
             LauncherBackgroundOpacityPercent = Math.Clamp(settings.LauncherBackgroundOpacityPercent, 0, 100);
             EnableImageBackgroundControlBlur = settings.EnableImageBackgroundControlBlur;
         });
+        ApplyCustomAccentColorCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnFollowSystemThemeChanged(bool value)
@@ -127,11 +136,41 @@ public sealed partial class ThemeSettingsViewModel : SettingsSectionViewModelBas
             return;
         }
 
+        OnPropertyChanged(nameof(IsCustomAccentColorVisible));
+        ApplyCustomAccentColorCommand.NotifyCanExecuteChanged();
         if (!CanPersist)
             return;
+        if (IsCustomAccentColorVisible)
+        {
+            ApplyCustomAccentColor();
+            return;
+        }
         var accent = newValue.Id;
         themeService.ApplyAccent(accent);
         Persist(settings => settings.AccentColor = accent);
+        ApplyCustomAccentColorCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnCustomAccentColorTextChanged(string value)
+    {
+        ApplyCustomAccentColorCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanApplyCustomAccentColor() =>
+        CanPersist && IsCustomAccentColorVisible
+        && LauncherAccentColors.TryNormalizeCustom(CustomAccentColorText, out var accent)
+        && !string.Equals(Settings.AccentColor, accent, StringComparison.OrdinalIgnoreCase);
+
+    [RelayCommand(CanExecute = nameof(CanApplyCustomAccentColor))]
+    private void ApplyCustomAccentColor()
+    {
+        if (!CanApplyCustomAccentColor()
+            || !LauncherAccentColors.TryNormalizeCustom(CustomAccentColorText, out var accent))
+            return;
+
+        themeService.ApplyAccent(accent);
+        Persist(settings => settings.AccentColor = accent);
+        ApplyCustomAccentColorCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnLauncherBackgroundOpacityPercentChanged(int value)

@@ -3173,6 +3173,10 @@ The current game folder will be backed up first.</value>
   <data name="Settings_AccentColorOrangeTitle" xml:space="preserve">
     <value>Orange</value>
   </data>
+  <data name="Settings_AccentColorCustomTitle" xml:space="preserve"><value>Custom</value></data>
+  <data name="Settings_CustomAccentColorPlaceholder" xml:space="preserve"><value>#RRGGBB</value></data>
+  <data name="Settings_CustomAccentColorFormat" xml:space="preserve"><value>Custom HEX color code</value></data>
+  <data name="Settings_CustomAccentColorLabel" xml:space="preserve"><value>Custom color</value></data>
   <data name="Settings_AccentColorAmberTitle" xml:space="preserve">
     <value>Amber</value>
   </data>

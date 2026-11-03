@@ -56,16 +56,29 @@ internal sealed class ThemeResourceLayerManager
         ArgumentNullException.ThrowIfNull(applicationResources);
 
         var dictionaries = applicationResources.MergedDictionaries;
+        var nextThemeSource = GetThemeSource(theme);
+        var nextAccentLayer = GetAccentLayer(accentColor);
+        var accentIndex = accentLayer is null ? -1 : dictionaries.IndexOf(accentLayer);
+        if (themeLayer is not null
+            && string.Equals(themeLayerSource, nextThemeSource, StringComparison.Ordinal)
+            && dictionaries.Contains(themeLayer)
+            && accentIndex >= 0
+            && (imageLayer is not null && dictionaries.Contains(imageLayer)) == imageBackgroundEnabled
+            && (imageBlurLayer is not null && dictionaries.Contains(imageBlurLayer)) == (imageBackgroundEnabled && imageControlBlurEnabled))
+        {
+            if (!ReferenceEquals(accentLayer, nextAccentLayer))
+                dictionaries[accentIndex] = nextAccentLayer;
+            accentLayer = nextAccentLayer;
+            return;
+        }
+
         RemoveLayer(dictionaries, themeLayer);
         RemoveLayer(dictionaries, accentLayer);
         RemoveLayer(dictionaries, imageLayer);
         RemoveLayer(dictionaries, imageBlurLayer);
 
-        var nextThemeSource = GetThemeSource(theme);
         themeLayer = GetOrCreateLayer(themeLayer, ref themeLayerSource, nextThemeSource);
-
-        var nextAccentSource = GetAccentThemeSource(accentColor);
-        accentLayer = GetOrCreateLayer(accentLayer, ref accentLayerSource, nextAccentSource);
+        accentLayer = nextAccentLayer;
         dictionaries.Add(themeLayer);
         dictionaries.Add(accentLayer);
         if (imageBackgroundEnabled)
@@ -93,6 +106,18 @@ internal sealed class ThemeResourceLayerManager
 
     internal static string GetAccentThemeSource(string accentColor) =>
         $"{AccentThemeSourcePrefix}{LauncherAccentColors.Normalize(accentColor)}.xaml";
+
+    private ResourceDictionary GetAccentLayer(string accentColor)
+    {
+        if (!LauncherAccentColors.TryNormalizeCustom(accentColor, out var customColor))
+            return GetOrCreateLayer(accentLayer, ref accentLayerSource, GetAccentThemeSource(accentColor));
+
+        if (accentLayer is not null && string.Equals(accentLayerSource, customColor, StringComparison.Ordinal))
+            return accentLayer;
+
+        accentLayerSource = customColor;
+        return CustomAccentResourceFactory.Create(customColor);
+    }
 
     private ResourceDictionary GetOrCreateLayer(
         ResourceDictionary? currentLayer,

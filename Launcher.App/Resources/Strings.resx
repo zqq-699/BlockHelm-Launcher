@@ -1074,14 +1074,18 @@
   <data name="Settings_AutoSetGameLanguageToLauncherLanguageLabel" xml:space="preserve"><value>自动设置游戏语言为启动器语言</value></data>
   <data name="Settings_AccentSection" xml:space="preserve"><value>强调色</value></data>
   <data name="Settings_AccentSelectionLabel" xml:space="preserve"><value>启动器强调色</value></data>
-  <data name="Settings_AccentColorBlueTitle" xml:space="preserve"><value>蓝色 Blue</value></data>
-  <data name="Settings_AccentColorCyanTitle" xml:space="preserve"><value>青色 Cyan</value></data>
-  <data name="Settings_AccentColorGreenTitle" xml:space="preserve"><value>绿色 Green</value></data>
-  <data name="Settings_AccentColorEmeraldTitle" xml:space="preserve"><value>翠绿 Emerald</value></data>
-  <data name="Settings_AccentColorPurpleTitle" xml:space="preserve"><value>紫色 Purple</value></data>
-  <data name="Settings_AccentColorPinkTitle" xml:space="preserve"><value>粉色 Pink</value></data>
-  <data name="Settings_AccentColorOrangeTitle" xml:space="preserve"><value>橙色 Orange</value></data>
-  <data name="Settings_AccentColorAmberTitle" xml:space="preserve"><value>黄色 Amber</value></data>
+  <data name="Settings_AccentColorBlueTitle" xml:space="preserve"><value>蓝色</value></data>
+  <data name="Settings_AccentColorCyanTitle" xml:space="preserve"><value>青色</value></data>
+  <data name="Settings_AccentColorGreenTitle" xml:space="preserve"><value>绿色</value></data>
+  <data name="Settings_AccentColorEmeraldTitle" xml:space="preserve"><value>翠绿</value></data>
+  <data name="Settings_AccentColorPurpleTitle" xml:space="preserve"><value>紫色</value></data>
+  <data name="Settings_AccentColorPinkTitle" xml:space="preserve"><value>粉色</value></data>
+  <data name="Settings_AccentColorOrangeTitle" xml:space="preserve"><value>橙色</value></data>
+  <data name="Settings_AccentColorCustomTitle" xml:space="preserve"><value>自定义</value></data>
+  <data name="Settings_CustomAccentColorPlaceholder" xml:space="preserve"><value>#RRGGBB</value></data>
+  <data name="Settings_CustomAccentColorFormat" xml:space="preserve"><value>自定义HEX颜色代码</value></data>
+  <data name="Settings_CustomAccentColorLabel" xml:space="preserve"><value>自定义颜色</value></data>
+  <data name="Settings_AccentColorAmberTitle" xml:space="preserve"><value>黄色</value></data>
   <data name="GameSettings_ModManagementEmptyMessage" xml:space="preserve"><value>当前没有可用模组</value></data>
   <data name="GameSettings_ModManagementLoading" xml:space="preserve"><value>正在加载模组...</value></data>
   <data name="GameSettings_ModManagementSearchEmptyMessage" xml:space="preserve"><value>没有匹配的模组</value></data>
