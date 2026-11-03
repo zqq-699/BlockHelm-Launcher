@@ -18,8 +18,10 @@
  */
 
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Launcher.App.Diagnostics;
 using Launcher.App.Logging;
 using Launcher.App.Resources;
 using Launcher.App.Services;
@@ -171,6 +173,7 @@ public sealed partial class SettingsPageViewModel : ObservableObject, IDisposabl
     public bool IsJavaSection => SelectedSection?.Section is SettingsPageSection.Java;
     public bool IsThemeSection => SelectedSection?.Section is SettingsPageSection.Theme;
     public bool IsInfoSection => SelectedSection?.Section is SettingsPageSection.Info;
+    public bool UsesVirtualizedScrollHost => SelectedSection?.Section is SettingsPageSection.Java or SettingsPageSection.Info;
 
     public void PrimeFromSettings(LauncherSettings settings)
     {
@@ -216,7 +219,18 @@ public sealed partial class SettingsPageViewModel : ObservableObject, IDisposabl
             return;
         }
 
+        if (!UiPerformanceLog.IsEnabled || ReferenceEquals(SelectedSection, section))
+        {
+            SelectedSection = section;
+            return;
+        }
+
+        var previous = SelectedSection?.Section;
+        var startedAt = Stopwatch.GetTimestamp();
         SelectedSection = section;
+        Serilog.Log.Debug(
+            "Settings section selection measured. From={FromSection} To={ToSection} SelectionMs={SelectionMs:F1}",
+            previous, section.Section, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
     }
 
     partial void OnSelectedSectionChanged(SettingsSectionItem? value)
@@ -232,6 +246,7 @@ public sealed partial class SettingsPageViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(IsJavaSection));
         OnPropertyChanged(nameof(IsThemeSection));
         OnPropertyChanged(nameof(IsInfoSection));
+        OnPropertyChanged(nameof(UsesVirtualizedScrollHost));
         CurrentSectionViewModel = value?.Section switch
         {
             SettingsPageSection.General => General,

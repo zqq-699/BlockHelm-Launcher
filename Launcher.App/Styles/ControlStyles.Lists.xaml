@@ -262,6 +262,28 @@
         </Setter>
     </Style>
 
+    <Style x:Key="SettingsVirtualizedPageListStyle"
+           TargetType="ListBox"
+           BasedOn="{StaticResource DownloadVersionListBoxStyle}">
+        <Setter Property="Focusable" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBox">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ScrollViewer x:Name="PART_ScrollViewer"
+                                      Focusable="False"
+                                      Style="{StaticResource NativeVirtualizedListPageScrollViewerStyle}"
+                                      behaviors:SmoothScrollBehavior.ScrollAmount="92">
+                            <ItemsPresenter />
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="DownloadVersionListBoxItemStyle" TargetType="ListBoxItem">
         <Setter Property="Padding" Value="0" />
         <Setter Property="Margin" Value="0" />

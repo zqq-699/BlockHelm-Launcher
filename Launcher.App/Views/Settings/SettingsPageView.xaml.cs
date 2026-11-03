@@ -18,10 +18,12 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Launcher.App.Diagnostics;
 using Launcher.App.Services;
 using Launcher.App.ViewModels.Settings;
 
@@ -47,6 +49,9 @@ public partial class SettingsPageView : UserControl
     private readonly PageTransitionService sectionTransitionService;
     private INotifyPropertyChanged? currentViewModelNotifier;
     private FrameworkElement? sectionContentRoot;
+    private string previousSectionId = SectionOrder[0];
+    private int sectionChangeGeneration;
+    private bool transitionPendingAfterReparent;
 
     public SettingsPageView()
     {
@@ -75,6 +80,10 @@ public partial class SettingsPageView : UserControl
     private void SettingsPageView_Unloaded(object sender, RoutedEventArgs e)
     {
         memoryRefreshTimer.Stop();
+        sectionChangeGeneration++;
+        transitionPendingAfterReparent = false;
+        sectionTransitionService.SyncTo(GetCurrentSectionId());
+        ResetSectionPresentation();
     }
 
     private void MemoryRefreshTimer_Tick(object? sender, EventArgs e)
@@ -90,6 +99,8 @@ public partial class SettingsPageView : UserControl
 
     private void SettingsPageView_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
+        sectionChangeGeneration++;
+        transitionPendingAfterReparent = false;
         if (currentViewModelNotifier is not null)
             currentViewModelNotifier.PropertyChanged -= SettingsPageViewModel_PropertyChanged;
 
@@ -97,7 +108,8 @@ public partial class SettingsPageView : UserControl
         if (currentViewModelNotifier is not null)
             currentViewModelNotifier.PropertyChanged += SettingsPageViewModel_PropertyChanged;
 
-        sectionTransitionService.SyncTo(GetCurrentSectionId());
+        previousSectionId = GetCurrentSectionId();
+        sectionTransitionService.SyncTo(previousSectionId);
         ResetSectionPresentation();
     }
 
@@ -106,15 +118,69 @@ public partial class SettingsPageView : UserControl
         if (e.PropertyName is nameof(SettingsPageViewModel.SelectedSection)
             && sender is SettingsPageViewModel viewModel)
         {
+            var nextSectionId = viewModel.SelectedSection?.Section.ToString() ?? SectionOrder[0];
+            var previous = previousSectionId;
+            previousSectionId = nextSectionId;
+            var generation = ++sectionChangeGeneration;
+            if (UsesDirectScrollHost(previous) != UsesDirectScrollHost(nextSectionId))
+            {
+                // Switching scroll hosts reparents the content. Start the transition only after
+                // Loaded, otherwise Unloaded cancels it before the first frame.
+                transitionPendingAfterReparent = true;
+                var startedAt = UiPerformanceLog.IsEnabled ? Stopwatch.GetTimestamp() : 0L;
+                sectionTransitionService.SyncTo(previous);
+                if (sectionContentRoot is not null)
+                    sectionContentRoot.Opacity = PageTransitionService.WarmupOpacity;
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+                {
+                    if (generation != sectionChangeGeneration || !transitionPendingAfterReparent)
+                        return;
+                    transitionPendingAfterReparent = false;
+                    if (sectionContentRoot is null || !sectionContentRoot.IsLoaded)
+                    {
+                        sectionTransitionService.SyncTo(nextSectionId);
+                        return;
+                    }
+                    SettingsListFrame.ScrollViewer.ScrollToVerticalOffset(0);
+                    SettingsListFrame.ScrollViewer.UpdateLayout();
+                    sectionContentRoot.UpdateLayout();
+                    if (startedAt != 0L)
+                        Serilog.Log.Debug("Settings section host switch measured. Section={Section} ElapsedMs={ElapsedMs:F1}",
+                            nextSectionId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+                    sectionTransitionService.MoveTo(nextSectionId);
+                }));
+                return;
+            }
+
+            transitionPendingAfterReparent = false;
             if (sectionContentRoot is null)
                 return;
 
+            var measure = UiPerformanceLog.IsEnabled;
+            var start = measure ? Stopwatch.GetTimestamp() : 0L;
             SettingsListFrame.ScrollViewer.ScrollToVerticalOffset(0);
+            var afterScroll = measure ? Stopwatch.GetTimestamp() : 0L;
             SettingsListFrame.ScrollViewer.UpdateLayout();
+            var afterScrollLayout = measure ? Stopwatch.GetTimestamp() : 0L;
             sectionContentRoot.UpdateLayout();
+            var afterContentLayout = measure ? Stopwatch.GetTimestamp() : 0L;
             sectionTransitionService.MoveTo(viewModel.SelectedSection?.Section.ToString() ?? SectionOrder[0]);
+            if (measure)
+            {
+                var afterTransition = Stopwatch.GetTimestamp();
+                Serilog.Log.Debug(
+                    "Settings section presentation measured. Section={Section} ScrollMs={ScrollMs:F1} ScrollLayoutMs={ScrollLayoutMs:F1} ContentLayoutMs={ContentLayoutMs:F1} TransitionSetupMs={TransitionSetupMs:F1}",
+                    viewModel.SelectedSection?.Section,
+                    Stopwatch.GetElapsedTime(start, afterScroll).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(afterScroll, afterScrollLayout).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(afterScrollLayout, afterContentLayout).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(afterContentLayout, afterTransition).TotalMilliseconds);
+            }
         }
     }
+
+    private static bool UsesDirectScrollHost(string sectionId) =>
+        sectionId is nameof(SettingsPageSection.Java) or nameof(SettingsPageSection.Info);
 
     private void ResetSectionPresentation()
     {
@@ -148,6 +214,12 @@ public partial class SettingsPageView : UserControl
     private void SectionContentRoot_OnLoaded(object sender, RoutedEventArgs e)
     {
         sectionContentRoot = sender as FrameworkElement;
+        if (transitionPendingAfterReparent)
+        {
+            if (sectionContentRoot is not null)
+                sectionContentRoot.Opacity = PageTransitionService.WarmupOpacity;
+            return;
+        }
         sectionTransitionService.SyncTo(GetCurrentSectionId());
         ResetSectionPresentation();
     }

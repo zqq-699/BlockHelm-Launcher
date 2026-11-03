@@ -17,6 +17,20 @@ namespace Launcher.Tests.ViewModels.GameSettings;
 
 public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
 {
+    [Fact]
+    public void JavaSectionUsesFullViewportAndRestoresScrollableHostWhenLeaving()
+    {
+        using var details = CreateDetails(new RecordingDirectoryMonitor());
+
+        details.SetSelectedSection(CreateSection("java"));
+        Assert.Same(details.Java, details.NonRetainedFullViewportSectionViewModel);
+        Assert.Null(details.ScrollSectionViewModel);
+
+        details.SetSelectedSection(CreateSection("general"));
+        Assert.Same(details.General, details.ScrollSectionViewModel);
+        Assert.Null(details.NonRetainedFullViewportSectionViewModel);
+    }
+
     [Theory]
     [InlineData("mod_management", InstanceDirectoryKind.Mods)]
     public async Task ResourceSectionUsesExpectedWatcherLifecycle(string sectionId, InstanceDirectoryKind expectedKind)
