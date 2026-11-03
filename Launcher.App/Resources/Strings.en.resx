@@ -2018,7 +2018,7 @@ Longer content wraps automatically.</value>
     <value>The modpack format is unsupported or the file is corrupted</value>
   </data>
   <data name="Status_ModpackArchiveTooLarge" xml:space="preserve">
-    <value>The extracted modpack contents exceed the launcher's 8 GB safety limit</value>
+    <value>The extracted modpack override files exceed the 20 GiB safety limit</value>
   </data>
   <data name="Status_ModpackInsufficientDiskSpace" xml:space="preserve">
     <value>There is not enough free disk space to import this modpack safely</value>

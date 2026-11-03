@@ -28,8 +28,7 @@ internal static class ModpackArchiveUtility
 {
     public const long MaxManifestBytes = 8L * 1024 * 1024;
     public const long MaxEmbeddedModpackBytes = 256L * 1024 * 1024;
-    public const long MaxOverrideEntryBytes = 256L * 1024 * 1024;
-    public const long MaxOverrideTotalBytes = 8L * 1024 * 1024 * 1024;
+    public const long MaxOverrideTotalBytes = 20L * 1024 * 1024 * 1024;
     public const long OverrideFreeSpaceReserveBytes = 1024L * 1024 * 1024;
 
     public static string NormalizeArchivePath(string? path)
@@ -73,15 +72,6 @@ internal static class ModpackArchiveUtility
         ZipExtractionBudget extractionBudget,
         CancellationToken cancellationToken)
     {
-        if (entry.Length > MaxOverrideEntryBytes)
-        {
-            throw new ModpackImportException(
-                ModpackImportFailureReason.ArchiveTooLarge,
-                $"Archive entry exceeds the allowed size. Entry={entry.FullName} " +
-                $"DeclaredBytes={entry.Length} LimitBytes={MaxOverrideEntryBytes}");
-        }
-
-        extractionBudget.Reserve(entry.Length);
         var targetPath = GetValidatedTargetPath(targetDirectory, relativePath);
         var parentDirectory = Path.GetDirectoryName(targetPath);
         if (!string.IsNullOrWhiteSpace(parentDirectory))
@@ -93,8 +83,9 @@ internal static class ModpackArchiveUtility
         await CopyToAsync(
             source,
             destination,
-            MaxOverrideEntryBytes,
-            cancellationToken).ConfigureAwait(false);
+            MaxOverrideTotalBytes,
+            cancellationToken,
+            extractionBudget).ConfigureAwait(false);
     }
 
     public static void EnsureSufficientOverrideDiskSpace(string targetDirectory, long requiredBytes)
@@ -144,7 +135,8 @@ internal static class ModpackArchiveUtility
         Stream source,
         Stream destination,
         long maxBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ZipExtractionBudget? extractionBudget = null)
     {
         var buffer = new byte[81920];
         long copiedBytes = 0;
@@ -155,6 +147,7 @@ internal static class ModpackArchiveUtility
                 return;
 
             copiedBytes += read;
+            extractionBudget?.Reserve(read);
             if (copiedBytes > maxBytes)
             {
                 throw new ModpackImportException(
@@ -197,13 +190,18 @@ internal sealed class ZipExtractionBudget(long maxTotalBytes)
                 "Archive entry has an invalid size.");
         }
 
-        var totalBytes = Interlocked.Add(ref extractedBytes, bytes);
-        if (totalBytes > maxTotalBytes)
+        while (true)
         {
-            throw new ModpackImportException(
-                ModpackImportFailureReason.ArchiveTooLarge,
-                "Archive contents exceed the allowed total size. " +
-                $"DeclaredBytes={totalBytes} LimitBytes={maxTotalBytes}");
+            var current = Interlocked.Read(ref extractedBytes);
+            if (bytes > maxTotalBytes - current)
+            {
+                throw new ModpackImportException(
+                    ModpackImportFailureReason.ArchiveTooLarge,
+                    "Archive contents exceed the allowed total size. " +
+                    $"PreviousBytes={current} AdditionalBytes={bytes} LimitBytes={maxTotalBytes}");
+            }
+            if (Interlocked.CompareExchange(ref extractedBytes, current + bytes, current) == current)
+                return;
         }
     }
 }

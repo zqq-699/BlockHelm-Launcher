@@ -5,6 +5,7 @@
  */
 
 using System.IO.Compression;
+using System.Buffers.Binary;
 using System.Net;
 using System.Text;
 using System.Collections.Concurrent;
@@ -73,8 +74,9 @@ public sealed class LocalModpackPackageServiceTests : TestTempDirectory
     }
 
     [Fact]
-    public void OverrideExtractionBudgetRejectsMoreThanEightGiBWithSpecificReason()
+    public void OverrideExtractionBudgetRejectsMoreThanTwentyGiBWithSpecificReason()
     {
+        Assert.Equal(20L * 1024 * 1024 * 1024, ModpackArchiveUtility.MaxOverrideTotalBytes);
         var budget = new ZipExtractionBudget(ModpackArchiveUtility.MaxOverrideTotalBytes);
         budget.Reserve(ModpackArchiveUtility.MaxOverrideTotalBytes);
 
@@ -85,6 +87,104 @@ public sealed class LocalModpackPackageServiceTests : TestTempDirectory
             $"LimitBytes={ModpackArchiveUtility.MaxOverrideTotalBytes}",
             exception.Message,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OverrideExtractionBudgetRejectsOverflowingDeclaredSize()
+    {
+        var budget = new ZipExtractionBudget(ModpackArchiveUtility.MaxOverrideTotalBytes);
+        budget.Reserve(1);
+        var exception = Assert.Throws<ModpackImportException>(() => budget.Reserve(long.MaxValue));
+        Assert.Equal(ModpackImportFailureReason.ArchiveTooLarge, exception.FailureReason);
+        Assert.Equal(1, budget.ReservedBytes);
+    }
+
+    [Fact]
+    public async Task PrepareAcceptsOverrideEntryLargerThanPreviousPerFileLimit()
+    {
+        var path = Path.Combine(TempRoot, "large-entry.mrpack");
+        CreateArchive(path, archive =>
+        {
+            AddEntry(archive, "modrinth.index.json", """{"name":"Large","dependencies":{"minecraft":"1.20.1"},"files":[]}""");
+            AddEntry(archive, "overrides/large.dat", "small test payload");
+        });
+
+        // Set the declared uncompressed length in the central directory without allocating a large file.
+        var data = await File.ReadAllBytesAsync(path);
+        var eocd = data.Length - 22;
+        Assert.Equal(0x06054b50u, BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(eocd, 4)));
+        var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(eocd + 16, 4));
+        var patched = false;
+        while (BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset, 4)) == 0x02014b50u)
+        {
+            var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(offset + 28, 2));
+            var extraLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(offset + 30, 2));
+            var commentLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(offset + 32, 2));
+            if (Encoding.UTF8.GetString(data, offset + 46, nameLength) == "overrides/large.dat")
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset + 24, 4), 256u * 1024 * 1024 + 1);
+                patched = true;
+                break;
+            }
+            offset += 46 + nameLength + extraLength + commentLength;
+        }
+        Assert.True(patched);
+        await File.WriteAllBytesAsync(path, data);
+
+        using (var archive = ZipFile.OpenRead(path))
+            Assert.Equal(256L * 1024 * 1024 + 1, archive.GetEntry("overrides/large.dat")!.Length);
+
+        var prepared = await CreateService().PrepareAsync(path);
+        Assert.True(prepared.HasOverrides);
+    }
+
+    [Fact]
+    public async Task ActualExtractedBytesCannotExceedTotalBudget()
+    {
+        var path = Path.Combine(TempRoot, "budget.zip");
+        CreateArchive(path, archive => AddEntry(archive, "overrides/data.txt", "123456"));
+        using var archive = ZipFile.OpenRead(path);
+        var budget = new ZipExtractionBudget(5);
+        var exception = await Assert.ThrowsAsync<ModpackImportException>(() =>
+            ModpackArchiveUtility.ExtractZipEntryAsync(archive.GetEntry("overrides/data.txt")!,
+                Path.Combine(TempRoot, "target"), "data.txt", budget, CancellationToken.None));
+        Assert.Equal(ModpackImportFailureReason.ArchiveTooLarge, exception.FailureReason);
+        Assert.True(new FileInfo(Path.Combine(TempRoot, "target", "data.txt")).Length <= 5);
+    }
+
+    [Fact]
+    public async Task PrepareRejectsDeclaredOverridesAboveTwentyGiBBeforeExtraction()
+    {
+        var path = Path.Combine(TempRoot, "oversized.mrpack");
+        CreateArchive(path, archive =>
+        {
+            AddEntry(archive, "modrinth.index.json", """{"name":"Large","dependencies":{"minecraft":"1.20.1"},"files":[]}""");
+            for (var index = 0; index < 80; index++)
+                AddEntry(archive, $"overrides/{index}.dat", "x");
+        });
+
+        var data = await File.ReadAllBytesAsync(path);
+        var eocd = data.Length - 22;
+        Assert.Equal(0x06054b50u, BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(eocd, 4)));
+        var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(eocd + 16, 4));
+        var patched = 0;
+        while (BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset, 4)) == 0x02014b50u)
+        {
+            var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(offset + 28, 2));
+            var extraLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(offset + 30, 2));
+            var commentLength = BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(offset + 32, 2));
+            if (Encoding.UTF8.GetString(data, offset + 46, nameLength).StartsWith("overrides/", StringComparison.Ordinal))
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset + 24, 4), 256u * 1024 * 1024 + 1);
+                patched++;
+            }
+            offset += 46 + nameLength + extraLength + commentLength;
+        }
+        Assert.Equal(80, patched);
+        await File.WriteAllBytesAsync(path, data);
+
+        var exception = await Assert.ThrowsAsync<ModpackImportException>(() => CreateService().PrepareAsync(path));
+        Assert.Equal(ModpackImportFailureReason.ArchiveTooLarge, exception.FailureReason);
     }
 
     [Fact]

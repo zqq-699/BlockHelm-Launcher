@@ -98,14 +98,6 @@ internal static class ModpackOverrideExtractor
                 if (string.IsNullOrWhiteSpace(relativePath))
                     continue;
 
-                if (entry.Length > ModpackArchiveUtility.MaxOverrideEntryBytes)
-                {
-                    throw new ModpackImportException(
-                        ModpackImportFailureReason.ArchiveTooLarge,
-                        $"Archive entry exceeds the allowed size. Entry={entry.FullName} " +
-                        $"DeclaredBytes={entry.Length} LimitBytes={ModpackArchiveUtility.MaxOverrideEntryBytes}");
-                }
-
                 extractionBudget.Reserve(entry.Length);
                 var target = ModpackArchiveUtility.GetValidatedTargetPath(Path.GetTempPath(), relativePath);
                 if (!targets.Add($"{prefix}:{Path.GetFullPath(target)}"))

@@ -2018,7 +2018,7 @@
     <value>整合包格式不支援或檔案損壞</value>
   </data>
   <data name="Status_ModpackArchiveTooLarge" xml:space="preserve">
-    <value>整合包解壓後的內容超過啟動器允許的 8 GB 安全上限</value>
+    <value>整合包覆蓋檔案解壓後的總大小超過 20 GiB 安全上限</value>
   </data>
   <data name="Status_ModpackInsufficientDiskSpace" xml:space="preserve">
     <value>磁碟剩餘空間不足，無法安全匯入此整合包</value>

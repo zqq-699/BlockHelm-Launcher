@@ -693,7 +693,7 @@
   <data name="Status_ModpackCleaningUp" xml:space="preserve"><value>正在清理导入现场</value></data>
   <data name="Status_ModpackImportedFormat" xml:space="preserve"><value>{0} 已导入完成</value></data>
   <data name="Status_ModpackInvalidArchive" xml:space="preserve"><value>整合包格式不支持或文件损坏</value></data>
-  <data name="Status_ModpackArchiveTooLarge" xml:space="preserve"><value>整合包解压后的内容超过启动器允许的 8 GB 安全上限</value></data>
+  <data name="Status_ModpackArchiveTooLarge" xml:space="preserve"><value>整合包覆盖文件解压后的总大小超过 20 GiB 安全上限</value></data>
   <data name="Status_ModpackInsufficientDiskSpace" xml:space="preserve"><value>磁盘剩余空间不足，无法安全导入此整合包</value></data>
   <data name="Status_ModpackUnsupportedLoader" xml:space="preserve"><value>当前仅支持 Vanilla、Fabric、Forge、NeoForge、Quilt 整合包</value></data>
   <data name="Status_ModpackMissingCurseForgeApiKey" xml:space="preserve"><value>未配置 CurseForge API Key</value></data>

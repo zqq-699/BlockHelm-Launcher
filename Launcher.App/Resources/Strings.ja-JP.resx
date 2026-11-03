@@ -2018,7 +2018,7 @@
     <value>Modパック形式が対応していないか、ファイルが破損しています</value>
   </data>
   <data name="Status_ModpackArchiveTooLarge" xml:space="preserve">
-    <value>展開後の Mod パックがランチャーの 8 GB の安全上限を超えています</value>
+    <value>展開後の Mod パックの上書きファイルの合計サイズが安全上限の 20 GiB を超えています</value>
   </data>
   <data name="Status_ModpackInsufficientDiskSpace" xml:space="preserve">
     <value>この Mod パックを安全にインポートするための空き容量が不足しています</value>
