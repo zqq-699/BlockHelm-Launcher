@@ -24,6 +24,8 @@ public sealed class SensitiveLogTextTests : TestTempDirectory
     [InlineData("password=\"first line\nsynthetic-secret-suffix\" status=ok", "password=<redacted> status=ok")]
     [InlineData("""password="unterminated\"synthetic-secret-suffix""", "password=<redacted>")]
     [InlineData("--password 'unterminated\\", "--password <redacted>")]
+    [InlineData("""password="Bearer prefix\"synthetic-secret-suffix" status=ok""", "password=<redacted> status=ok")]
+    [InlineData("""--token "password=prefix\"synthetic-secret-suffix" --mode safe""", "--token <redacted> --mode safe")]
     public void QuotedCredentialsAreFullyRedacted(string input, string expected)
     {
         Assert.Equal(expected, SensitiveLogText.Redact(input));
@@ -54,6 +56,14 @@ public sealed class SensitiveLogTextTests : TestTempDirectory
     public void KnownValuesAreRemovedBeforePatternReplacement(string secret)
     {
         Assert.Equal("<redacted>", SensitiveLogText.Redact(secret, [secret]));
+    }
+
+    [Fact]
+    public void KnownValueOverlappingAnEscapeCannotExposeCredentialSuffix()
+    {
+        var input = """password="prefix\"synthetic-secret-suffix" status=ok""";
+        Assert.Equal("password=<redacted> status=ok", SensitiveLogText.Redact(input, ["prefix\\"]));
+        Assert.Equal("<redacted>", SensitiveLogText.Redact("abcd", ["abc", "bcd"]));
     }
 
     [Fact]
@@ -94,7 +104,7 @@ public sealed class SensitiveLogTextTests : TestTempDirectory
             new MessageTemplateParser().Parse("Request failed at {Url} Payload={Payload}"),
             [
                 new LogEventProperty("Url", new ScalarValue("https://example.test/signed/synthetic-path-secret?token=synthetic-query-secret")),
-                new LogEventProperty("Payload", new ScalarValue("""{"password":"prefix\"synthetic-secret-suffix", "id_token":"synthetic-id-secret", "Authorization":"Basic synthetic-basic-secret"}"""))
+                new LogEventProperty("Payload", new ScalarValue("""{"password":"Bearer prefix\"synthetic-secret-suffix", "id_token":"synthetic-id-secret", "Authorization":"Basic synthetic-basic-secret"}"""))
             ]);
         using var writer = new StringWriter();
 
