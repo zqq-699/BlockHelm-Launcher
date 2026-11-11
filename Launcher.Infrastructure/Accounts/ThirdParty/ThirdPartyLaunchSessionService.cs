@@ -153,7 +153,8 @@ internal sealed class ThirdPartyLaunchSessionService : IThirdPartyLaunchSessionS
 
     private async Task<string> GetPrefetchedMetadataAsync(Uri apiRoot, CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync(apiRoot, cancellationToken).ConfigureAwait(false);
+        var metadataUri = new Uri(apiRoot.AbsoluteUri.TrimEnd('/'), UriKind.Absolute);
+        using var response = await httpClient.GetAsync(metadataUri, cancellationToken).ConfigureAwait(false);
         EnsureHttpsResponse(response);
         if (!response.IsSuccessStatusCode)
         {
