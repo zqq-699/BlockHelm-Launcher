@@ -7,127 +7,127 @@
   },
   "lastRun": {
     "attempted": {
-      "edited": 37,
+      "edited": 48,
       "gap": 10,
-      "new": 146,
-      "retry": 0
+      "new": 132,
+      "retry": 5
     },
-    "catalogRowsChanged": 150,
-    "date": "2026-11-08",
+    "catalogRowsChanged": 145,
+    "date": "2026-11-15",
     "existingOnly": false,
-    "newIdBacklog": 406,
+    "newIdBacklog": 434,
     "newQuarantines": 0,
-    "newestSeenId": 32760,
-    "nextNewId": 32355,
+    "newestSeenId": 32920,
+    "nextNewId": 32487,
     "outcomes": {
-      "failed": 5,
-      "missing": 6,
+      "failed": 8,
+      "missing": 5,
       "ok": 182
     },
     "requestLimit": 200,
     "requests": 200,
     "retryNow": false
   },
-  "nextNewId": 32355,
+  "nextNewId": 32487,
   "pendingUpdates": {},
   "quarantine": {},
   "recentEditedIds": [
-    28440,
-    32760,
-    32759,
-    32758,
-    32756,
-    32755,
-    32754,
-    32753,
-    32752,
-    32751,
-    32749,
-    260,
-    32748,
-    32747,
-    32746,
-    32745,
-    32743,
-    32741,
-    32740,
-    32739,
-    32738,
-    32736,
-    32735,
-    32734,
-    32733,
-    32732,
-    32731,
-    32725,
-    32724,
-    32723,
-    32722,
-    32721,
-    46,
-    32720,
-    32719,
-    32718,
-    32717,
-    32716,
-    32715,
-    32714,
-    32711,
-    32712,
-    7635,
-    24070,
-    4067,
-    31083,
-    18243,
-    19129,
-    1269,
-    17599,
-    23693,
-    22604,
-    31985,
-    20237,
-    16523,
-    22699,
-    31204,
-    5214,
-    17601,
-    7788,
-    9946,
-    30098,
-    2422,
-    7207,
-    2769,
-    30008,
-    32686,
-    30261,
-    19915,
-    61,
-    2021,
-    14068,
+    943,
+    1171,
+    31281,
+    32920,
+    32919,
+    32918,
+    32917,
+    32916,
+    32915,
+    32914,
+    32913,
+    32912,
+    32911,
+    32910,
+    32909,
+    32908,
+    32907,
+    32906,
+    32905,
+    32904,
+    32902,
+    32901,
+    32900,
+    32896,
+    32895,
+    32894,
+    32893,
     3725,
-    32709,
-    32708,
-    32705,
-    32704,
-    32703,
-    32702,
-    32701,
-    32700,
-    32698,
-    32697,
-    32696,
-    32695,
-    32694,
-    32693,
-    32692,
-    32679,
-    32691,
-    26854,
-    26855,
-    32524,
-    19270,
-    23540,
-    32685
+    32888,
+    32887,
+    32885,
+    32884,
+    32882,
+    32880,
+    32879,
+    32877,
+    32876,
+    32875,
+    32874,
+    32873,
+    32872,
+    32871,
+    27787,
+    25643,
+    27857,
+    14515,
+    20080,
+    26004,
+    19232,
+    27914,
+    6417,
+    14682,
+    14916,
+    2783,
+    32329,
+    505,
+    27601,
+    18828,
+    20118,
+    18210,
+    26667,
+    31968,
+    12297,
+    14899,
+    22075,
+    725,
+    9830,
+    2820,
+    18071,
+    11457,
+    15064,
+    3471,
+    12123,
+    2126,
+    9555,
+    21813,
+    15710,
+    27851,
+    7691,
+    31217,
+    3232,
+    29547,
+    10445,
+    929,
+    32866,
+    32853,
+    32841,
+    32857,
+    32858,
+    32847,
+    11464,
+    32849,
+    32842,
+    32854,
+    32867,
+    5281
   ],
   "records": {
     "10017": {
@@ -165,6 +165,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "1025": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2027-02-13",
+      "status": "missing"
+    },
     "10298": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -172,12 +179,40 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "10445": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "1053": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "1055": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2027-02-13",
+      "status": "missing"
+    },
     "10860": {
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
       "nextRetry": null,
       "status": "ok"
+    },
+    "1087": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2026-11-22",
+      "status": "failed"
     },
     "10999": {
       "failures": 0,
@@ -207,12 +242,33 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "11457": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "11464": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "11504": {
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
       "nextRetry": null,
       "status": "ok"
+    },
+    "1159": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2027-02-13",
+      "status": "missing"
     },
     "11600": {
       "failures": 0,
@@ -225,6 +281,20 @@
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "1170": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "1171": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -260,6 +330,20 @@
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "12123": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "12297": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -445,10 +529,24 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "14515": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "14606": {
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "14682": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -461,8 +559,15 @@
     },
     "14899": {
       "failures": 0,
-      "lastChecked": "2026-11-01",
-      "lastSuccess": "2026-11-01",
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "14916": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -477,6 +582,13 @@
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "15064": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -519,6 +631,13 @@
       "failures": 0,
       "lastChecked": "2026-10-25",
       "lastSuccess": "2026-10-25",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "15710": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -676,10 +795,24 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "18071": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "182": {
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "18210": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -739,6 +872,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "18828": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "18845": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -778,6 +918,13 @@
       "failures": 0,
       "lastChecked": "2026-11-08",
       "lastSuccess": "2026-11-08",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "19232": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -837,6 +984,20 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "20080": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "20118": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "2021": {
       "failures": 0,
       "lastChecked": "2026-11-08",
@@ -893,6 +1054,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "2126": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "21366": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -925,6 +1093,20 @@
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "21813": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "22075": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -1194,6 +1376,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "25643": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "25749": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -1236,6 +1425,13 @@
       "nextRetry": "2026-11-22",
       "status": "failed"
     },
+    "26004": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "26043": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -1275,6 +1471,13 @@
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "26667": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -1369,6 +1572,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "27601": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "2762": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -1390,10 +1600,45 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "27787": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "27791": {
       "failures": 0,
       "lastChecked": "2026-10-21",
       "lastSuccess": "2026-10-21",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "2783": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "27851": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "27857": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "27914": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -1434,8 +1679,8 @@
     },
     "2820": {
       "failures": 0,
-      "lastChecked": "2026-10-22",
-      "lastSuccess": "2026-10-22",
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -1534,6 +1779,13 @@
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "29547": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -1747,10 +1999,24 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "31217": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "31240": {
       "failures": 0,
       "lastChecked": "2026-11-01",
       "lastSuccess": "2026-11-01",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "31281": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -4983,8 +5249,8 @@
     },
     "31968": {
       "failures": 0,
-      "lastChecked": "2026-10-25",
-      "lastSuccess": "2026-10-25",
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -6697,10 +6963,10 @@
       "status": "ok"
     },
     "32213": {
-      "failures": 1,
-      "lastChecked": "2026-11-08",
+      "failures": 2,
+      "lastChecked": "2026-11-15",
       "lastSuccess": null,
-      "nextRetry": "2026-11-15",
+      "nextRetry": "2026-11-29",
       "status": "failed"
     },
     "32214": {
@@ -6949,10 +7215,10 @@
       "status": "ok"
     },
     "32249": {
-      "failures": 1,
-      "lastChecked": "2026-11-08",
+      "failures": 2,
+      "lastChecked": "2026-11-15",
       "lastSuccess": null,
-      "nextRetry": "2026-11-15",
+      "nextRetry": "2026-11-29",
       "status": "failed"
     },
     "32250": {
@@ -7454,8 +7720,8 @@
     },
     "3232": {
       "failures": 0,
-      "lastChecked": "2026-10-22",
-      "lastSuccess": "2026-10-22",
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -7524,8 +7790,8 @@
     },
     "32329": {
       "failures": 0,
-      "lastChecked": "2026-11-08",
-      "lastSuccess": "2026-11-08",
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -7704,6 +7970,930 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "32355": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32356": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32357": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32358": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32359": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32360": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32361": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32362": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32363": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32364": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32365": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32366": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32367": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32368": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32369": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32370": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32371": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32372": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32373": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32374": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2026-11-22",
+      "status": "failed"
+    },
+    "32375": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32376": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32377": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32378": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32379": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32380": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32381": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32382": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32383": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32384": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32385": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32386": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32387": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32388": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32389": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32390": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32391": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32392": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32393": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32394": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32395": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32396": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32397": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32398": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32399": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32400": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32401": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32402": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32403": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32404": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32405": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32406": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32407": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32408": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32409": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32410": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32411": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32412": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32413": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32414": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32415": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32416": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32417": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32418": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32419": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32420": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32421": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32422": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32423": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32424": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32425": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32426": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32427": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32428": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32429": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32430": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32431": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32432": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32433": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32434": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32435": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32436": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32437": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32438": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32439": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32440": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32441": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32442": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32443": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32444": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32445": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32446": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32447": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32448": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32449": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32450": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32451": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32452": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32453": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32454": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32455": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32456": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32457": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32458": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32459": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32460": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32461": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32462": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32463": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32464": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32465": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32466": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32467": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32468": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32469": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32470": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32471": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32472": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32473": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32474": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32475": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32476": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32477": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32478": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32479": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32480": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32481": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32482": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32483": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32484": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32485": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "32486": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "328": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -7736,6 +8926,13 @@
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "3471": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -7804,8 +9001,8 @@
     },
     "3725": {
       "failures": 0,
-      "lastChecked": "2026-11-08",
-      "lastSuccess": "2026-11-08",
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -7838,10 +9035,10 @@
       "status": "ok"
     },
     "3838": {
-      "failures": 2,
-      "lastChecked": "2026-11-01",
+      "failures": 3,
+      "lastChecked": "2026-11-15",
       "lastSuccess": null,
-      "nextRetry": "2026-11-15",
+      "nextRetry": "2026-12-13",
       "status": "failed"
     },
     "384": {
@@ -8005,6 +9202,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "505": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "5129": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -8030,6 +9234,13 @@
       "failures": 0,
       "lastChecked": "2026-11-08",
       "lastSuccess": "2026-11-08",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "5281": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -8258,10 +9469,10 @@
       "status": "ok"
     },
     "580": {
-      "failures": 1,
-      "lastChecked": "2026-11-08",
+      "failures": 2,
+      "lastChecked": "2026-11-15",
       "lastSuccess": null,
-      "nextRetry": "2026-11-15",
+      "nextRetry": "2026-11-29",
       "status": "failed"
     },
     "581": {
@@ -8307,10 +9518,10 @@
       "status": "ok"
     },
     "61": {
-      "failures": 1,
-      "lastChecked": "2026-11-08",
+      "failures": 2,
+      "lastChecked": "2026-11-15",
       "lastSuccess": null,
-      "nextRetry": "2026-11-15",
+      "nextRetry": "2026-11-29",
       "status": "failed"
     },
     "6103": {
@@ -8324,6 +9535,13 @@
       "failures": 0,
       "lastChecked": "2026-11-01",
       "lastSuccess": "2026-11-01",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "6417": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
@@ -8404,6 +9622,13 @@
       "nextRetry": "2027-02-06",
       "status": "missing"
     },
+    "725": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "7395": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -8446,6 +9671,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "7691": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "771": {
       "failures": 1,
       "lastChecked": "2026-11-08",
@@ -8473,6 +9705,13 @@
       "lastSuccess": "2026-11-08",
       "nextRetry": null,
       "status": "ok"
+    },
+    "783": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2027-02-13",
+      "status": "missing"
     },
     "79": {
       "failures": 0,
@@ -8530,6 +9769,13 @@
       "nextRetry": "2027-01-20",
       "status": "missing"
     },
+    "827": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2027-02-13",
+      "status": "missing"
+    },
     "83": {
       "failures": 1,
       "lastChecked": "2026-10-22",
@@ -8558,6 +9804,20 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "835": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "841": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "8472": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -8579,6 +9839,13 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "929": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "9324": {
       "failures": 0,
       "lastChecked": "2026-10-22",
@@ -8593,10 +9860,31 @@
       "nextRetry": null,
       "status": "ok"
     },
+    "943": {
+      "failures": 1,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": null,
+      "nextRetry": "2026-11-22",
+      "status": "failed"
+    },
+    "9555": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
+      "nextRetry": null,
+      "status": "ok"
+    },
     "9698": {
       "failures": 0,
       "lastChecked": "2026-10-22",
       "lastSuccess": "2026-10-22",
+      "nextRetry": null,
+      "status": "ok"
+    },
+    "9830": {
+      "failures": 0,
+      "lastChecked": "2026-11-15",
+      "lastSuccess": "2026-11-15",
       "nextRetry": null,
       "status": "ok"
     },
