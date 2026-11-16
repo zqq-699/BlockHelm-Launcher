@@ -142,7 +142,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             cancellationToken: cancellationToken);
     }
 
-    /// <summary>Starts the next catalog source when the preferred source is slow or fails.</summary>
+    /// <summary>Starts the next lookup source when the preferred source is slow or fails. The operation must not publish shared state.</summary>
     internal async Task<DownloadLookupResult<T>> ExecuteStaggeredLookupAsync<T>(
         string originalUrl,
         DownloadSourcePreference preference,
@@ -150,9 +150,14 @@ internal sealed class MinecraftDownloadRequestExecutor
         Func<DownloadAttemptContext, CancellationToken, Task<T>> operation,
         Func<HttpStatusCode, bool> noResultStatus,
         CancellationToken cancellationToken,
-        Func<CancellationToken, Task>? fallbackDelay = null)
+        Func<CancellationToken, Task>? fallbackDelay = null,
+        IReadOnlyList<ResolvedDownloadRequest>? sourceCandidates = null,
+        SpeedMeter? speedMeter = null)
     {
-        var candidates = MinecraftDownloadSourceResolver.EnumerateRequests(originalUrl, preference, categoryHint).ToArray();
+        var candidates = sourceCandidates?.ToArray()
+            ?? MinecraftDownloadSourceResolver.EnumerateRequests(originalUrl, preference, categoryHint).ToArray();
+        if (candidates.Length == 0)
+            throw new ArgumentException("At least one lookup source is required.", nameof(sourceCandidates));
         using var pending = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = pending.Token;
         var firstFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -163,7 +168,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         Task<DownloadLookupResult<T>> Start(ResolvedDownloadRequest source, Action? onFailure = null) =>
             ExecuteCoreAsync(originalUrl, preference, categoryHint, operation, noResultStatus,
                 lookupMode: true, configureRequest: null, allowResponseStatus: null,
-                sensitiveHeaders: null, speedMeter: null, executionMode: DownloadExecutionMode.PerSourceRetries,
+                sensitiveHeaders: null, speedMeter: speedMeter, executionMode: DownloadExecutionMode.PerSourceRetries,
                 fileCandidates: null, cancellationToken: token, singleCandidate: source,
                 onRecoverableFailure: onFailure, logExhaustion: false);
 
@@ -204,7 +209,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                         cancellationToken.ThrowIfCancellationRequested();
                         if (result.Found)
                         {
-                            logger.LogInformation("Version catalog loaded. ResourceCategory={ResourceCategory} FinalSource={FinalSource}",
+                            logger.LogInformation("Download lookup completed. ResourceCategory={ResourceCategory} FinalSource={FinalSource}",
                                 item.Source.ResourceCategory, item.Source.ResolvedSourceKind);
                             return result;
                         }
@@ -224,7 +229,7 @@ internal sealed class MinecraftDownloadRequestExecutor
 
                 if (nextCandidate < candidates.Length && (delay.IsCompleted || firstFailure.Task.IsCompleted))
                 {
-                    logger.LogInformation("Starting fallback version catalog source. ResourceCategory={ResourceCategory} Source={Source} Trigger={Trigger}",
+                    logger.LogInformation("Starting fallback download lookup source. ResourceCategory={ResourceCategory} Source={Source} Trigger={Trigger}",
                         candidates[nextCandidate].ResourceCategory, candidates[nextCandidate].ResolvedSourceKind,
                         firstFailure.Task.IsCompleted ? "PreferredSourceFailedOrEmpty" : "PreferredSourceSlow");
                     tasks.Add((candidates[nextCandidate], Start(candidates[nextCandidate])));

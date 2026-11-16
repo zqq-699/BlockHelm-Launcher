@@ -21,9 +21,12 @@ namespace Launcher.Infrastructure.Accounts.ThirdParty;
 
 internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvisioningService
 {
-    private static readonly Uri LatestArtifactUri = new("https://authlib-injector.yushi.moe/artifact/latest.json");
+    private const string OfficialRoot = "https://authlib-injector.yushi.moe/";
+    private const string BmclApiRoot = "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/";
+    private static readonly Uri LatestArtifactUri = new(OfficialRoot + "artifact/latest.json");
     private const long MaximumArtifactBytes = 16 * 1024 * 1024;
-    private readonly MinecraftDownloadTransport transport;
+    private readonly HttpClient httpClient;
+    private readonly Func<CancellationToken, Task>? fallbackDelay;
     private readonly string cacheDirectory;
     private readonly ILogger<AuthlibInjectorProvisioningService> logger;
     private readonly SemaphoreSlim provisioningLock = new(1, 1);
@@ -41,13 +44,13 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
     internal AuthlibInjectorProvisioningService(
         HttpClient httpClient,
         string cacheDirectory,
-        ILogger<AuthlibInjectorProvisioningService>? logger = null)
+        ILogger<AuthlibInjectorProvisioningService>? logger = null,
+        Func<CancellationToken, Task>? fallbackDelay = null)
     {
+        this.httpClient = httpClient;
+        this.fallbackDelay = fallbackDelay;
         this.cacheDirectory = Path.GetFullPath(cacheDirectory);
         this.logger = logger ?? NullLogger<AuthlibInjectorProvisioningService>.Instance;
-        transport = new MinecraftDownloadTransport(
-            httpClient,
-            new DownloadRetryOptions { ResponseHeadersTimeout = TimeSpan.FromSeconds(20) });
     }
 
     public Task<AuthlibInjectorArtifact> EnsureAvailableAsync(CancellationToken cancellationToken = default) =>
@@ -92,17 +95,56 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
         }
     }
 
-    private async Task<ArtifactMetadata> GetLatestArtifactAsync(CancellationToken cancellationToken)
+    private Task<ArtifactMetadata> GetLatestArtifactAsync(CancellationToken cancellationToken) =>
+        LookupSourcesAsync(LatestArtifactUri, async (context, token) =>
+        {
+            var metadata = await context.Response.Content.ReadFromJsonAsync<ArtifactMetadata>(cancellationToken: token)
+                .ConfigureAwait(false)
+                ?? throw new JsonException("The authlib-injector metadata response is empty.");
+            try
+            {
+                ValidateMetadata(metadata);
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new DownloadContentValidationException("The authlib-injector metadata is invalid.", exception);
+            }
+            return metadata;
+        }, cancellationToken);
+
+    private async Task<T> LookupSourcesAsync<T>(
+        Uri original,
+        Func<DownloadAttemptContext, CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken,
+        SpeedMeter? speedMeter = null,
+        DownloadConcurrencyCategory category = DownloadConcurrencyCategory.Metadata)
     {
-        using var response = (await transport.SendAsync(
-            LatestArtifactUri.AbsoluteUri,
-            cancellationToken).ConfigureAwait(false)).Response;
-        response.EnsureSuccessStatusCode();
-        var metadata = await response.Content.ReadFromJsonAsync<ArtifactMetadata>(cancellationToken: cancellationToken)
-            .ConfigureAwait(false)
-            ?? throw new JsonException("The authlib-injector metadata response is empty.");
-        ValidateMetadata(metadata);
-        return metadata;
+        var sources = GetSources(original).Select(source => new ResolvedDownloadRequest(
+            original.AbsoluteUri, source.AbsoluteUri, DownloadSourcePreference.Official,
+            source.Host == "bmclapi2.bangbang93.com" ? "BmclApiAuthlibInjector" : "AuthlibInjectorOfficial",
+            "AuthlibInjector")).ToArray();
+        var executor = new MinecraftDownloadRequestExecutor(httpClient, logger, category: category,
+            retryOptions: new DownloadRetryOptions
+            {
+                ResponseHeadersTimeout = TimeSpan.FromSeconds(20),
+                MaxAttemptsPerSource = 1
+            });
+        var result = await executor.ExecuteStaggeredLookupAsync(
+            original.AbsoluteUri, DownloadSourcePreference.Official, categoryHint: null,
+            operation, _ => false, cancellationToken, fallbackDelay,
+            sourceCandidates: sources, speedMeter: speedMeter).ConfigureAwait(false);
+        return result.Value!;
+    }
+
+    private static Uri[] GetSources(Uri original)
+    {
+        // Only rewrite known download roots, never arbitrary hosts returned by metadata.
+        var url = original.AbsoluteUri;
+        if (url.StartsWith(OfficialRoot, StringComparison.OrdinalIgnoreCase))
+            return [original, new Uri(BmclApiRoot + url[OfficialRoot.Length..])];
+        if (url.StartsWith(BmclApiRoot, StringComparison.OrdinalIgnoreCase))
+            return [original, new Uri(OfficialRoot + url[BmclApiRoot.Length..])];
+        return [original];
     }
 
     private async Task<AuthlibInjectorArtifact?> TryUseArtifactAsync(
@@ -131,6 +173,36 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
         IProgress<LauncherProgress>? progress,
         CancellationToken cancellationToken)
     {
+        // Racing sources only prepare bounded, verified bytes. Publish the winner once,
+        // so a late response can never replace its artifact or manifest.
+        var bytes = await LookupSourcesAsync(metadata.DownloadUrl, async (context, token) =>
+        {
+            if (context.Response.Content.Headers.ContentLength is > MaximumArtifactBytes)
+                throw new DownloadContentValidationException("The authlib-injector artifact is too large.");
+
+            await using var source = await context.Response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+            using var target = new MemoryStream();
+            var buffer = new byte[81920];
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer, token).ConfigureAwait(false);
+                if (read == 0)
+                    break;
+                if (target.Length + read > MaximumArtifactBytes)
+                    throw new DownloadContentValidationException("The authlib-injector artifact is too large.");
+                target.Write(buffer, 0, read);
+            }
+            var content = target.ToArray();
+            var actualHash = Convert.ToHexString(SHA256.HashData(content));
+            if (!string.Equals(actualHash, metadata.Checksums.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning("Authlib-injector integrity check failed. Host={Host} HashAlgorithm=SHA256 ExpectedHash={ExpectedHash} ActualHash={ActualHash}",
+                    new Uri(context.Resolution.ActualUrl).Host, metadata.Checksums.Sha256, actualHash);
+                throw new DownloadContentValidationException("The authlib-injector SHA-256 checksum does not match.");
+            }
+            return content;
+        }, cancellationToken, SpeedMeterProgress.TryGet(progress), DownloadConcurrencyCategory.Runtime).ConfigureAwait(false);
+
         var destination = GetArtifactPath(metadata);
         var temporaryPath = destination + $".{Guid.NewGuid():N}.tmp";
         try
@@ -143,28 +215,6 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
                 cacheDirectory,
                 temporaryPath,
                 "Authlib-injector temporary artifact");
-            using var response = (await transport.SendAsync(
-                metadata.DownloadUrl.AbsoluteUri,
-                cancellationToken).ConfigureAwait(false)).Response;
-            response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is > MaximumArtifactBytes)
-                throw new InvalidDataException("The authlib-injector artifact is too large.");
-
-            await DownloadResponseThrottler.ApplyAsync(
-                response,
-                bandwidthLimiter: null,
-                cancellationToken,
-                speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
-
-            MinecraftPathGuard.EnsureSafeFileDestination(
-                destination,
-                cacheDirectory,
-                "Authlib-injector artifact");
-            MinecraftPathGuard.EnsureNoReparsePoints(
-                cacheDirectory,
-                temporaryPath,
-                "Authlib-injector temporary artifact");
-            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
             await using (var target = new FileStream(
                 temporaryPath,
                 FileMode.CreateNew,
@@ -173,23 +223,10 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
                 81920,
                 FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
-                var buffer = new byte[81920];
-                long total = 0;
-                while (true)
-                {
-                    var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                    if (read == 0)
-                        break;
-                    total += read;
-                    if (total > MaximumArtifactBytes)
-                        throw new InvalidDataException("The authlib-injector artifact is too large.");
-                    await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                }
+                await target.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
                 await target.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            if (!await HashMatchesAsync(temporaryPath, metadata.Checksums.Sha256, cancellationToken).ConfigureAwait(false))
-                throw new InvalidDataException("The authlib-injector SHA-256 checksum does not match.");
             MinecraftPathGuard.EnsureSafeFileDestination(
                 destination,
                 cacheDirectory,
