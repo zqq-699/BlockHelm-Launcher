@@ -38,13 +38,14 @@ internal static class LauncherLogConfiguration
     private const string LogDirectoryName = "log";
     private static readonly string[] LogFileSearchPatterns = ["bhl*.log", "updater-*.log"];
 
-    public static Serilog.ILogger CreateLogger(
+    public static Serilog.Core.Logger CreateLogger(
         LoggingLevelSwitch levelSwitch,
-        LoggingLevelSwitch microsoftLevelSwitch)
+        LoggingLevelSwitch microsoftLevelSwitch,
+        string? logDirectoryOverride = null, long fileSizeLimitBytes = FileSizeLimitBytes)
     {
         ArgumentNullException.ThrowIfNull(levelSwitch);
         ArgumentNullException.ThrowIfNull(microsoftLevelSwitch);
-        var logDirectory = ResolveLogDirectory();
+        var logDirectory = logDirectoryOverride ?? ResolveLogDirectory();
         Directory.CreateDirectory(logDirectory);
         var startedAt = DateTimeOffset.Now;
         // Reserve one slot before the new startup file is opened so the directory
@@ -63,7 +64,7 @@ internal static class LauncherLogConfiguration
                 logPath,
                 rollingInterval: RollingInterval.Infinite,
                 retainedFileCountLimit: null,
-                fileSizeLimitBytes: FileSizeLimitBytes,
+                fileSizeLimitBytes: fileSizeLimitBytes,
                 rollOnFileSizeLimit: RollOnFileSizeLimit,
                 shared: false,
                 hooks: new LauncherLogFileLifecycleHooks(logDirectory))
@@ -173,10 +174,15 @@ internal static class LauncherLogConfiguration
 
     private sealed class LauncherLogFileLifecycleHooks(string logDirectory) : FileLifecycleHooks
     {
+        private string? previousFile;
         public override Stream OnFileOpened(string path, Stream underlyingStream, Encoding encoding)
         {
             // Re-apply the global cap whenever the active startup log rolls by size.
             PruneOldLogFiles(logDirectory, DateTimeOffset.Now);
+            var fileName = Path.GetFileName(path);
+            var header = $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [INF] Log file opened. LogSession={RedactingLogFormatter.SessionId} LogFile={fileName} PreviousLogFile={previousFile ?? "None"}{Environment.NewLine}";
+            underlyingStream.Write(encoding.GetBytes(header));
+            previousFile = fileName;
             return underlyingStream;
         }
     }

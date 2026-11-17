@@ -35,19 +35,20 @@ public sealed class ModUpdateFileTransaction : IModUpdateFileTransaction
     {
         ArgumentNullException.ThrowIfNull(mod);
         var path = Path.GetFullPath(mod.FullPath);
+        using var contentLease = InstanceContentOwnership.Acquire(mod, path);
         var before = ReadFileState(path);
         var fingerprint = await fingerprintService.GetFingerprintAsync(path, cancellationToken).ConfigureAwait(false);
         var after = ReadFileState(path);
         if (before.Length != after.Length || before.LastWriteTimeUtcTicks != after.LastWriteTimeUtcTicks)
             throw new ModUpdateConflictException(path, ModUpdateConflictReason.SourceChanged);
 
-        return new ModUpdateLocalFileState(
+        return InstanceContentOwnership.Transfer(mod, new ModUpdateLocalFileState(
             path,
             fingerprint.Sha1,
             fingerprint.CurseForgeFingerprint,
             after.Length,
             after.LastWriteTimeUtcTicks,
-            mod.IsEnabled);
+            mod.IsEnabled));
     }
 
     public async Task<ModUpdateResult> ApplyAsync(
@@ -58,11 +59,15 @@ public sealed class ModUpdateFileTransaction : IModUpdateFileTransaction
     {
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentNullException.ThrowIfNull(candidate);
+        using var instanceScope = InstanceContentOwnership.Open(instance, instance.InstanceDirectory);
+        using var contentLease = InstanceContentOwnership.Acquire(candidate.LocalFile, candidate.LocalFile.FullPath);
         progress?.Report(new LauncherProgress(ModUpdateProgressStages.Preparing, string.Empty, 0));
 
         var modsDirectory = Path.GetFullPath(await installationService
             .EnsureInstanceContentDirectoryAsync(ResourceProjectKind.Mod, instance, cancellationToken)
             .ConfigureAwait(false));
+        instanceScope.EnsureCurrent();
+        using var targetScope = InstanceContentOwnership.Open(instance, modsDirectory);
         var sourcePath = ValidateDirectChild(candidate.LocalFile.FullPath, modsDirectory);
         var targetPath = ResolveTargetPath(candidate.TargetVersion.FileName, candidate.LocalFile.IsEnabled, modsDirectory);
         var backupPath = ResolveBackupPath(sourcePath, modsDirectory);
@@ -95,8 +100,10 @@ public sealed class ModUpdateFileTransaction : IModUpdateFileTransaction
             });
             await installationService.ExecuteAsync(request, downloadProgress, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
+            targetScope.EnsureCurrent();
 
             await EnsureSourceUnchangedAsync(candidate.LocalFile, cancellationToken).ConfigureAwait(false);
+            targetScope.EnsureCurrent();
             if (!sameTarget && File.Exists(targetPath))
                 throw new ModUpdateConflictException(targetPath, ModUpdateConflictReason.TargetExists);
 
@@ -115,7 +122,7 @@ public sealed class ModUpdateFileTransaction : IModUpdateFileTransaction
         }
         finally
         {
-            TryDelete(stagingPath);
+            if (targetScope.IsCurrent) TryDelete(stagingPath);
         }
     }
 

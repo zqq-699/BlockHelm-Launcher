@@ -27,6 +27,8 @@ using Launcher.Infrastructure.CurseForge;
 using Launcher.Infrastructure.Resources;
 using Microsoft.Extensions.Logging;
 
+using Launcher.Infrastructure.Minecraft;
+
 namespace Launcher.Infrastructure.FileSystem;
 
 /// <summary>
@@ -64,7 +66,7 @@ internal sealed class RemoteModIconProviderClient
             var candidatesBySha1 = candidates
                 .GroupBy(candidate => candidate.Sha1, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-            using var response = await httpClient.PostAsJsonAsync(
+            using var response = await DownloadHttpDiagnostics.PostAsJsonAsync(httpClient, logger,
                     $"{ModrinthBaseUrl}/version_files",
                     new ModrinthVersionFilesRequest(hashes, "sha1"),
                     JsonOptions,
@@ -72,15 +74,13 @@ internal sealed class RemoteModIconProviderClient
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogDebug(
+                logger.LogWarning(
                     "Modrinth local mod icon lookup was rejected. StatusCode={StatusCode}",
                     response.StatusCode);
                 return new Dictionary<string, RemoteIconCandidate>(StringComparer.OrdinalIgnoreCase);
             }
 
-            var versions = await response.Content.ReadFromJsonAsync<Dictionary<string, ModrinthVersionFileMatch>>(
-                    JsonOptions,
-                    cancellationToken)
+            var versions = await DownloadHttpDiagnostics.ReadFromJsonAsync<Dictionary<string, ModrinthVersionFileMatch>>(response, logger, cancellationToken, JsonOptions)
                 .ConfigureAwait(false)
                 ?? new Dictionary<string, ModrinthVersionFileMatch>(StringComparer.OrdinalIgnoreCase);
             var projectIds = versions.Values
@@ -92,7 +92,7 @@ internal sealed class RemoteModIconProviderClient
                 return new Dictionary<string, RemoteIconCandidate>(StringComparer.OrdinalIgnoreCase);
 
             var projectsParameter = Uri.EscapeDataString(JsonSerializer.Serialize(projectIds, JsonOptions));
-            var projects = await httpClient.GetFromJsonAsync<List<ModrinthProject>>(
+            var projects = await DownloadHttpDiagnostics.GetFromJsonAsync<List<ModrinthProject>>(httpClient, logger,
                     $"{ModrinthBaseUrl}/projects?ids={projectsParameter}",
                     JsonOptions,
                     cancellationToken)
@@ -132,7 +132,7 @@ internal sealed class RemoteModIconProviderClient
         }
         catch (Exception exception)
         {
-            logger.LogDebug(exception, "Failed to resolve remote local mod icons from Modrinth.");
+            logger.LogWarning(exception, "Failed to resolve remote local mod icons from Modrinth.");
             return new Dictionary<string, RemoteIconCandidate>(StringComparer.OrdinalIgnoreCase);
         }
     }
@@ -145,7 +145,7 @@ internal sealed class RemoteModIconProviderClient
         var apiKey = await curseForgeApiKeyResolver.TryResolveAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            logger.LogDebug("Skipping CurseForge local mod icon lookup because API key is not configured.");
+            logger.LogInformation("Skipping CurseForge local mod icon lookup because API key is not configured.");
             return new Dictionary<string, RemoteIconCandidate>(StringComparer.OrdinalIgnoreCase);
         }
 
@@ -160,7 +160,7 @@ internal sealed class RemoteModIconProviderClient
             };
             fingerprintRequest.Headers.Add("x-api-key", apiKey);
 
-            using var fingerprintResponse = await httpClient.SendAsync(fingerprintRequest, cancellationToken)
+            using var fingerprintResponse = await DownloadHttpDiagnostics.SendAsync(httpClient, fingerprintRequest, logger, cancellationToken)
                 .ConfigureAwait(false);
             if (!fingerprintResponse.IsSuccessStatusCode)
             {
@@ -184,7 +184,7 @@ internal sealed class RemoteModIconProviderClient
             };
             modsRequest.Headers.Add("x-api-key", apiKey);
 
-            using var modsResponse = await httpClient.SendAsync(modsRequest, cancellationToken).ConfigureAwait(false);
+            using var modsResponse = await DownloadHttpDiagnostics.SendAsync(httpClient, modsRequest, logger, cancellationToken).ConfigureAwait(false);
             if (!modsResponse.IsSuccessStatusCode)
             {
                 logger.LogDebug(
@@ -193,7 +193,7 @@ internal sealed class RemoteModIconProviderClient
                 return new Dictionary<string, RemoteIconCandidate>(StringComparer.OrdinalIgnoreCase);
             }
 
-            var mods = await modsResponse.Content.ReadFromJsonAsync<CurseForgeModsResponse>(JsonOptions, cancellationToken)
+            var mods = await DownloadHttpDiagnostics.ReadFromJsonAsync<CurseForgeModsResponse>(modsResponse, logger, cancellationToken, JsonOptions)
                 .ConfigureAwait(false)
                 ?? new CurseForgeModsResponse();
             var modsById = mods.Data.ToDictionary(mod => mod.Id);
@@ -230,7 +230,7 @@ internal sealed class RemoteModIconProviderClient
         }
         catch (Exception exception)
         {
-            logger.LogDebug(exception, "Failed to resolve remote local mod icons from CurseForge.");
+            logger.LogWarning(exception, "Failed to resolve remote local mod icons from CurseForge.");
             return new Dictionary<string, RemoteIconCandidate>(StringComparer.OrdinalIgnoreCase);
         }
     }

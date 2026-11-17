@@ -22,6 +22,8 @@ using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 
+using Launcher.Application.Services;
+
 namespace Launcher.Infrastructure.Minecraft;
 
 /// <summary>
@@ -148,9 +150,8 @@ internal static class MinecraftDownloadFileWriter
         }
         catch (Exception exception) when (exception is IOException or HttpRequestException or OperationCanceledException)
         {
-            throw new DownloadBodyInterruptedException(
-                "The response body was interrupted while downloading a file.",
-                exception);
+            throw SafeExceptionLog.Describe(new DownloadBodyInterruptedException("The response body was interrupted while downloading a file.",
+                exception), "DownloadBodyInterruptedException", ("Reason", "The response body was interrupted while downloading a file."));
         }
     }
 
@@ -167,9 +168,7 @@ internal static class MinecraftDownloadFileWriter
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new DownloadLocalFileException(
-                $"Failed to write the download temporary file: {tempPath}",
-                exception);
+            throw SafeExceptionLog.Describe(new DownloadLocalFileException($"Failed to write the download temporary file: {tempPath}", exception), "LocalFileSystem", ("Action", "Failed to write the download temporary file"), ("Artifact", tempPath));
         }
     }
 
@@ -186,9 +185,7 @@ internal static class MinecraftDownloadFileWriter
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new DownloadLocalFileException(
-                $"Failed to flush the download temporary file: {tempPath}",
-                exception);
+            throw SafeExceptionLog.Describe(new DownloadLocalFileException($"Failed to flush the download temporary file: {tempPath}", exception), "LocalFileSystem", ("Action", "Failed to flush the download temporary file"), ("Artifact", tempPath));
         }
     }
 
@@ -206,7 +203,9 @@ internal static class MinecraftDownloadFileWriter
         if (requiredSize is > 0 && totalRead != requiredSize.Value)
         {
             throw new DownloadBodyInterruptedException(
-                $"The response body length was {totalRead}, expected {requiredSize.Value}.");
+                $"The response body length was {totalRead}, expected {requiredSize.Value}.")
+                .WithDetail("ExpectedBytes", requiredSize.Value).WithDetail("ActualBytes", totalRead)
+                .WithDetail("FailureStage", "ResponseBodyLength");
         }
     }
 
@@ -225,7 +224,9 @@ internal static class MinecraftDownloadFileWriter
         if (!string.Equals(actualSha1, expectedSha1, StringComparison.OrdinalIgnoreCase))
         {
             throw new DownloadHashMismatchException(
-                $"The downloaded file SHA-1 did not match the expected value for {destinationPath}.");
+                $"The downloaded file SHA-1 did not match the expected value for {destinationPath}.")
+                .WithDetail("Artifact", destinationPath).WithDetail("HashAlgorithm", "SHA1")
+                .WithDetail("ExpectedHash", expectedSha1).WithDetail("ActualHash", actualSha1);
         }
     }
 
@@ -240,9 +241,7 @@ internal static class MinecraftDownloadFileWriter
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new DownloadLocalFileException(
-                $"Failed to replace the download destination: {destinationPath}",
-                exception);
+            throw SafeExceptionLog.Describe(new DownloadLocalFileException($"Failed to replace the download destination: {destinationPath}", exception), "LocalFileSystem", ("Action", "Failed to replace the download destination"), ("Artifact", destinationPath));
         }
     }
 
@@ -260,9 +259,7 @@ internal static class MinecraftDownloadFileWriter
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new DownloadLocalFileException(
-                $"Failed to create the download temporary file: {tempPath}",
-                exception);
+            throw SafeExceptionLog.Describe(new DownloadLocalFileException($"Failed to create the download temporary file: {tempPath}", exception), "LocalFileSystem", ("Action", "Failed to create the download temporary file"), ("Artifact", tempPath));
         }
     }
 
@@ -292,6 +289,6 @@ internal static class MinecraftDownloadFileWriter
             return;
 
         if (expectedSha1.Length != 40 || expectedSha1.Any(character => !Uri.IsHexDigit(character)))
-            throw new InvalidDataException("The expected SHA-1 value is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The expected SHA-1 value is invalid."), "DownloadValidation", ("Reason", "The expected SHA-1 value is invalid."));
     }
 }

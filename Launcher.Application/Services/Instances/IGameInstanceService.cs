@@ -23,6 +23,8 @@ namespace Launcher.Application.Services;
 
 public interface IGameInstanceService
 {
+    bool CanReuseSettingsSnapshot(GameInstance previous, GameInstance current, bool allowOlderRead = false) => ReferenceEquals(previous, current);
+
     Task<IReadOnlyList<GameInstance>> GetStoredInstancesAsync(LauncherSettings settings, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<GameInstance>> GetInstancesAsync(CancellationToken cancellationToken = default);
     Task<GameInstance?> GetDefaultInstanceAsync(CancellationToken cancellationToken = default);
@@ -39,7 +41,11 @@ public interface IGameInstanceService
         string? fabricApiVersionId = null,
         string? quiltStandardLibraryVersionId = null);
     Task SaveInstanceAsync(GameInstance instance, CancellationToken cancellationToken = default);
-    Task<GameInstance> RenameInstanceAsync(string instanceId, string? newName, string? newIconSource, CancellationToken cancellationToken = default);
-    Task<bool> SetDefaultInstanceAsync(string instanceId, CancellationToken cancellationToken = default);
-    Task<bool> DeleteInstanceAsync(string instanceId, CancellationToken cancellationToken = default);
+    Task<GameInstance> RenameInstanceAsync(string instanceDirectory, string? newName, string? newIconSource, CancellationToken cancellationToken = default);
+    Task<GameInstance> RenameInstanceAsync(GameInstance instance, string? newName, string? newIconSource, CancellationToken cancellationToken = default)
+        => RenameInstanceAsync(instance.InstanceDirectory, newName, newIconSource, cancellationToken);
+    Task<bool> SetDefaultInstanceAsync(string instanceDirectory, CancellationToken cancellationToken = default);
+    Task<bool> DeleteInstanceAsync(string instanceDirectory, CancellationToken cancellationToken = default);
+    Task<bool> DeleteInstanceAsync(GameInstance instance, CancellationToken cancellationToken = default)
+        => DeleteInstanceAsync(instance.InstanceDirectory, cancellationToken);
 }

@@ -13,6 +13,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Launcher.Infrastructure.Minecraft;
 
+using Launcher.Application.Services;
+
 namespace Launcher.Infrastructure.Modpacks;
 
 internal static partial class FabricServerLauncherJarBuilder
@@ -47,7 +49,7 @@ internal static partial class FabricServerLauncherJarBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(librariesRoot);
 
         var destinationDirectory = Path.GetDirectoryName(destinationPath)
-            ?? throw new InvalidDataException("Fabric server launcher destination has no parent directory.");
+            ?? throw SafeExceptionLog.Describe(new InvalidDataException("Fabric server launcher destination has no parent directory."), "DownloadValidation", ("Reason", "Fabric server launcher destination has no parent directory."));
         Directory.CreateDirectory(destinationDirectory);
         var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.download";
         var shadeLibraries = ShouldShadeLibraries(loaderVersion);
@@ -143,12 +145,12 @@ internal static partial class FabricServerLauncherJarBuilder
                 cancellationToken.ThrowIfCancellationRequested();
                 ValidateEntry(entry);
                 if (++entryCount > MaximumEntryCount)
-                    throw new InvalidDataException("Fabric loader libraries contain too many archive entries.");
+                    throw SafeExceptionLog.Describe(new InvalidDataException("Fabric loader libraries contain too many archive entries."), "DownloadValidation", ("Reason", "Fabric loader libraries contain too many archive entries."));
                 if (entry.FullName.EndsWith("/", StringComparison.Ordinal))
                     continue;
                 totalBytes = checked(totalBytes + entry.Length);
                 if (totalBytes > MaximumTotalBytes)
-                    throw new InvalidDataException("Fabric loader libraries exceed the permitted expanded size.");
+                    throw SafeExceptionLog.Describe(new InvalidDataException("Fabric loader libraries exceed the permitted expanded size."), "DownloadValidation", ("Reason", "Fabric loader libraries exceed the permitted expanded size."));
 
                 var entryName = entry.FullName;
                 if (IsDiscardedMetadata(entryName))
@@ -238,7 +240,7 @@ internal static partial class FabricServerLauncherJarBuilder
                     return copied;
                 copied = checked(copied + read);
                 if (copied > maximumBytes)
-                    throw new InvalidDataException("Fabric loader libraries exceed the permitted expanded size.");
+                    throw SafeExceptionLog.Describe(new InvalidDataException("Fabric loader libraries exceed the permitted expanded size."), "DownloadValidation", ("Reason", "Fabric loader libraries exceed the permitted expanded size."));
                 await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             }
         }

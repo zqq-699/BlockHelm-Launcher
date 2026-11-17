@@ -75,8 +75,7 @@ public sealed class QuiltLoaderProvider : ILoaderProvider, ISeparatedInstallPath
                 using var json = await JsonDocument.ParseAsync(stream, cancellationToken: token);
                 if (json.RootElement.ValueKind is not JsonValueKind.Array)
                 {
-                    throw new DownloadContentValidationException(
-                        "Quilt loader metadata is not a JSON array.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Quilt loader metadata is not a JSON array."), "DownloadContentValidationException", ("Reason", "Quilt loader metadata is not a JSON array."));
                 }
 
                 var entries = json.RootElement.EnumerateArray().ToList();
@@ -95,8 +94,7 @@ public sealed class QuiltLoaderProvider : ILoaderProvider, ISeparatedInstallPath
                     .ToList();
                 if (versions.Count == 0)
                 {
-                    throw new DownloadContentValidationException(
-                        "Quilt loader metadata contains no valid loader entries.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Quilt loader metadata contains no valid loader entries."), "DownloadContentValidationException", ("Reason", "Quilt loader metadata contains no valid loader entries."));
                 }
 
                 return (IReadOnlyList<LoaderVersionInfo>)versions;

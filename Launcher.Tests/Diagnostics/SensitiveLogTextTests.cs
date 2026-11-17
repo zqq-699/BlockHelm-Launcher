@@ -37,10 +37,16 @@ public sealed class SensitiveLogTextTests : TestTempDirectory
     [InlineData("{\"refresh_token\":\"synthetic-json-secret\"}", "synthetic-json-secret")]
     [InlineData("Authorization: Bearer synthetic-bearer-secret", "synthetic-bearer-secret")]
     [InlineData("Authorization=Basic synthetic-basic-secret", "synthetic-basic-secret")]
+    [InlineData("Authorization: Negotiate synthetic-negotiate-secret", "synthetic-negotiate-secret")]
+    [InlineData("Proxy-Authorization: Digest username=synthetic-user, response=synthetic-digest-secret", "synthetic-digest-secret")]
     [InlineData("""{"Authorization":"Basic synthetic-basic-secret"}""", "synthetic-basic-secret")]
     [InlineData("id_token=synthetic-id-secret", "synthetic-id-secret")]
     [InlineData("--idToken synthetic-id-secret", "synthetic-id-secret")]
     [InlineData("client_secret=synthetic-client-secret", "synthetic-client-secret")]
+    [InlineData("-Dhttp.proxyPassword=synthetic-proxy-secret", "synthetic-proxy-secret")]
+    [InlineData("-Djavax.net.ssl.keyStorePassword=synthetic-keystore-secret", "synthetic-keystore-secret")]
+    [InlineData("-Daws.secretAccessKey=synthetic-aws-secret", "synthetic-aws-secret")]
+    [InlineData("customAccessToken=synthetic-custom-secret", "synthetic-custom-secret")]
     [InlineData("https://example.test/signed/synthetic-path-secret?token=synthetic-query-secret", "synthetic-path-secret")]
     public void RedactRemovesKnownSecretsFromFreeFormText(string input, string secret)
     {
@@ -93,6 +99,34 @@ public sealed class SensitiveLogTextTests : TestTempDirectory
         Assert.Equal("<redacted>", redactor.RedactLine("short"));
     }
 
+    [Theory]
+    [InlineData("password=", "synthetic-secret status=ok", "<redacted> status=ok")]
+    [InlineData("--accessToken", "synthetic-secret --mode safe", "<redacted> --mode safe")]
+    [InlineData("Authorization: Bearer", "synthetic-secret", "<redacted>")]
+    [InlineData("proxyPassword:", "\"first synthetic-secret", "<redacted>")]
+    public void StreamingRedactionProtectsValuesStartingOnTheNextLine(string key, string value, string expected)
+    {
+        var redactor = new SensitiveLogText.LineRedactor([]);
+        redactor.RedactLine(key);
+        redactor.RedactLine(" ");
+        Assert.Equal(expected, redactor.RedactLine(value));
+        if (value.StartsWith('"'))
+            Assert.Equal("<redacted> status=ok", redactor.RedactLine("last synthetic-secret\" status=ok"));
+        Assert.Equal("healthy", redactor.RedactLine("healthy"));
+    }
+
+    [Theory]
+    [InlineData("Negotiate")]
+    [InlineData("Digest")]
+    public void StreamingAuthorizationRedactsAllSchemeFields(string scheme)
+    {
+        var redactor = new SensitiveLogText.LineRedactor([]);
+        redactor.RedactLine("Authorization:");
+        redactor.RedactLine(scheme);
+        Assert.Equal("<redacted>", redactor.RedactLine("opaque-secret username=private-user"));
+        Assert.Equal("healthy", redactor.RedactLine("healthy"));
+    }
+
     [Fact]
     public void FileFormatterDoesNotRenderRawExceptionMessages()
     {
@@ -125,7 +159,7 @@ public sealed class SensitiveLogTextTests : TestTempDirectory
     public async Task EarlyLaunchFailureDiagnosticOmitsRawExceptionAndProcessArguments()
     {
         var context = new LaunchDiagnosticContext(
-            TempRoot, Path.Combine(TempRoot, "instance"), "instance-id", "Instance", "1.21.1",
+            TempRoot, Path.Combine(TempRoot, "instance"), "Instance", "1.21.1",
             "1.21.1", LoaderKind.Vanilla, null, null, null, null, 2048, []);
         var startInfo = new ProcessStartInfo("java") { Arguments = "-Dcustom=unlabelled-argument-secret" };
 

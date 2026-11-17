@@ -53,12 +53,13 @@ internal sealed class ModrinthModpackExporter
 
     public async Task<ModpackExportResult> ExportAsync(
         ModpackExportRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? isCurrent = null)
     {
         // 先冻结候选与哈希，再创建目标压缩包；任何失败都清理未完成输出。
         logger.LogInformation(
-            "Modrinth modpack export started. InstanceId={InstanceId} IncludeMods={IncludeMods} IncludeDisabledMods={IncludeDisabledMods} IncludeResourcePacks={IncludeResourcePacks} IncludeShaderPacks={IncludeShaderPacks} IncludeConfig={IncludeConfig}",
-            request.Instance.Id,
+            "Modrinth modpack export started. InstanceDirectory={InstanceDirectory} IncludeMods={IncludeMods} IncludeDisabledMods={IncludeDisabledMods} IncludeResourcePacks={IncludeResourcePacks} IncludeShaderPacks={IncludeShaderPacks} IncludeConfig={IncludeConfig}",
+            request.Instance.InstanceDirectory,
             request.IncludeMods,
             request.IncludeDisabledMods,
             request.IncludeResourcePacks,
@@ -105,12 +106,13 @@ internal sealed class ModrinthModpackExporter
                     "modrinth.index.json",
                     CreateManifest(request, manifestFiles),
                     overrideFiles,
-                    cancellationToken)
+                    cancellationToken,
+                    isCurrent)
                 .ConfigureAwait(false);
 
             logger.LogInformation(
-                "Modrinth modpack export completed. InstanceId={InstanceId} ManifestFileCount={ManifestFileCount} OverrideFileCount={OverrideFileCount}",
-                request.Instance.Id,
+                "Modrinth modpack export completed. InstanceDirectory={InstanceDirectory} ManifestFileCount={ManifestFileCount} OverrideFileCount={OverrideFileCount}",
+                request.Instance.InstanceDirectory,
                 manifestFiles.Count,
                 overrideFiles.Count);
             logger.LogDebug("Modrinth modpack export path resolved. OutputArchivePath={OutputArchivePath}", outputPath);
@@ -127,27 +129,27 @@ internal sealed class ModrinthModpackExporter
         }
         catch (HttpRequestException exception)
         {
-            logger.LogWarning(exception, "Modrinth modpack export API request failed. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogWarning(exception, "Modrinth modpack export API request failed. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.ModrinthApiFailed);
         }
         catch (JsonException exception)
         {
-            logger.LogWarning(exception, "Modrinth modpack export API response was invalid. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogWarning(exception, "Modrinth modpack export API response was invalid. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.ModrinthApiFailed);
         }
         catch (IOException exception)
         {
-            logger.LogError(exception, "Modrinth modpack export file operation failed. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogError(exception, "Modrinth modpack export file operation failed. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.FileSystemError);
         }
         catch (UnauthorizedAccessException exception)
         {
-            logger.LogError(exception, "Modrinth modpack export file access failed. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogError(exception, "Modrinth modpack export file access failed. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.FileSystemError);
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Modrinth modpack export failed unexpectedly. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogError(exception, "Modrinth modpack export failed unexpectedly. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.UnexpectedError);
         }
     }

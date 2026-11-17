@@ -214,8 +214,7 @@ public sealed class ResourceProjectInstallationService : IResourceProjectInstall
 
     private IResourceCatalogDestinationWriter RequireDestinationWriter() =>
         resourceCatalogService as IResourceCatalogDestinationWriter
-        ?? throw new InvalidOperationException(
-            "The configured resource catalog does not support explicit download destinations.");
+        ?? throw SafeExceptionLog.Describe(new InvalidOperationException("The configured resource catalog does not support explicit download destinations."), "DownloadValidation", ("Reason", "The configured resource catalog does not support explicit download destinations."));
 
     private static ResourceProjectDestinationState RequireExpectedDestinationState(
         ResourceProjectInstallationRequest request) =>
@@ -260,16 +259,12 @@ public sealed class ResourceProjectInstallationService : IResourceProjectInstall
             var result = await localModpackImportService.ImportFromArchiveAsync(
                 archivePath,
                 progress,
-                cancellationToken).ConfigureAwait(false);
-            if (result.IsSuccess
-                && result.ImportedInstance is not null
-                && preparedIconPath is not null)
-            {
-                await TryApplyResourceProjectIconAsync(
-                        preparedIconPath,
-                        result.ImportedInstance)
-                    .ConfigureAwait(false);
-            }
+                cancellationToken,
+                prepareInstanceAsync: preparedIconPath is null ? null : staged =>
+                {
+                    TryApplyResourceProjectIcon(preparedIconPath, staged);
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
             return new ResourceProjectInstallationResult(archivePath, result);
         }
         finally
@@ -402,27 +397,27 @@ public sealed class ResourceProjectInstallationService : IResourceProjectInstall
         }
     }
 
-    private async Task TryApplyResourceProjectIconAsync(
+    private void TryApplyResourceProjectIcon(
         string preparedIconPath,
-        GameInstance instance)
+        StagedModpackInstance staged)
     {
+        var instance = staged.Instance;
         var originalIconSource = instance.IconSource;
         var iconDirectory = Path.Combine(
             instance.InstanceDirectory,
             LauncherApplicationIdentity.StorageDirectoryName);
-        var destinationPath = Path.Combine(iconDirectory, ResourceProjectIconFileName);
-        var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.tmp";
+        var iconFileName = $"resource-project-icon-{Guid.NewGuid():N}.png";
+        var destinationPath = Path.Combine(iconDirectory, iconFileName);
+        var finalDirectory = staged.InstallTransaction?.FinalDirectory ?? staged.InstanceDirectory;
         try
         {
             Directory.CreateDirectory(iconDirectory);
-            File.Copy(preparedIconPath, temporaryPath, overwrite: false);
-            File.Move(temporaryPath, destinationPath, overwrite: true);
-            instance.IconSource = new Uri(Path.GetFullPath(destinationPath)).AbsoluteUri;
-            await gameInstanceService.SaveInstanceAsync(instance, CancellationToken.None)
-                .ConfigureAwait(false);
+            File.Copy(preparedIconPath, destinationPath, overwrite: false);
+            instance.IconSource = new Uri(Path.GetFullPath(Path.Combine(
+                finalDirectory, LauncherApplicationIdentity.StorageDirectoryName, iconFileName))).AbsoluteUri;
             logger.LogInformation(
-                "Resource project icon applied to imported instance. InstanceId={InstanceId}",
-                instance.Id);
+                "Resource project icon applied to imported instance. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
         }
         catch (Exception exception)
         {
@@ -430,12 +425,8 @@ public sealed class ResourceProjectInstallationService : IResourceProjectInstall
             TryDelete(destinationPath);
             logger.LogWarning(
                 exception,
-                "Failed to apply resource project icon to imported instance. InstanceId={InstanceId}",
-                instance.Id);
-        }
-        finally
-        {
-            TryDelete(temporaryPath);
+                "Failed to apply resource project icon to imported instance. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
         }
     }
 

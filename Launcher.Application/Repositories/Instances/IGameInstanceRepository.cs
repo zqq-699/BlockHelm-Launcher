@@ -23,9 +23,13 @@ namespace Launcher.Application.Repositories;
 
 public interface IGameInstanceRepository
 {
+    bool CanReuseSettingsSnapshot(GameInstance previous, GameInstance current, bool allowOlderRead = false) => ReferenceEquals(previous, current);
+
     Task<IReadOnlyList<GameInstance>> GetAllAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<GameInstance>> GetAllAsync(string minecraftDirectory, CancellationToken cancellationToken = default);
+
+    Task<InstanceCatalogSnapshot> ReadCatalogAsync(string minecraftDirectory, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates or updates settings for the supplied instances without deleting settings for omitted instances.
@@ -52,21 +56,25 @@ public interface IGameInstanceRepository
         string minecraftDirectory,
         CancellationToken cancellationToken = default);
 
-    string GetUniqueInstanceDirectory(string dataDirectory, string name);
 
     string GetVersionDirectory(string minecraftDirectory, string versionName);
 
     bool IsInstanceInstalled(GameInstance instance, string minecraftDirectory);
 
+    Task<bool> IsInstalledInstanceDirectoryAsync(string minecraftDirectory, string instanceDirectory,
+        CancellationToken cancellationToken = default);
+
     void CreateInstanceDirectories(string directory);
 
-    void DeleteVersionDirectory(string minecraftDirectory, string versionName);
 
     Task<string> StageVersionForDeletionAsync(
         string minecraftDirectory,
         string versionName,
-        string expectedInstanceId,
+        string expectedInstanceDirectory,
         CancellationToken cancellationToken = default);
+
+    Task<string> StageVersionForDeletionAsync(string minecraftDirectory, GameInstance instance, CancellationToken cancellationToken = default)
+        => StageVersionForDeletionAsync(minecraftDirectory, instance.VersionName, instance.InstanceDirectory, cancellationToken);
 
     Task<bool> TryDeleteStagedVersionDirectoryAsync(
         string minecraftDirectory,

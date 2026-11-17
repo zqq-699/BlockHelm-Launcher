@@ -58,19 +58,20 @@ internal sealed class LocalSaveArchiveImporter
     /// 校验归档路径和格式，将可预期失败转换为用户可处理的导入失败原因。
     /// </summary>
     public LocalSaveImportResult Import(
-        string instanceId,
+        string instanceDirectory,
         string savesDirectory,
         string archivePath,
         Func<string, LocalSave> createSave,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var normalizedArchivePath = Path.GetFullPath(archivePath);
         if (!File.Exists(normalizedArchivePath))
         {
             logger.LogDebug(
-                "Skipping local save import because archive does not exist. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instanceId,
+                "Skipping local save import because archive does not exist. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instanceDirectory,
                 normalizedArchivePath);
             return LocalSaveImportResult.Failure(LocalSaveImportFailureReason.FileNotFound);
         }
@@ -78,25 +79,26 @@ internal sealed class LocalSaveArchiveImporter
         if (!IsSupportedArchivePath(normalizedArchivePath))
         {
             logger.LogDebug(
-                "Skipping local save import because archive type is unsupported. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instanceId,
+                "Skipping local save import because archive type is unsupported. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instanceDirectory,
                 normalizedArchivePath);
             return LocalSaveImportResult.Failure(LocalSaveImportFailureReason.UnsupportedArchive);
         }
 
         logger.LogDebug(
-            "Importing local save archive. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-            instanceId,
+            "Importing local save archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+            instanceDirectory,
             normalizedArchivePath);
 
         try
         {
             return ImportValidatedArchive(
-                instanceId,
+                instanceDirectory,
                 savesDirectory,
                 normalizedArchivePath,
                 createSave,
-                cancellationToken);
+                cancellationToken,
+                instanceScope);
         }
         catch (OperationCanceledException)
         {
@@ -104,32 +106,32 @@ internal sealed class LocalSaveArchiveImporter
         }
         catch (InvalidOperationException exception)
         {
-            logger.LogWarning(exception, "Failed to open local save archive. InstanceId={InstanceId} ArchivePath={ArchivePath}", instanceId, normalizedArchivePath);
+            logger.LogWarning(exception, "Failed to open local save archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}", instanceDirectory, normalizedArchivePath);
             return UnexpectedFailure();
         }
         catch (InvalidFormatException exception)
         {
-            logger.LogWarning(exception, "Failed to parse local save archive. InstanceId={InstanceId} ArchivePath={ArchivePath}", instanceId, normalizedArchivePath);
+            logger.LogWarning(exception, "Failed to parse local save archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}", instanceDirectory, normalizedArchivePath);
             return UnexpectedFailure();
         }
         catch (NotSupportedException exception)
         {
-            logger.LogWarning(exception, "Unsupported local save archive feature encountered. InstanceId={InstanceId} ArchivePath={ArchivePath}", instanceId, normalizedArchivePath);
+            logger.LogWarning(exception, "Unsupported local save archive feature encountered. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}", instanceDirectory, normalizedArchivePath);
             return LocalSaveImportResult.Failure(LocalSaveImportFailureReason.UnsupportedArchive);
         }
         catch (IOException exception)
         {
-            logger.LogWarning(exception, "Failed to import local save archive because a file operation failed. InstanceId={InstanceId} ArchivePath={ArchivePath}", instanceId, normalizedArchivePath);
+            logger.LogWarning(exception, "Failed to import local save archive because a file operation failed. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}", instanceDirectory, normalizedArchivePath);
             return UnexpectedFailure();
         }
         catch (UnauthorizedAccessException exception)
         {
-            logger.LogWarning(exception, "Failed to import local save archive because access was denied. InstanceId={InstanceId} ArchivePath={ArchivePath}", instanceId, normalizedArchivePath);
+            logger.LogWarning(exception, "Failed to import local save archive because access was denied. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}", instanceDirectory, normalizedArchivePath);
             return UnexpectedFailure();
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Unexpected failure while importing local save archive. InstanceId={InstanceId} ArchivePath={ArchivePath}", instanceId, normalizedArchivePath);
+            logger.LogError(exception, "Unexpected failure while importing local save archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}", instanceDirectory, normalizedArchivePath);
             return UnexpectedFailure();
         }
     }
@@ -138,18 +140,19 @@ internal sealed class LocalSaveArchiveImporter
     /// 识别存档根目录、创建唯一目标目录并执行失败后可清理的解压。
     /// </summary>
     private LocalSaveImportResult ImportValidatedArchive(
-        string instanceId,
+        string instanceDirectory,
         string savesDirectory,
         string archivePath,
         Func<string, LocalSave> createSave,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope)
     {
         var entries = ReadArchiveEntries(archivePath);
         if (entries.Length == 0)
         {
             logger.LogDebug(
-                "Local save archive did not contain any usable entries. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instanceId,
+                "Local save archive did not contain any usable entries. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instanceDirectory,
                 archivePath);
             return LocalSaveImportResult.Failure(LocalSaveImportFailureReason.InvalidMinecraftSaveArchive);
         }
@@ -159,40 +162,43 @@ internal sealed class LocalSaveArchiveImporter
         if (archiveRoot is null)
         {
             logger.LogDebug(
-                "Local save archive is not a valid Minecraft save. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instanceId,
+                "Local save archive is not a valid Minecraft save. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instanceDirectory,
                 archivePath);
             return LocalSaveImportResult.Failure(LocalSaveImportFailureReason.InvalidMinecraftSaveArchive);
         }
 
+        instanceScope?.EnsureCurrent();
         Directory.CreateDirectory(savesDirectory);
+        using var savesLease = WindowsDirectoryHandleMover.AcquireReadLease(savesDirectory);
         var preferredDirectoryName = archiveRoot.Length == 0 ? RemoveAllExtensions(archivePath) : archiveRoot;
         var resolvedDirectoryName = ResolveUniqueDirectoryName(
             savesDirectory,
             SanitizeDirectoryName(preferredDirectoryName));
         var targetSaveDirectory = Path.Combine(savesDirectory, resolvedDirectoryName);
         logger.LogDebug(
-            "Resolved local save archive target. InstanceId={InstanceId} ArchivePath={ArchivePath} SaveDirectory={SaveDirectory}",
-            instanceId,
+            "Resolved local save archive target. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath} SaveDirectory={SaveDirectory}",
+            instanceDirectory,
             archivePath,
             targetSaveDirectory);
 
         Directory.CreateDirectory(targetSaveDirectory);
         try
         {
-            ExtractArchiveEntries(archivePath, archiveRoot, targetSaveDirectory, cancellationToken);
+            ExtractArchiveEntries(archivePath, archiveRoot, targetSaveDirectory, cancellationToken, instanceScope);
+            instanceScope?.EnsureCurrent();
         }
         catch
         {
             // 取消和解压异常都不能留下一个看似有效但内容不完整的存档目录。
-            SafeDeleteDirectory(targetSaveDirectory);
+            if (instanceScope?.IsCurrent is not false) SafeDeleteDirectory(targetSaveDirectory);
             throw;
         }
 
         var importedSave = createSave(targetSaveDirectory);
         logger.LogDebug(
-            "Local save archive imported. InstanceId={InstanceId} ArchivePath={ArchivePath} SaveDirectory={SaveDirectory}",
-            instanceId,
+            "Local save archive imported. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath} SaveDirectory={SaveDirectory}",
+            instanceDirectory,
             archivePath,
             targetSaveDirectory);
         return LocalSaveImportResult.Success(importedSave);
@@ -241,22 +247,24 @@ internal sealed class LocalSaveArchiveImporter
         string archivePath,
         string archiveRoot,
         string targetSaveDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope)
     {
         if (IsTarArchivePath(archivePath))
         {
-            ExtractTarArchiveEntries(archivePath, archiveRoot, targetSaveDirectory, cancellationToken);
+            ExtractTarArchiveEntries(archivePath, archiveRoot, targetSaveDirectory, cancellationToken, instanceScope);
             return;
         }
 
-        ExtractGenericArchiveEntries(archivePath, archiveRoot, targetSaveDirectory, cancellationToken);
+        ExtractGenericArchiveEntries(archivePath, archiveRoot, targetSaveDirectory, cancellationToken, instanceScope);
     }
 
     private static void ExtractGenericArchiveEntries(
         string archivePath,
         string archiveRoot,
         string targetSaveDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope)
     {
         using var extractionStream = File.OpenRead(archivePath);
         using var archive = ArchiveFactory.OpenArchive(extractionStream);
@@ -268,7 +276,7 @@ internal sealed class LocalSaveArchiveImporter
                 continue;
 
             using var entryStream = entry.OpenEntryStream();
-            ExtractEntry(entryStream, targetSaveDirectory, relativePath, cancellationToken);
+            ExtractEntry(entryStream, targetSaveDirectory, relativePath, cancellationToken, instanceScope);
         }
     }
 
@@ -276,7 +284,8 @@ internal sealed class LocalSaveArchiveImporter
         string archivePath,
         string archiveRoot,
         string targetSaveDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope)
     {
         using var fileStream = File.OpenRead(archivePath);
         using var archiveStream = OpenTarArchiveStream(fileStream, archivePath);
@@ -290,7 +299,7 @@ internal sealed class LocalSaveArchiveImporter
 
             var relativePath = ResolveRelativeEntryPath(entry.Name, archiveRoot);
             if (relativePath.Length != 0)
-                ExtractEntry(entry.DataStream, targetSaveDirectory, relativePath, cancellationToken);
+                ExtractEntry(entry.DataStream, targetSaveDirectory, relativePath, cancellationToken, instanceScope);
         }
     }
 
@@ -359,8 +368,10 @@ internal sealed class LocalSaveArchiveImporter
         Stream sourceStream,
         string targetDirectory,
         string relativePath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope)
     {
+        instanceScope?.EnsureCurrent();
         var relativePathForDisk = relativePath.Replace('/', Path.DirectorySeparatorChar);
         var fullTargetPath = GetValidatedTargetPath(targetDirectory, relativePathForDisk);
         var targetParentDirectory = Path.GetDirectoryName(fullTargetPath);

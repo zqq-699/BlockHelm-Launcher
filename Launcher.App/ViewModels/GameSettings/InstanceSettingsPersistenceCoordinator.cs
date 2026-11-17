@@ -36,7 +36,7 @@ internal sealed class InstanceSettingsPersistenceCoordinator : IDisposable
     private readonly object pendingSavesLock = new();
     private CancellationTokenSource instanceLifetime = new();
     private GameInstance? selectedInstance;
-    private string? selectedInstanceId;
+    private string? selectedInstanceDirectory;
     private int generation;
     private bool disposed;
 
@@ -54,20 +54,49 @@ internal sealed class InstanceSettingsPersistenceCoordinator : IDisposable
 
     public event Action<GameInstance>? InstanceSaved;
 
-    public void SetInstance(GameInstance? instance)
+    public bool HasPendingSave(string area)
+    {
+        lock (pendingSavesLock)
+            return pendingSaves.ContainsKey(area);
+    }
+
+    public GameInstance? SetInstance(GameInstance? instance)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         if (ReferenceEquals(selectedInstance, instance))
-            return;
+            return instance;
 
+        if (selectedInstance is not null && instance is not null
+            && instanceService.CanReuseSettingsSnapshot(selectedInstance, instance, allowOlderRead: true))
+        {
+            // Only disk-derived identity/version fields are refreshed; pending editor
+            // mutations and the snapshot's save credentials stay together.
+            selectedInstance.Name = instance.Name;
+            selectedInstance.InstanceDirectory = instance.InstanceDirectory;
+            selectedInstance.VersionName = instance.VersionName;
+            selectedInstance.MinecraftVersion = instance.MinecraftVersion;
+            selectedInstance.VersionType = instance.VersionType;
+            selectedInstance.Loader = instance.Loader;
+            selectedInstance.LoaderVersion = instance.LoaderVersion;
+            return selectedInstance;
+        }
+
+        var interruptedEdit = instance is not null
+            && selectedInstanceDirectory is not null
+            && string.Equals(selectedInstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
+        lock (pendingSavesLock)
+            interruptedEdit &= pendingSaves.Count > 0;
         selectedInstance = instance;
-        selectedInstanceId = instance?.Id;
+        selectedInstanceDirectory = instance?.InstanceDirectory;
         Interlocked.Increment(ref generation);
         CancelPendingSaves();
         var nextLifetime = new CancellationTokenSource();
         var previousLifetime = Interlocked.Exchange(ref instanceLifetime, nextLifetime);
         previousLifetime.Cancel();
         previousLifetime.Dispose();
+        if (interruptedEdit)
+            statusService.Report(Strings.Status_InstanceSettingsSaveFailed);
+        return instance;
     }
 
     public void Schedule(
@@ -78,8 +107,17 @@ internal sealed class InstanceSettingsPersistenceCoordinator : IDisposable
         TimeSpan? delay = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        if (!string.Equals(selectedInstanceId, instance.Id, StringComparison.OrdinalIgnoreCase))
-            return;
+        if (!ReferenceEquals(selectedInstance, instance))
+        {
+            if (selectedInstance is not null && instanceService.CanReuseSettingsSnapshot(selectedInstance, instance))
+                instance = selectedInstance;
+            else
+            {
+                if (string.Equals(selectedInstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase))
+                    statusService.Report(Strings.Status_InstanceSettingsSaveFailed);
+                return;
+            }
+        }
 
         var requestGeneration = generation;
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(instanceLifetime.Token);
@@ -92,6 +130,44 @@ internal sealed class InstanceSettingsPersistenceCoordinator : IDisposable
 
         previous?.Cancel();
         _ = PersistAsync(area, instance, requestGeneration, applyMutation, restoreEditor, delay, cancellation);
+    }
+
+    public async Task<bool> SaveAsync(GameInstance instance, Func<GameInstance, Action?> applyMutation)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        var current = selectedInstance;
+        if (current is null || (!ReferenceEquals(current, instance)
+            && !instanceService.CanReuseSettingsSnapshot(current, instance, allowOlderRead: true)))
+            return false;
+
+        var requestGeneration = generation;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(instanceLifetime.Token);
+        await saveGate.WaitAsync(cancellation.Token);
+        Action? rollback = null;
+        try
+        {
+            if (!IsCurrent(current, requestGeneration))
+                return false;
+            rollback = applyMutation(current);
+            if (rollback is null)
+                return true;
+            await instanceService.SaveInstanceAsync(current, cancellation.Token);
+            if (IsCurrent(current, requestGeneration))
+                uiDispatcher.Post(() =>
+                {
+                    if (IsCurrent(current, requestGeneration)) InstanceSaved?.Invoke(current);
+                });
+            return IsCurrent(current, requestGeneration);
+        }
+        catch
+        {
+            rollback?.Invoke();
+            throw;
+        }
+        finally
+        {
+            saveGate.Release();
+        }
     }
 
     public void Dispose()
@@ -131,7 +207,10 @@ internal sealed class InstanceSettingsPersistenceCoordinator : IDisposable
 
             await instanceService.SaveInstanceAsync(instance, cancellation.Token);
             if (IsCurrent(instance, requestGeneration))
-                uiDispatcher.Post(() => InstanceSaved?.Invoke(instance));
+                uiDispatcher.Post(() =>
+                {
+                    if (IsCurrent(instance, requestGeneration)) InstanceSaved?.Invoke(instance);
+                });
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -142,13 +221,14 @@ internal sealed class InstanceSettingsPersistenceCoordinator : IDisposable
             rollback?.Invoke();
             logger.LogError(
                 exception,
-                "Failed to save instance settings. InstanceId={InstanceId} Area={Area}",
-                instance.Id,
+                "Failed to save instance settings. InstanceDirectory={InstanceDirectory} Area={Area}",
+                instance.InstanceDirectory,
                 area);
             if (IsCurrent(instance, requestGeneration))
             {
                 uiDispatcher.Post(() =>
                 {
+                    if (!IsCurrent(instance, requestGeneration)) return;
                     restoreEditor();
                     statusService.Report(Strings.Status_InstanceSettingsSaveFailed);
                 });
@@ -172,7 +252,8 @@ internal sealed class InstanceSettingsPersistenceCoordinator : IDisposable
     private bool IsCurrent(GameInstance instance, int requestGeneration)
     {
         return requestGeneration == generation
-            && string.Equals(selectedInstanceId, instance.Id, StringComparison.OrdinalIgnoreCase);
+            && ReferenceEquals(selectedInstance, instance)
+            && string.Equals(selectedInstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 
     private void CancelPendingSaves()

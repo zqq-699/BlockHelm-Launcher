@@ -33,14 +33,16 @@ internal static class AtomicJsonFileWriter
         string destinationPath,
         T value,
         JsonSerializerOptions options,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        Action? validateDestination = null) =>
         WriteAsync(
             destinationPath,
             value,
             options,
             cancellationToken,
             MaxMoveAttempts,
-            token => Task.Delay(RetryDelay, token));
+            token => Task.Delay(RetryDelay, token),
+            validateDestination);
 
     internal static async Task WriteAsync<T>(
         string destinationPath,
@@ -48,7 +50,8 @@ internal static class AtomicJsonFileWriter
         JsonSerializerOptions options,
         CancellationToken cancellationToken,
         int maxMoveAttempts,
-        Func<CancellationToken, Task> retryAsync)
+        Func<CancellationToken, Task> retryAsync,
+        Action? validateDestination = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         ArgumentNullException.ThrowIfNull(options);
@@ -59,6 +62,7 @@ internal static class AtomicJsonFileWriter
         var fullDestinationPath = Path.GetFullPath(destinationPath);
         var directory = Path.GetDirectoryName(fullDestinationPath)
             ?? throw new InvalidOperationException("The JSON destination must have a parent directory.");
+        validateDestination?.Invoke();
         Directory.CreateDirectory(directory);
 
         var temporaryPath = Path.Combine(
@@ -86,7 +90,8 @@ internal static class AtomicJsonFileWriter
                     fullDestinationPath,
                     maxMoveAttempts,
                     retryAsync,
-                    cancellationToken)
+                    cancellationToken,
+                    validateDestination)
                 .ConfigureAwait(false);
         }
         finally
@@ -100,11 +105,13 @@ internal static class AtomicJsonFileWriter
         string destination,
         int maxMoveAttempts,
         Func<CancellationToken, Task> retryAsync,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? validateDestination)
     {
         for (var attempt = 1; ; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            validateDestination?.Invoke();
             try
             {
                 File.Move(source, destination, overwrite: true);

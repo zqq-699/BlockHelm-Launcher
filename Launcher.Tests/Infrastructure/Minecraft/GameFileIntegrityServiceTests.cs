@@ -20,6 +20,114 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 
 public sealed class GameFileIntegrityServiceTests : TestTempDirectory
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ReferencedLocalParentWithDifferentJsonNameUsesItsActualClient(int referenceKind)
+    {
+        const string client = "parent client";
+        var root = Path.Combine(TempRoot, ".minecraft");
+        var parent = Path.Combine(root, "versions", "Parent");
+        var child = Path.Combine(root, "versions", "Child");
+        Directory.CreateDirectory(parent);
+        Directory.CreateDirectory(child);
+        var json = JsonNode.Parse("""{"id":"A","jar":"A","mainClass":"example.Main","libraries":[],"arguments":{"game":[],"jvm":["-cp","${classpath}"]}}""")!.AsObject();
+        json["downloads"] = new JsonObject { ["client"] = new JsonObject
+        {
+            ["url"] = "https://example.test/client.jar", ["sha1"] = Sha1(client), ["size"] = client.Length
+        } };
+        await File.WriteAllTextAsync(Path.Combine(parent, "A.json"), json.ToJsonString());
+        var jar = Path.Combine(parent, "A.jar");
+        await File.WriteAllTextAsync(jar, referenceKind == 2 ? "broken" : client);
+        var childJson = JsonNode.Parse("""{"id":"Child","inheritsFrom":"Parent","mainClass":"example.Child","libraries":[],"arguments":{"game":[],"jvm":["-cp","${classpath}"]}}""")!.AsObject();
+        if (referenceKind != 0) childJson["jar"] = "Parent";
+        if (referenceKind == 2) childJson.Remove("inheritsFrom");
+        await File.WriteAllTextAsync(Path.Combine(child, "Child.json"), childJson.ToJsonString());
+        var handler = new ContentHandler(new Dictionary<string, string> { ["https://example.test/client.jar"] = client });
+        var service = new GameFileIntegrityService(new HttpClient(handler), downloadSpeedLimitState: null);
+        var request = new GameFileIntegrityRequest(root, "Child", child);
+        var repaired = await service.ValidateAndRepairAsync(request, new GameFileRepairOptions(AllowRepair: true));
+        Assert.True(repaired.LaunchAllowed, string.Join("; ", repaired.Failures.Select(f => f.Source)));
+        using var process = await VanillaLoaderProvider.CreateLauncher(root, progress: null).BuildProcessAsync("Child",
+            new CmlLib.Core.ProcessBuilder.MLaunchOption { JavaPath = Environment.ProcessPath! });
+        var final = await service.ValidateFinalLaunchCommandAsync(request, process.StartInfo);
+        Assert.True(final.LaunchAllowed, string.Join("; ", final.Failures.Select(f => f.TargetPath + ": " + f.Source)));
+        Assert.Contains(jar, process.StartInfo.Arguments);
+        Assert.Equal(client, await File.ReadAllTextAsync(jar));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CopiedInstanceRepairAndFinalCommandValidateTheActualClientJar(
+        bool hasFolderNamedJar, bool corruptOriginalJar)
+    {
+        const string originalName = "26.3";
+        const string copiedName = "26.3 - Copy";
+        const string client = "valid client jar";
+        const string clientUrl = "https://example.test/client.jar";
+        var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");
+        var versionDirectory = Path.Combine(minecraftDirectory, "versions", copiedName);
+        Directory.CreateDirectory(versionDirectory);
+        var jsonPath = Path.Combine(versionDirectory, originalName + ".json");
+        var json = new JsonObject
+        {
+            ["id"] = originalName,
+            ["jar"] = originalName,
+            ["mainClass"] = "example.Main",
+            ["libraries"] = new JsonArray(),
+            ["arguments"] = new JsonObject
+            {
+                ["game"] = new JsonArray(),
+                ["jvm"] = new JsonArray("-cp", "${classpath}")
+            },
+            ["downloads"] = new JsonObject
+            {
+                ["client"] = new JsonObject
+                {
+                    ["url"] = clientUrl,
+                    ["sha1"] = Sha1(client),
+                    ["size"] = Encoding.UTF8.GetByteCount(client)
+                }
+            }
+        };
+        await File.WriteAllTextAsync(jsonPath, json.ToJsonString());
+        var originalJson = await File.ReadAllBytesAsync(jsonPath);
+        var actualJar = Path.Combine(versionDirectory, originalName + ".jar");
+        var folderNamedJar = Path.Combine(versionDirectory, copiedName + ".jar");
+        await File.WriteAllTextAsync(actualJar, corruptOriginalJar ? "broken" : client);
+        if (hasFolderNamedJar) await File.WriteAllTextAsync(folderNamedJar, client);
+        var service = new GameFileIntegrityService(
+            new HttpClient(new ContentHandler(new Dictionary<string, string> { [clientUrl] = client })),
+            downloadSpeedLimitState: null);
+        var request = new GameFileIntegrityRequest(minecraftDirectory, copiedName, versionDirectory);
+
+        var repaired = await service.ValidateAndRepairAsync(request, new GameFileRepairOptions(AllowRepair: true));
+        Assert.True(repaired.LaunchAllowed);
+        Assert.Equal(client, await File.ReadAllTextAsync(actualJar));
+        Assert.Equal(hasFolderNamedJar, File.Exists(folderNamedJar));
+
+        var launcher = VanillaLoaderProvider.CreateLauncher(minecraftDirectory, progress: null);
+        using var process = await launcher.BuildProcessAsync(copiedName,
+            new CmlLib.Core.ProcessBuilder.MLaunchOption
+            {
+                JavaPath = Environment.ProcessPath!,
+                Path = new InstanceMinecraftPath(versionDirectory)
+                {
+                    Versions = Path.Combine(minecraftDirectory, "versions"),
+                    Library = Path.Combine(minecraftDirectory, "libraries"),
+                    Assets = Path.Combine(minecraftDirectory, "assets")
+                }
+            });
+        var finalValidation = await service.ValidateFinalLaunchCommandAsync(request, process.StartInfo);
+
+        Assert.True(finalValidation.LaunchAllowed, string.Join("; ", finalValidation.Failures.Select(f => f.TargetPath + ": " + f.Source)));
+        Assert.Contains(actualJar, process.StartInfo.Arguments);
+        Assert.Equal(originalJson, await File.ReadAllBytesAsync(jsonPath));
+    }
+
     [Fact]
     public async Task ManifestResolutionUsesMissingOfficialParentInMemoryWithoutWritingIt()
     {

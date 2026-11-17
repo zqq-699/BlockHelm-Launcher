@@ -168,8 +168,9 @@ internal static class FabricVersionComposer
                 var profileNode = await JsonNode.ParseAsync(profileStream, cancellationToken: token);
                 if (profileNode is not JsonObject profileObject)
                 {
-                    throw new DownloadContentValidationException(
-                        $"Fabric profile metadata is not a JSON object: {minecraftVersion} {loaderVersion}");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                        $"Fabric profile metadata is not a JSON object: {minecraftVersion} {loaderVersion}"), "LoaderProfileRootInvalid",
+                        ("ExpectedFormat", "JSON object"), ("MinecraftVersion", minecraftVersion), ("LoaderVersion", loaderVersion), ("Loader", "Fabric"));
                 }
 
                 return profileObject;

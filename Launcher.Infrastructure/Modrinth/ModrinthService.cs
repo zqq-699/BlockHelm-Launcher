@@ -99,7 +99,7 @@ public sealed class ModrinthService : IModrinthService
             minecraftVersion,
             loader);
         var url = $"{BaseUrl}/search?limit=24&query={Uri.EscapeDataString(query ?? string.Empty)}&facets={Uri.EscapeDataString(JsonSerializer.Serialize(facets))}";
-        var response = await httpClient.GetFromJsonAsync<ModrinthSearchResponse>(url, cancellationToken);
+        var response = await DownloadHttpDiagnostics.GetFromJsonAsync<ModrinthSearchResponse>(httpClient, logger, url, cancellationToken);
         var projects = response?.Hits.Select(hit => new ModrinthProject
         {
             ProjectId = hit.ProjectId,
@@ -196,22 +196,22 @@ public sealed class ModrinthService : IModrinthService
     {
         // 用户指定版本仍需验证属于当前实例兼容集合，防止跨 Minecraft 版本安装。
         if (string.IsNullOrWhiteSpace(versionId))
-            throw new InvalidOperationException("Fabric API version id is required.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("Fabric API version id is required."), "ModrinthMetadata", ("Reason", "Fabric API version id is required."));
 
         logger.LogDebug(
-            "Installing Fabric API. VersionId={VersionId} MinecraftVersion={MinecraftVersion} InstanceId={InstanceId}",
+            "Installing Fabric API. VersionId={VersionId} MinecraftVersion={MinecraftVersion} InstanceDirectory={InstanceDirectory}",
             versionId,
             instance.MinecraftVersion,
-            instance.Id);
-        var version = await httpClient.GetFromJsonAsync<ModrinthVersion>(
+            instance.InstanceDirectory);
+        var version = await DownloadHttpDiagnostics.GetFromJsonAsync<ModrinthVersion>(httpClient, logger,
             $"{BaseUrl}/version/{Uri.EscapeDataString(versionId)}",
             cancellationToken)
-            ?? throw new InvalidOperationException($"Modrinth version metadata is empty: {versionId}");
+            ?? throw SafeExceptionLog.Describe(new InvalidOperationException($"Modrinth version metadata is empty: {versionId}"), "ModrinthVersionEmpty", ("VersionId", versionId));
 
         if (!string.Equals(version.ProjectId, FabricApiProjectId, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(version.ProjectId, FabricApiProjectSlug, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Modrinth version is not a Fabric API version: {versionId}");
+            throw SafeExceptionLog.Describe(new InvalidOperationException($"Modrinth version is not a Fabric API version: {versionId}"), "ModrinthProjectMismatch", ("ExpectedProject", FabricApiProjectSlug), ("ActualProject", version.ProjectId), ("VersionId", versionId));
         }
 
         return await InstallVersionFileAsync(
@@ -230,22 +230,22 @@ public sealed class ModrinthService : IModrinthService
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(versionId))
-            throw new InvalidOperationException("Quilt standard library version id is required.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("Quilt standard library version id is required."), "ModrinthMetadata", ("Reason", "Quilt standard library version id is required."));
 
         logger.LogDebug(
-            "Installing Quilt standard library. VersionId={VersionId} MinecraftVersion={MinecraftVersion} InstanceId={InstanceId}",
+            "Installing Quilt standard library. VersionId={VersionId} MinecraftVersion={MinecraftVersion} InstanceDirectory={InstanceDirectory}",
             versionId,
             instance.MinecraftVersion,
-            instance.Id);
-        var version = await httpClient.GetFromJsonAsync<ModrinthVersion>(
+            instance.InstanceDirectory);
+        var version = await DownloadHttpDiagnostics.GetFromJsonAsync<ModrinthVersion>(httpClient, logger,
             $"{BaseUrl}/version/{Uri.EscapeDataString(versionId)}",
             cancellationToken)
-            ?? throw new InvalidOperationException($"Modrinth version metadata is empty: {versionId}");
+            ?? throw SafeExceptionLog.Describe(new InvalidOperationException($"Modrinth version metadata is empty: {versionId}"), "ModrinthVersionEmpty", ("VersionId", versionId));
 
         if (!string.Equals(version.ProjectId, QuiltStandardLibraryProjectId, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(version.ProjectId, QuiltStandardLibraryProjectSlug, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Modrinth version is not a QFAPI/QSL version: {versionId}");
+            throw SafeExceptionLog.Describe(new InvalidOperationException($"Modrinth version is not a QFAPI/QSL version: {versionId}"), "ModrinthProjectMismatch", ("ExpectedProject", QuiltStandardLibraryProjectSlug), ("ActualProject", version.ProjectId), ("VersionId", versionId));
         }
 
         return await InstallVersionFileAsync(
@@ -273,8 +273,12 @@ public sealed class ModrinthService : IModrinthService
         string loader,
         CancellationToken cancellationToken)
     {
+        using var operation = DownloadDiagnostics.BeginOperation(logger, "ModrinthCompatibleVersions");
+        logger.LogInformation("Modrinth compatible versions lookup started. ProjectId={ProjectId} MinecraftVersion={MinecraftVersion} Loader={Loader}", projectIdOrSlug, minecraftVersion, loader);
         var versionsUrl = $"{BaseUrl}/project/{Uri.EscapeDataString(projectIdOrSlug)}/version?loaders={Uri.EscapeDataString(JsonSerializer.Serialize(new[] { loader }))}&game_versions={Uri.EscapeDataString(JsonSerializer.Serialize(new[] { minecraftVersion }))}";
-        return await httpClient.GetFromJsonAsync<List<ModrinthVersion>>(versionsUrl, cancellationToken) ?? [];
+        var versions = await DownloadHttpDiagnostics.GetFromJsonAsync<List<ModrinthVersion>>(httpClient, logger, versionsUrl, cancellationToken) ?? [];
+        logger.LogInformation("Modrinth compatible versions lookup completed. ProjectId={ProjectId} VersionCount={VersionCount}", projectIdOrSlug, versions.Count);
+        return versions;
     }
 
     private static List<ModrinthVersionInfo> MapVersionInfos(IEnumerable<ModrinthVersion> versions)
@@ -332,6 +336,7 @@ public sealed class ModrinthService : IModrinthService
             target,
             file.Url,
             integrity.ExpectedSize);
+        using var diagnosticLogScope = logScope.RestoreContext();
         try
         {
             var resolution = await executor.DownloadFileAsync(
@@ -380,7 +385,7 @@ public sealed class ModrinthService : IModrinthService
             || fileName.Contains(Path.DirectorySeparatorChar)
             || fileName.Contains(Path.AltDirectorySeparatorChar))
         {
-            throw new InvalidDataException("Modrinth returned an unsafe file name.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Modrinth returned an unsafe file name."), "ModrinthMetadata", ("Reason", "Modrinth returned an unsafe file name."));
         }
         return fileName;
     }
@@ -388,9 +393,9 @@ public sealed class ModrinthService : IModrinthService
     private static DownloadIntegrityExpectation CreateIntegrityExpectation(ModrinthFile file)
     {
         if (file.Size is null or < 0)
-            throw new InvalidDataException("Modrinth returned an invalid file size.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Modrinth returned an invalid file size."), "ModrinthMetadata", ("Reason", "Modrinth returned an invalid file size."));
         if (file.Hashes is null || !IsHexHash(file.Hashes.Sha512, 128))
-            throw new InvalidDataException("Modrinth returned no valid SHA-512 for the selected file.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Modrinth returned no valid SHA-512 for the selected file."), "ModrinthMetadata", ("Reason", "Modrinth returned no valid SHA-512 for the selected file."));
 
         var hashes = new List<(HashAlgorithmName Algorithm, string Value)>
         {
@@ -399,7 +404,7 @@ public sealed class ModrinthService : IModrinthService
         if (!string.IsNullOrWhiteSpace(file.Hashes.Sha1))
         {
             if (!IsHexHash(file.Hashes.Sha1, 40))
-                throw new InvalidDataException("Modrinth returned an invalid SHA-1 for the selected file.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Modrinth returned an invalid SHA-1 for the selected file."), "ModrinthMetadata", ("Reason", "Modrinth returned an invalid SHA-1 for the selected file."));
             hashes.Add((HashAlgorithmName.SHA1, file.Hashes.Sha1));
         }
         return new DownloadIntegrityExpectation(file.Size.Value, hashes);

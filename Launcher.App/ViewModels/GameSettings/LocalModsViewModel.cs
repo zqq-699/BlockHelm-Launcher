@@ -127,8 +127,20 @@ public sealed class LocalModsViewModel : IDisposable
         contentWatcher.SetInstance(instance);
         ClearMods();
         logger.LogDebug(
-            "Selected instance changed for local mods view. InstanceId={InstanceId}",
-            instance?.Id ?? "<none>");
+            "Selected instance changed for local mods view. InstanceDirectory={InstanceDirectory}",
+            instance?.InstanceDirectory ?? "<none>");
+    }
+
+    public void RefreshSelectedInstanceReference(GameInstance? instance)
+    {
+        if (ReferenceEquals(selectedInstance, instance)) return;
+        selectedInstance = instance;
+        Interlocked.Increment(ref modRefreshVersion);
+        Interlocked.Increment(ref invalidationRevision);
+        CancelRefresh();
+        CancelIconEnrichment();
+        categoryEnrichmentCoordinator.Cancel();
+        contentWatcher.SetInstance(instance);
     }
 
     public void SetSectionActive(bool active)
@@ -238,8 +250,8 @@ public sealed class LocalModsViewModel : IDisposable
         {
             logger.LogError(
                 exception,
-                "Failed to load local mods. InstanceId={InstanceId}",
-                instance.Id);
+                "Failed to load local mods. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
             throw;
         }
         finally
@@ -281,8 +293,8 @@ public sealed class LocalModsViewModel : IDisposable
             return false;
         AdvanceAppliedInvalidationRevision(invalidationAtStart);
         logger.LogDebug(
-            "Local mods view refreshed. InstanceId={InstanceId} Count={ModCount}",
-            instance.Id,
+            "Local mods view refreshed. InstanceDirectory={InstanceDirectory} Count={ModCount}",
+            instance.InstanceDirectory,
             Mods.Count);
         // 远程补全是非阻断增强，失败不会撤回已经可用的本地列表。
         if (snapshotChanged)
@@ -338,8 +350,8 @@ public sealed class LocalModsViewModel : IDisposable
         {
             logger.LogWarning(
                 exception,
-                "Failed to resolve cached local mod icons before publishing mods. InstanceId={InstanceId}",
-                instance.Id);
+                "Failed to resolve cached local mod icons before publishing mods. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
             return false;
         }
 
@@ -364,8 +376,8 @@ public sealed class LocalModsViewModel : IDisposable
         if (appliedCount > 0)
         {
             logger.LogDebug(
-                "Applied cached local mod icons before publishing mods. InstanceId={InstanceId} Count={Count}",
-                instance.Id,
+                "Applied cached local mod icons before publishing mods. InstanceDirectory={InstanceDirectory} Count={Count}",
+                instance.InstanceDirectory,
                 appliedCount);
         }
         return appliedCount > 0;
@@ -631,8 +643,8 @@ public sealed class LocalModsViewModel : IDisposable
                 // 图标属于可选增强，记录警告后保留现有列表和已解析的缓存图标。
                 logger.LogWarning(
                     exception,
-                    "Failed to enrich local mod icons. InstanceId={InstanceId}",
-                    instance.Id);
+                    "Failed to enrich local mod icons. InstanceDirectory={InstanceDirectory}",
+                    instance.InstanceDirectory);
             }
             finally
             {
@@ -720,7 +732,7 @@ public sealed class LocalModsViewModel : IDisposable
     private static bool IsSameInstancePath(GameInstance left, GameInstance? right)
     {
         return right is not null
-            && string.Equals(left.Id, right.Id, StringComparison.Ordinal)
+            && string.Equals(left.InstanceDirectory, right.InstanceDirectory, StringComparison.Ordinal)
             && string.Equals(left.InstanceDirectory, right.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 

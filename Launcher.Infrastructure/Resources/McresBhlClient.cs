@@ -17,6 +17,8 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Microsoft.Extensions.Logging;
 
+using Launcher.Infrastructure.Minecraft;
+
 namespace Launcher.Infrastructure.Resources;
 
 internal sealed class McresBhlClient(
@@ -87,6 +89,7 @@ internal sealed class McresBhlClient(
         catch (OperationCanceledException exception)
         {
             logger.LogWarning(
+                exception,
                 "MCRES related website lookup timed out. Source={Source} ProjectId={ProjectId} ErrorType={ErrorType}",
                 reference.Source,
                 reference.ProjectId,
@@ -95,6 +98,7 @@ internal sealed class McresBhlClient(
         catch (Exception exception) when (exception is HttpRequestException or JsonException or NotSupportedException)
         {
             logger.LogWarning(
+                exception,
                 "MCRES related website lookup failed. Source={Source} ProjectId={ProjectId} ErrorType={ErrorType}",
                 reference.Source,
                 reference.ProjectId,
@@ -112,8 +116,7 @@ internal sealed class McresBhlClient(
     {
         var requestUri =
             $"{BaseUrl}/lookup?provider={Uri.EscapeDataString(provider)}&project_id={Uri.EscapeDataString(projectId)}&key={Uri.EscapeDataString(apiKey)}";
-        using var response = await httpClient
-            .GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+        using var response = await DownloadHttpDiagnostics.GetAsync(httpClient, logger, requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.NotFound)
             return null;
@@ -127,9 +130,7 @@ internal sealed class McresBhlClient(
             return null;
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        var result = await JsonSerializer
-            .DeserializeAsync<McresLookupResponse>(stream, JsonOptions, cancellationToken)
+        var result = await DownloadHttpDiagnostics.DeserializeJsonAsync<McresLookupResponse>(response, logger, cancellationToken, JsonOptions)
             .ConfigureAwait(false);
         if (result is null || result.Code is 404 || result.Resources is null || result.Resources.Count == 0)
             return null;
@@ -154,8 +155,7 @@ internal sealed class McresBhlClient(
     {
         var requestUri =
             $"{BaseUrl}/detail/{Uri.EscapeDataString(resource.ResourceType)}/{resource.ResourceId}?key={Uri.EscapeDataString(apiKey)}";
-        using var response = await httpClient
-            .GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+        using var response = await DownloadHttpDiagnostics.GetAsync(httpClient, logger, requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.NotFound)
             return null;
@@ -169,9 +169,7 @@ internal sealed class McresBhlClient(
             return null;
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        var result = await JsonSerializer
-            .DeserializeAsync<McresDetailResponse>(stream, JsonOptions, cancellationToken)
+        var result = await DownloadHttpDiagnostics.DeserializeJsonAsync<McresDetailResponse>(response, logger, cancellationToken, JsonOptions)
             .ConfigureAwait(false);
         if (result is null || result.Code is 404)
             return null;

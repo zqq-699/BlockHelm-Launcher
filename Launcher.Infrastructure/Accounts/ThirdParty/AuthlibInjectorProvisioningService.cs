@@ -81,7 +81,7 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
             }
             catch (Exception exception)
             {
-                logger.LogWarning("Unable to prepare the latest authlib-injector build; checking verified cache. ErrorType={ErrorType}",
+                logger.LogWarning(exception, "Unable to prepare the latest authlib-injector build; checking verified cache. ErrorType={ErrorType}",
                     exception.GetType().FullName);
                 var fallback = await FindVerifiedFallbackAsync(cancellationToken).ConfigureAwait(false);
                 if (fallback is not null)
@@ -353,11 +353,11 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
             || metadata.Checksums.Sha256.Length != 64
             || !metadata.Checksums.Sha256.All(Uri.IsHexDigit))
         {
-            throw new InvalidDataException("The authlib-injector metadata is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The authlib-injector metadata is invalid."), "ComponentValidation", ("Reason", "The authlib-injector metadata is invalid."));
         }
     }
 
-    private static async Task<bool> HashMatchesAsync(
+    private async Task<bool> HashMatchesAsync(
         string path,
         string expectedHash,
         CancellationToken cancellationToken)
@@ -370,7 +370,10 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
             81920,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         var hash = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
-        return string.Equals(Convert.ToHexString(hash), expectedHash, StringComparison.OrdinalIgnoreCase);
+        var matches = string.Equals(Convert.ToHexString(hash), expectedHash, StringComparison.OrdinalIgnoreCase);
+        if (!matches)
+            logger.LogWarning("Authlib-injector integrity check failed. Artifact={Artifact} HashAlgorithm=SHA256 ExpectedHash={ExpectedHash} ActualHash={ActualHash}", path, expectedHash, Convert.ToHexString(hash));
+        return matches;
     }
 
     private static AuthlibInjectorArtifact ToArtifact(string path, ArtifactMetadata metadata) =>
@@ -387,14 +390,9 @@ internal sealed class AuthlibInjectorProvisioningService : IAuthlibInjectorProvi
             if (File.Exists(path))
                 File.Delete(path);
         }
-        catch (InvalidDataException)
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            logger.LogWarning(exception, "Authlib-injector cache cleanup failed. Artifact={Artifact} Stage=Cleanup", path);
         }
     }
 

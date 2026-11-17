@@ -263,9 +263,6 @@ public sealed class LauncherSessionCoordinator : IDisposable
 
     private void SynchronizeGameSettingsInstances()
     {
-        if (gameSettingsPage.IsDetailsStep)
-            return;
-
         gameSettingsPage.ApplyInstanceCatalog(
             gameManagement.Instances,
             gameManagement.InstanceCatalogRevision);
@@ -277,6 +274,8 @@ public sealed class LauncherSessionCoordinator : IDisposable
             SynchronizeHomeInstances();
         else if (NavigationCatalog.IsPage(currentPage, NavigationCatalog.GameSettingsPage))
             SynchronizeGameSettingsInstances();
+        else if (NavigationCatalog.IsPage(currentPage, NavigationCatalog.ResourcesPage))
+            resourcesPage.ApplyInstanceCatalog(gameManagement.Instances, gameManagement.InstanceCatalogRevision);
     }
 
     private void GameManagement_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -311,7 +310,7 @@ public sealed class LauncherSessionCoordinator : IDisposable
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Failed to persist installed instance selection. InstanceId={InstanceId}", instance.Id);
+            logger.LogWarning(exception, "Failed to persist installed instance selection. InstanceDirectory={InstanceDirectory}", instance.InstanceDirectory);
             gameManagement.SelectedInstance = instance;
         }
 
@@ -347,7 +346,7 @@ public sealed class LauncherSessionCoordinator : IDisposable
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Failed to select launch instance from game settings. InstanceId={InstanceId}", instance.Id);
+            logger.LogWarning(exception, "Failed to select launch instance from game settings. InstanceDirectory={InstanceDirectory}", instance.InstanceDirectory);
             statusService.Report(Strings.Status_LaunchInstanceSelectionFailed);
         }
     }
@@ -362,7 +361,7 @@ public sealed class LauncherSessionCoordinator : IDisposable
     private void GameSettingsPage_InstanceListActivated()
     {
         if (NavigationCatalog.IsPage(currentPage, NavigationCatalog.GameSettingsPage))
-            SynchronizeGameSettingsInstances();
+            stateSyncService.RequestSync();
     }
 
     private async Task OpenOnlineResourcesForInstanceAsync(GameInstance instance, ResourceProjectKind kind)
@@ -382,18 +381,18 @@ public sealed class LauncherSessionCoordinator : IDisposable
         // monitor so the launcher's own metadata write cannot queue a stale full-page refresh.
         stateSyncService.AcknowledgeLocalStateChange();
 
-        // 已完成的本地变更携带权威实例或 ID，直接串行合并，避免再扫描目录。
+        // 已完成的本地变更携带权威实例或目录，直接串行合并，避免再扫描目录。
         if (args.Kind is GameSettingsInstancesChangedKind.Updated && args.UpdatedInstance is not null)
         {
-            await gameManagement.ApplyUpdatedInstanceAsync(args.UpdatedInstance);
+            await gameManagement.ApplyUpdatedInstanceAsync(args.UpdatedInstance, args.PreviousInstanceDirectory);
             SynchronizeVisibleInstanceProjection();
             return;
         }
 
         if (args.Kind is GameSettingsInstancesChangedKind.Deleted
-            && !string.IsNullOrWhiteSpace(args.DeletedInstanceId))
+            && !string.IsNullOrWhiteSpace(args.DeletedInstanceDirectory))
         {
-            await gameManagement.RemoveInstanceAsync(args.DeletedInstanceId);
+            await gameManagement.RemoveInstanceAsync(args.DeletedInstanceDirectory);
             SynchronizeVisibleInstanceProjection();
             return;
         }
@@ -477,7 +476,7 @@ public sealed class LauncherSessionCoordinator : IDisposable
                     settings.MinecraftDirectory,
                     latestSettings.MinecraftDirectory))
             {
-                settings.DefaultInstanceId = latestSettings.DefaultInstanceId;
+                settings.DefaultInstanceDirectory = latestSettings.DefaultInstanceDirectory;
             }
             SynchronizeVisibleInstanceProjection();
             stateSyncService.AcknowledgeLocalStateChange();

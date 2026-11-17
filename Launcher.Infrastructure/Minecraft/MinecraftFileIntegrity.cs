@@ -7,6 +7,7 @@
 
 using System.Buffers;
 using System.IO;
+using Launcher.Application.Services;
 using System.Security.Cryptography;
 
 namespace Launcher.Infrastructure.Minecraft;
@@ -46,26 +47,26 @@ internal static class MinecraftFileIntegrity
     }
 
     public static async Task<MinecraftFileIntegrityStatus> EvaluateAsync(
-        string path,
-        string? expectedSha1,
-        long? expectedSize,
-        MinecraftFileVerification verification,
+        string path, string? expectedSha1, long? expectedSize, MinecraftFileVerification verification,
+        CancellationToken cancellationToken = default) =>
+        (await InspectAsync(path, expectedSha1, expectedSize, verification, cancellationToken).ConfigureAwait(false)).Status;
+
+    public static async Task<MinecraftIntegrityResult> InspectAsync(
+        string path, string? expectedSha1, long? expectedSize, MinecraftFileVerification verification,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(path))
-            return MinecraftFileIntegrityStatus.Missing;
-
-        if (expectedSize is > 0 && new FileInfo(path).Length != expectedSize.Value)
-            return MinecraftFileIntegrityStatus.SizeMismatch;
-
-        if (verification != MinecraftFileVerification.Full || string.IsNullOrWhiteSpace(expectedSha1))
-            return MinecraftFileIntegrityStatus.Valid;
-
-        var actualSha1 = await ComputeSha1Async(path, cancellationToken).ConfigureAwait(false);
-        return string.Equals(actualSha1, expectedSha1, StringComparison.OrdinalIgnoreCase)
-            ? MinecraftFileIntegrityStatus.Valid
-            : MinecraftFileIntegrityStatus.HashMismatch;
+            return new(MinecraftFileIntegrityStatus.Missing, expectedSize, null, expectedSha1, null, verification);
+        var actualSize = new FileInfo(path).Length;
+        if (expectedSize is > 0 && actualSize != expectedSize.Value)
+            return new(MinecraftFileIntegrityStatus.SizeMismatch, expectedSize, actualSize, expectedSha1, null, verification);
+        string? actualSha1 = null;
+        if (verification == MinecraftFileVerification.Full && !string.IsNullOrWhiteSpace(expectedSha1))
+            actualSha1 = await ComputeSha1Async(path, cancellationToken).ConfigureAwait(false);
+        var status = actualSha1 is not null && !string.Equals(actualSha1, expectedSha1, StringComparison.OrdinalIgnoreCase)
+            ? MinecraftFileIntegrityStatus.HashMismatch : MinecraftFileIntegrityStatus.Valid;
+        return new(status, expectedSize, actualSize, expectedSha1, actualSha1, verification);
     }
 
     public static bool IsValid(
@@ -131,4 +132,14 @@ internal enum MinecraftFileIntegrityStatus
     Missing,
     SizeMismatch,
     HashMismatch
+}
+
+internal sealed record MinecraftIntegrityResult(MinecraftFileIntegrityStatus Status, long? ExpectedSize,
+    long? ActualSize, string? ExpectedSha1, string? ActualSha1, MinecraftFileVerification Verification)
+{
+    public InvalidDataException CreateException(string path, string kind) => SafeExceptionLog.Describe(
+        new InvalidDataException($"{kind} is missing or invalid ({Status}): {path}"), "ArtifactValidation",
+        ("Artifact", path), ("ArtifactKind", kind), ("IntegrityStatus", Status.ToString()),
+        ("Verification", Verification.ToString()), ("ExpectedSize", ExpectedSize), ("ActualSize", ActualSize),
+        ("HashAlgorithm", "SHA1"), ("ExpectedHash", ExpectedSha1), ("ActualHash", ActualSha1 ?? "NotChecked"));
 }

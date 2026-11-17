@@ -22,8 +22,12 @@ using System.IO;
 
 namespace Launcher.App.Services;
 
-public sealed class InstanceFolderService : IInstanceFolderService
+public sealed class InstanceFolderService(Launcher.Application.Services.IResourceProjectInstallationService installationService) : IInstanceFolderService
 {
+    public Task<string> EnsureInstanceContentDirectoryAsync(Launcher.Domain.Models.GameInstance instance,
+        Launcher.Domain.Models.ResourceProjectKind kind)
+        => installationService.EnsureInstanceContentDirectoryAsync(kind, instance);
+
     public bool DirectoryExists(string folderPath)
     {
         return !string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath);

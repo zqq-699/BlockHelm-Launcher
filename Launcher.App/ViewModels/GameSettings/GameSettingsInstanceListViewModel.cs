@@ -100,12 +100,15 @@ public sealed partial class GameSettingsInstanceListViewModel : ObservableObject
             return false;
 
         var wasLoaded = hasLoadedInstances;
-        var selectedId = SelectedInstance?.Instance.Id;
+        var selectedId = SelectedInstance?.Instance.InstanceDirectory;
+        var selectedSnapshot = SelectedInstance?.Instance;
         IsLoading = false;
         LoadError = string.Empty;
         EmptyMessage = string.Empty;
         var changed = Reconcile(instances);
         RestoreSelection(selectedId);
+        if (SelectedInstance is not null && !ReferenceEquals(selectedSnapshot, SelectedInstance.Instance))
+            OnPropertyChanged(nameof(SelectedInstance));
         hasLoadedInstances = true;
         appliedCatalogRevision = catalogRevision;
         RefreshVisibleInstances();
@@ -113,10 +116,10 @@ public sealed partial class GameSettingsInstanceListViewModel : ObservableObject
             EntranceAnimationToken++;
 
         logger.LogDebug(
-            "Game settings instance catalog applied. Count={InstanceCount} VisibleCount={VisibleCount} SelectedInstanceId={SelectedInstanceId} CatalogRevision={CatalogRevision}",
+            "Game settings instance catalog applied. Count={InstanceCount} VisibleCount={VisibleCount} SelectedInstanceDirectory={SelectedInstanceDirectory} CatalogRevision={CatalogRevision}",
             AllInstances.Count,
             VisibleInstances.Count,
-            SelectedInstance?.Instance.Id,
+            SelectedInstance?.Instance.InstanceDirectory,
             catalogRevision);
         return changed;
     }
@@ -155,7 +158,7 @@ public sealed partial class GameSettingsInstanceListViewModel : ObservableObject
 
     public GameSettingsInstanceItem GetOrAdd(GameInstance instance)
     {
-        var item = Find(instance.Id);
+        var item = Find(instance.InstanceDirectory);
         if (item is not null)
             return item;
         item = CreateItem(instance);
@@ -164,19 +167,19 @@ public sealed partial class GameSettingsInstanceListViewModel : ObservableObject
         return item;
     }
 
-    public GameSettingsInstanceItem? Find(string? instanceId)
+    public GameSettingsInstanceItem? Find(string? instanceDirectory)
     {
-        if (string.IsNullOrWhiteSpace(instanceId))
+        if (string.IsNullOrWhiteSpace(instanceDirectory))
             return null;
         return AllInstances.FirstOrDefault(item =>
-            string.Equals(item.Instance.Id, instanceId, StringComparison.OrdinalIgnoreCase));
+            string.Equals(item.Instance.InstanceDirectory, instanceDirectory, StringComparison.OrdinalIgnoreCase));
     }
 
     public void AddOrUpdate(GameInstance instance)
     {
         if (!hasLoadedInstances)
             return;
-        var item = Find(instance.Id);
+        var item = Find(instance.InstanceDirectory);
         if (item is null)
         {
             AllInstances.Add(CreateItem(instance));
@@ -192,13 +195,13 @@ public sealed partial class GameSettingsInstanceListViewModel : ObservableObject
         RefreshVisibleInstances();
     }
 
-    public bool Remove(string instanceId)
+    public bool Remove(string instanceDirectory)
     {
         var removed = AllInstances.RemoveAll(item =>
-            string.Equals(item.Instance.Id, instanceId, StringComparison.OrdinalIgnoreCase)) > 0;
+            string.Equals(item.Instance.InstanceDirectory, instanceDirectory, StringComparison.OrdinalIgnoreCase)) > 0;
         if (!removed)
             return false;
-        if (string.Equals(SelectedInstance?.Instance.Id, instanceId, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(SelectedInstance?.Instance.InstanceDirectory, instanceDirectory, StringComparison.OrdinalIgnoreCase))
             SelectInstanceCore(null);
         RefreshVisibleInstances();
         return true;
@@ -231,21 +234,21 @@ public sealed partial class GameSettingsInstanceListViewModel : ObservableObject
 
     private bool ContainsSelectedInstance() => SelectedInstance is not null && AllInstances.Any(item =>
         ReferenceEquals(item, SelectedInstance)
-        || (!string.IsNullOrWhiteSpace(item.Instance.Id)
-            && string.Equals(item.Instance.Id, SelectedInstance.Instance.Id, StringComparison.OrdinalIgnoreCase)));
+        || (!string.IsNullOrWhiteSpace(item.Instance.InstanceDirectory)
+            && string.Equals(item.Instance.InstanceDirectory, SelectedInstance.Instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase)));
 
     private bool Reconcile(IReadOnlyList<GameInstance> instances)
     {
         // 原地更新已有条目可保留选择、动画和外部 Binding；仅新增/删除才改变集合结构。
         var existing = AllInstances
-            .Where(item => !string.IsNullOrWhiteSpace(item.Instance.Id))
-            .GroupBy(item => item.Instance.Id, StringComparer.OrdinalIgnoreCase)
+            .Where(item => !string.IsNullOrWhiteSpace(item.Instance.InstanceDirectory))
+            .GroupBy(item => item.Instance.InstanceDirectory, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         var next = new List<GameSettingsInstanceItem>(instances.Count);
         var changed = AllInstances.Count != instances.Count;
         foreach (var instance in instances)
         {
-            if (!string.IsNullOrWhiteSpace(instance.Id) && existing.TryGetValue(instance.Id, out var item))
+            if (!string.IsNullOrWhiteSpace(instance.InstanceDirectory) && existing.TryGetValue(instance.InstanceDirectory, out var item))
             {
                 changed |= item.Update(instance, ResolveVersionType(instance));
                 next.Add(item);
@@ -271,8 +274,8 @@ public sealed partial class GameSettingsInstanceListViewModel : ObservableObject
         return changed;
     }
 
-    private void RestoreSelection(string? instanceId) =>
-        SelectInstanceCore(string.IsNullOrWhiteSpace(instanceId) ? null : Find(instanceId));
+    private void RestoreSelection(string? instanceDirectory) =>
+        SelectInstanceCore(string.IsNullOrWhiteSpace(instanceDirectory) ? null : Find(instanceDirectory));
 
     private void SelectInstanceCore(GameSettingsInstanceItem? instance, bool forceNotification = false)
     {

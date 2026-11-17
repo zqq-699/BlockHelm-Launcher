@@ -64,6 +64,7 @@ public sealed partial class InstanceBackupService
 
                 var versionsDirectory = Directory.GetParent(normalizedInstanceDirectory)!.FullName;
                 var versionName = Path.GetFileName(normalizedInstanceDirectory);
+                var previousOwnerProof = InstanceDirectoryOwnership.EnsureCurrent(instance);
                 var transactionId = Guid.NewGuid().ToString("N");
                 var stagingDirectory = Path.Combine(versionsDirectory, $"{RestoreDirectoryPrefix}{transactionId}");
                 var extractDirectory = Path.Combine(stagingDirectory, "extract");
@@ -72,9 +73,22 @@ public sealed partial class InstanceBackupService
                 var markerPath = Path.Combine(stagingDirectory, RestoreMarkerFileName);
                 var swapStarted = false;
                 var swapCommitted = false;
+                var stagingCreated = false;
+                var activeLockPath = GetRestoreActiveLockPath(minecraftDirectory, transactionId);
+                using var activeRestore = new FileStream(activeLockPath, FileMode.CreateNew,
+                    FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
 
                 try
                 {
+                    if (Directory.Exists(stagingDirectory) || File.Exists(stagingDirectory))
+                        throw new IOException("Restore staging directory already exists.");
+                    Directory.CreateDirectory(stagingDirectory);
+                    stagingCreated = true;
+                    var stagingProof = InstanceDirectoryOwnership.Capture(stagingDirectory);
+                    var extractingMarker = new RestoreTransactionMarker(2, transactionId, stagingProof,
+                        versionName, RestoreStateExtracting, DateTimeOffset.UtcNow, previousOwnerProof);
+                    await AtomicJsonFileWriter.WriteAsync(markerPath, extractingMarker, JsonOptions, cancellationToken)
+                        .ConfigureAwait(false);
                     string archiveRootName;
                     var directoryLock = GetDirectoryLock(normalizedBackupDirectory);
                     await directoryLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -108,43 +122,50 @@ public sealed partial class InstanceBackupService
 
                     await ValidateAndPrepareRestoredInstanceAsync(
                             extractedRootDirectory,
-                            instance.Id,
+                            instance.InstanceDirectory,
                             versionName,
                             normalizedInstanceDirectory,
                             cancellationToken)
                         .ConfigureAwait(false);
                     Directory.Move(extractedRootDirectory, restoredDirectory);
                     TryDeleteEmptyDirectory(extractDirectory);
-                    await WriteRestoreOwnerAsync(restoredDirectory, transactionId, instance.Id, cancellationToken)
+                    var restoredOwnerProof = InstanceDirectoryOwnership.Capture(restoredDirectory);
+                    await WriteRestoreOwnerAsync(restoredDirectory, transactionId, restoredOwnerProof, cancellationToken)
                         .ConfigureAwait(false);
                     var marker = new RestoreTransactionMarker(
-                        1,
+                        2,
                         transactionId,
-                        instance.Id,
+                        restoredOwnerProof,
                         versionName,
                         RestoreStatePrepared,
-                        DateTimeOffset.UtcNow);
-                    await AtomicJsonFileWriter.WriteAsync(markerPath, marker, JsonOptions, cancellationToken)
-                        .ConfigureAwait(false);
-
+                        DateTimeOffset.UtcNow,
+                        previousOwnerProof);
                     await using (var mutationLock = await CrossProcessVersionLock.AcquireAsync(
                                      CrossProcessVersionLock.GetMutationPath(minecraftDirectory),
                                      progress: null,
                                      cancellationToken).ConfigureAwait(false))
                     {
+                        InstanceDirectoryOwnership.EnsureCurrent(instance);
                         await EnsureCurrentInstanceIdentityAsync(
                                 normalizedInstanceDirectory,
-                                instance.Id,
+                                previousOwnerProof,
                                 cancellationToken)
                             .ConfigureAwait(false);
                         await EnsureRestoredInstanceOwnershipAsync(restoredDirectory, marker, cancellationToken)
                             .ConfigureAwait(false);
 
+                        // Publishing the marker makes this transaction eligible for recovery.
+                        // Hold the same lock until its marker and cleanup are complete.
+                        await AtomicJsonFileWriter.WriteAsync(markerPath, marker, JsonOptions, cancellationToken)
+                            .ConfigureAwait(false);
+
                         swapStarted = true;
-                        Directory.Move(normalizedInstanceDirectory, previousDirectory);
+                        WindowsDirectoryHandleMover.MoveOwnedDirectory(normalizedInstanceDirectory, previousDirectory,
+                            () => InstanceDirectoryOwnership.Matches(normalizedInstanceDirectory, previousOwnerProof));
                         try
                         {
-                            Directory.Move(restoredDirectory, normalizedInstanceDirectory);
+                            WindowsDirectoryHandleMover.MoveOwnedDirectory(restoredDirectory, normalizedInstanceDirectory,
+                                () => InstanceDirectoryOwnership.Matches(restoredDirectory, restoredOwnerProof));
                         }
                         catch
                         {
@@ -160,18 +181,18 @@ public sealed partial class InstanceBackupService
                         await AtomicJsonFileWriter.WriteAsync(markerPath, marker, JsonOptions, CancellationToken.None)
                             .ConfigureAwait(false);
                         swapCommitted = true;
-                    }
 
-                    DeleteOwnedRestorePrevious(previousDirectory, instance.Id);
-                    File.Delete(markerPath);
-                    DeleteRestoreOwnerIfOwned(normalizedInstanceDirectory, transactionId);
-                    TryDeleteEmptyDirectory(stagingDirectory);
+                        DeleteOwnedRestorePrevious(previousDirectory, previousOwnerProof);
+                        File.Delete(markerPath);
+                        DeleteRestoreOwnerIfOwned(normalizedInstanceDirectory, transactionId);
+                        TryDeleteEmptyDirectory(stagingDirectory);
+                    }
                     logger.LogInformation(
-                        "Instance backup restored. InstanceId={InstanceId}",
-                        instance.Id);
+                        "Instance backup restored. OwnerProof={OwnerProof}",
+                        instance.InstanceDirectory);
                     logger.LogDebug(
-                        "Instance backup restore paths. InstanceId={InstanceId} InstanceDirectory={InstanceDirectory} BackupFile={BackupFile}",
-                        instance.Id,
+                        "Instance backup restore paths. OwnerProof={OwnerProof} InstanceDirectory={InstanceDirectory} BackupFile={BackupFile}",
+                        instance.InstanceDirectory,
                         normalizedInstanceDirectory,
                         normalizedBackupFullPath);
                 }
@@ -179,14 +200,16 @@ public sealed partial class InstanceBackupService
                 {
                     try
                     {
-                        if (!swapStarted)
+                        if (!swapStarted && stagingCreated)
                             DeleteLocallyOwnedRestoreStaging(stagingDirectory, versionsDirectory, transactionId);
-                        else
+                        else if (swapStarted)
+                        {
                             await RecoverRestoreDirectoryAsync(
                                     minecraftDirectory,
                                     stagingDirectory,
                                     CancellationToken.None)
                                 .ConfigureAwait(false);
+                        }
                     }
                     catch (Exception recoveryException)
                     {
@@ -199,8 +222,8 @@ public sealed partial class InstanceBackupService
                     {
                         logger.LogWarning(
                             exception,
-                            "Instance restore committed but cleanup was deferred to startup recovery. InstanceId={InstanceId} StagingDirectory={StagingDirectory}",
-                            instance.Id,
+                            "Instance restore committed but cleanup was deferred to startup recovery. OwnerProof={OwnerProof} StagingDirectory={StagingDirectory}",
+                            instance.InstanceDirectory,
                             stagingDirectory);
                         return;
                     }
@@ -208,8 +231,8 @@ public sealed partial class InstanceBackupService
                     {
                         logger.LogError(
                             exception,
-                            "Failed to restore instance backup. InstanceId={InstanceId} InstanceDirectory={InstanceDirectory} BackupFile={BackupFile}",
-                            instance.Id,
+                            "Failed to restore instance backup. OwnerProof={OwnerProof} InstanceDirectory={InstanceDirectory} BackupFile={BackupFile}",
+                            instance.InstanceDirectory,
                             normalizedInstanceDirectory,
                             normalizedBackupFullPath);
                     }

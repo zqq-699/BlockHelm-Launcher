@@ -67,8 +67,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to load saves for section activation. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to load saves for section activation. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             HasLoadedSaves = false;
             ClearDisplayedSaves();
             hasPendingVisualRefresh = false;
@@ -116,8 +116,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to silently refresh cached saves. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to silently refresh cached saves. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_LoadLocalSavesFailed);
         }
         finally
@@ -251,7 +251,7 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
         if (selectedInstance is null || instance is null)
             return selectedInstance is not null || instance is not null;
 
-        return !string.Equals(selectedInstance.Id, instance.Id, StringComparison.OrdinalIgnoreCase)
+        return !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 

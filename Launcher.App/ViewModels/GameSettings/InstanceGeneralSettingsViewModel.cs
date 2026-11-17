@@ -23,6 +23,7 @@ using CommunityToolkit.Mvvm.Input;
 using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.Application.Services;
+using Launcher.Domain.Models;
 
 namespace Launcher.App.ViewModels.GameSettings;
 
@@ -35,6 +36,7 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
     private readonly InstanceSettingsPersistenceCoordinator persistence;
     private INotifyPropertyChanged? selectedInstanceNotifier;
     private GameSettingsInstanceItem? selectedInstance;
+    private GameInstance? settingsInstance;
     private bool suppressAutoSave;
 
     [ObservableProperty]
@@ -62,18 +64,20 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
 
     public string InstanceCreatedAtText => selectedInstance?.Instance.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? string.Empty;
 
-    public void SetSelectedInstance(GameSettingsInstanceItem? value)
+    public void SetSelectedInstance(GameSettingsInstanceItem? value, GameInstance? editableInstance = null)
     {
         if (selectedInstanceNotifier is not null)
             selectedInstanceNotifier.PropertyChanged -= SelectedInstance_PropertyChanged;
 
         selectedInstance = value;
+        settingsInstance = editableInstance ?? value?.Instance;
         selectedInstanceNotifier = value;
         if (selectedInstanceNotifier is not null)
             selectedInstanceNotifier.PropertyChanged += SelectedInstance_PropertyChanged;
 
         NotifyInstanceDisplayChanged();
-        LoadDescriptionFromInstance();
+        if (!persistence.HasPendingSave("description"))
+            LoadDescriptionFromInstance();
     }
 
     public void Dispose()
@@ -85,10 +89,10 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
 
     partial void OnDescriptionTextChanged(string value)
     {
-        if (suppressAutoSave || selectedInstance is null)
+        if (suppressAutoSave || settingsInstance is null)
             return;
 
-        var instance = selectedInstance.Instance;
+        var instance = settingsInstance;
         var normalizedDescription = NormalizeDescription(value);
         persistence.Schedule(
             "description",
@@ -155,7 +159,7 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
         suppressAutoSave = true;
         try
         {
-            DescriptionText = selectedInstance?.Instance.Description ?? string.Empty;
+            DescriptionText = settingsInstance?.Description ?? string.Empty;
         }
         finally
         {

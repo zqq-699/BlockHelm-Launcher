@@ -39,6 +39,7 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
     {
         if (selectedInstance is null)
             return;
+        var instance = selectedInstance;
 
         // 文件选择器和拖放共享校验，但错误呈现方式不同：拖放用状态栏，选择器用对话框。
         if (!TryValidateImportPaths(archivePaths, Strings.GameSettings_DropSaveArchivesOnlyMessage, out var validationMessage))
@@ -56,8 +57,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Starting local save import batch. InstanceId={InstanceId} Source={Source} FileCount={FileCount}",
-            selectedInstance.Id,
+            "Starting local save import batch. InstanceDirectory={InstanceDirectory} Source={Source} FileCount={FileCount}",
+            selectedInstance.InstanceDirectory,
             source,
             archivePaths.Count);
 
@@ -66,13 +67,16 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
             archivePaths,
             async archivePath =>
             {
+                if (!ReferenceEquals(instance, selectedInstance))
+                    return LocalSaveImportResult.Failure(LocalSaveImportFailureReason.UnexpectedError);
                 logger.LogDebug(
-                    "Importing local save archive. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                    selectedInstance.Id,
+                    "Importing local save archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                    selectedInstance.InstanceDirectory,
                     archivePath);
                 return await localSavesViewModel.ImportSaveFromArchiveAsync(archivePath, reportStatus: false);
             },
             result => result.IsSuccess);
+        if (!ReferenceEquals(instance, selectedInstance)) return;
 
         if (batch.Failure is not null)
         {
@@ -90,8 +94,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
                     break;
                 case LocalSaveImportFailureReason.UnexpectedError:
                     logger.LogWarning(
-                        "Local save import failed unexpectedly after service call. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                        selectedInstance.Id,
+                        "Local save import failed unexpectedly after service call. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                        selectedInstance.InstanceDirectory,
                         batch.FailedPath);
                     statusService.Report(Strings.Status_LocalSaveImportFailed);
                     break;
@@ -107,8 +111,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
                 : string.Format(Strings.Status_LocalSavesImportedFormat, batch.SuccessCount));
         }
         logger.LogInformation(
-            "Local save import batch completed. InstanceId={InstanceId} RequestedCount={RequestedCount} ImportedCount={ImportedCount}",
-            selectedInstance.Id,
+            "Local save import batch completed. InstanceDirectory={InstanceDirectory} RequestedCount={RequestedCount} ImportedCount={ImportedCount}",
+            selectedInstance.InstanceDirectory,
             archivePaths.Count,
             batch.SuccessCount);
     }

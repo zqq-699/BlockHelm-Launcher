@@ -83,6 +83,7 @@ public sealed class ModService : IModService
             var result = await Task.Run<IReadOnlyList<LocalMod>>(
                 () =>
                 {
+                    using var contentScope = InstanceContentOwnership.Open(instance, modsDirectory);
                     CleanupLegacyIconCacheDirectory();
                     cancellationToken.ThrowIfCancellationRequested();
                     var inventory = Directory.Exists(modsDirectory)
@@ -99,22 +100,24 @@ public sealed class ModService : IModService
                     {
                         snapshots.Remove(modsDirectory);
                         logger.LogDebug(
-                            "Local mod inventory checked. InstanceId={InstanceId} Count=0",
-                            instance.Id);
+                            "Local mod inventory checked. InstanceDirectory={InstanceDirectory} Count=0",
+                            instance.InstanceDirectory);
                         return [];
                     }
 
-                    var snapshot = snapshots.GetOrCreate(modsDirectory);
+                    var snapshot = snapshots.GetOrCreate(modsDirectory, contentScope.CacheIdentity);
                     var mods = snapshot.Reconcile(
                             inventory,
                             static item => item.FullPath,
-                            CreateLocalMod)
+                            CreateLocalMod,
+                            mod => InstanceContentOwnership.CanReuse(mod, mod.FullPath))
+                        .Select(mod => contentScope.Bind(mod))
                         .OrderBy(mod => mod.Name, StringComparer.OrdinalIgnoreCase)
                         .ThenBy(mod => mod.FileName, StringComparer.OrdinalIgnoreCase)
                         .ToArray();
                     logger.LogDebug(
-                        "Local mod inventory checked. InstanceId={InstanceId} Count={ModCount}",
-                        instance.Id,
+                        "Local mod inventory checked. InstanceDirectory={InstanceDirectory} Count={ModCount}",
+                        instance.InstanceDirectory,
                         mods.Length);
                     return mods;
                 },
@@ -139,7 +142,7 @@ public sealed class ModService : IModService
             throw new ModFileImportNotFoundException(sourceJarPath);
 
         var modsDirectory = GetModsDirectory(instance);
-        Directory.CreateDirectory(modsDirectory);
+        using var contentScope = InstanceContentOwnership.Open(instance, modsDirectory, createDirectory: true);
 
         var destination = Path.Combine(modsDirectory, Path.GetFileName(sourceJarPath));
         if (File.Exists(destination) && !overwriteExisting)
@@ -148,20 +151,27 @@ public sealed class ModService : IModService
             destination = Path.Combine(modsDirectory, $"{name}-{DateTimeOffset.Now:yyyyMMddHHmmss}.jar");
         }
 
-        await using var source = File.OpenRead(sourceJarPath);
-        await using var target = new FileStream(
-            destination,
-            overwriteExisting ? FileMode.Create : FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None);
-        await source.CopyToAsync(target, cancellationToken);
+        var staging = Path.Combine(modsDirectory, $".import-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var source = File.OpenRead(sourceJarPath))
+            await using (var target = new FileStream(staging, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                await source.CopyToAsync(target, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            contentScope.EnsureCurrent();
+            File.Move(staging, destination, overwriteExisting);
+        }
+        finally
+        {
+            if (contentScope.IsCurrent && File.Exists(staging)) File.Delete(staging);
+        }
         logger.LogDebug(
-            "Local mod imported. InstanceId={InstanceId} FileName={FileName} Destination={Destination} OverwriteExisting={OverwriteExisting}",
-            instance.Id,
+            "Local mod imported. InstanceDirectory={InstanceDirectory} FileName={FileName} Destination={Destination} OverwriteExisting={OverwriteExisting}",
+            instance.InstanceDirectory,
             Path.GetFileName(destination),
             destination,
             overwriteExisting);
-        return ToLocalMod(destination);
+        return contentScope.Bind(ToLocalMod(destination));
     }
 
     public async Task SetEnabledAsync(LocalMod mod, bool enabled, CancellationToken cancellationToken = default)
@@ -179,6 +189,7 @@ public sealed class ModService : IModService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            using var contentLease = InstanceContentOwnership.Acquire(mod, current);
             if (PathExists(targetPath))
                 throw new ModEnabledStateConflictException(targetPath);
 
@@ -230,6 +241,8 @@ public sealed class ModService : IModService
 
     public Task DeleteAsync(LocalMod mod, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var contentLease = InstanceContentOwnership.Acquire(mod, mod.FullPath);
         if (File.Exists(mod.FullPath))
         {
             userFileDeletionService.DeleteFile(mod.FullPath);

@@ -19,6 +19,7 @@ internal static class WindowsDirectoryHandleMover
 {
     private const uint DeleteAccess = 0x00010000;
     private const uint FileReadAttributes = 0x00000080;
+    private const uint FileListDirectory = 0x00000001;
     private const uint ShareRead = 0x00000001;
     private const uint ShareWrite = 0x00000002;
     private const uint ShareDelete = 0x00000004;
@@ -53,12 +54,21 @@ internal static class WindowsDirectoryHandleMover
         RenameByHandle(ownedHandle, Path.GetFullPath(destinationDirectory));
     }
 
-    private static SafeFileHandle OpenDirectory(string path)
+    internal static string CaptureProof(string path)
+    {
+        using var handle = OpenDirectory(path, requireDelete: false);
+        var identity = ReadIdentity(handle);
+        return $"directory-v2:{identity.VolumeSerialNumber:X8}:{identity.FileIndex:X16}";
+    }
+
+    internal static SafeFileHandle AcquireReadLease(string path) => OpenDirectory(path, requireDelete: false, shareDelete: false, requireList: true);
+
+    private static SafeFileHandle OpenDirectory(string path, bool requireDelete = true, bool shareDelete = true, bool requireList = false)
     {
         var handle = CreateFileW(
             Path.GetFullPath(path),
-            DeleteAccess | FileReadAttributes,
-            ShareRead | ShareWrite | ShareDelete,
+            (requireDelete ? DeleteAccess : 0) | FileReadAttributes | (requireList ? FileListDirectory : 0),
+            ShareRead | ShareWrite | (shareDelete ? ShareDelete : 0),
             IntPtr.Zero,
             OpenExisting,
             FileFlagBackupSemantics | FileFlagOpenReparsePoint,

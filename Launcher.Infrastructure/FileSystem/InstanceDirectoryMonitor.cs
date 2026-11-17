@@ -22,12 +22,18 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Launcher.Infrastructure.Persistence;
 
 namespace Launcher.Infrastructure.FileSystem;
 
 public sealed class InstanceDirectoryMonitor(
     ILogger<InstanceDirectoryMonitor>? logger = null) : IInstanceDirectoryMonitor
 {
+    public bool IsSameWatchTarget(GameInstance previous, GameInstance current) =>
+        ReferenceEquals(previous, current)
+        || InstanceDirectoryOwnership.IsSameDirectorySnapshot(previous, current)
+        || (!InstanceDirectoryOwnership.IsObserved(previous) && !InstanceDirectoryOwnership.IsObserved(current)
+            && string.Equals(previous.InstanceDirectory, current.InstanceDirectory, StringComparison.OrdinalIgnoreCase));
     private readonly ILogger<InstanceDirectoryMonitor> logger = logger ?? NullLogger<InstanceDirectoryMonitor>.Instance;
 
     public IInstanceDirectoryWatch Watch(GameInstance instance, InstanceDirectoryKind directoryKind)
@@ -46,7 +52,6 @@ public sealed class InstanceDirectoryMonitor(
                 instanceDirectory,
                 ResolveDirectoryName(directoryKind),
                 directoryKind,
-                instance.Id,
                 logger);
         }
         catch (Exception exception) when (
@@ -55,8 +60,8 @@ public sealed class InstanceDirectoryMonitor(
         {
             logger.LogDebug(
                 exception,
-                "Instance directory disappeared while starting its watcher. InstanceId={InstanceId} DirectoryKind={DirectoryKind}",
-                instance.Id,
+                "Instance directory disappeared while starting its watcher. InstanceDirectory={InstanceDirectory} DirectoryKind={DirectoryKind}",
+                instance.InstanceDirectory,
                 directoryKind);
             return EmptyInstanceDirectoryWatch.Instance;
         }
@@ -77,7 +82,7 @@ public sealed class InstanceDirectoryMonitor(
         private readonly FileSystemWatcher rootWatcher;
         private readonly ILogger logger;
         private readonly string targetDirectory;
-        private readonly string instanceId;
+        private readonly string instanceDirectory;
         private readonly InstanceDirectoryKind directoryKind;
         private readonly List<FileSystemWatcher> targetWatchers = [];
         private bool disposed;
@@ -86,11 +91,10 @@ public sealed class InstanceDirectoryMonitor(
             string instanceDirectory,
             string targetDirectoryName,
             InstanceDirectoryKind directoryKind,
-            string instanceId,
             ILogger logger)
         {
             this.directoryKind = directoryKind;
-            this.instanceId = instanceId;
+            this.instanceDirectory = instanceDirectory;
             this.logger = logger;
             targetDirectory = Path.Combine(instanceDirectory, targetDirectoryName);
 
@@ -188,8 +192,8 @@ public sealed class InstanceDirectoryMonitor(
         {
             logger.LogWarning(
                 e.GetException(),
-                "Instance directory watcher reported an error. InstanceId={InstanceId} DirectoryKind={DirectoryKind}",
-                instanceId,
+                "Instance directory watcher reported an error. InstanceDirectory={InstanceDirectory} DirectoryKind={DirectoryKind}",
+                instanceDirectory,
                 directoryKind);
             RaiseChanged(new InstanceDirectoryChangedEventArgs("Error", targetDirectory));
         }

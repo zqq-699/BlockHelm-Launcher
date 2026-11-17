@@ -146,8 +146,8 @@ internal sealed class InstanceContentRefreshWatcher : IDisposable
         {
             logger.LogWarning(
                 exception,
-                "Failed to start instance content watcher. InstanceId={InstanceId} DirectoryKind={DirectoryKind}",
-                instance.Id,
+                "Failed to start instance content watcher. InstanceDirectory={InstanceDirectory} DirectoryKind={DirectoryKind}",
+                instance.InstanceDirectory,
                 directoryKind);
         }
     }
@@ -236,8 +236,8 @@ internal sealed class InstanceContentRefreshWatcher : IDisposable
             }
 
             logger.LogDebug(
-                "Detected instance content change. InstanceId={InstanceId} DirectoryKind={DirectoryKind} ChangeType={ChangeType} Path={Path}",
-                watchedInstance.Id,
+                "Detected instance content change. InstanceDirectory={InstanceDirectory} DirectoryKind={DirectoryKind} ChangeType={ChangeType} Path={Path}",
+                watchedInstance.InstanceDirectory,
                 directoryKind,
                 change?.ChangeType ?? "<unknown>",
                 change?.FullPath ?? "<unknown>");
@@ -256,8 +256,8 @@ internal sealed class InstanceContentRefreshWatcher : IDisposable
 
             logger.LogError(
                 exception,
-                "Failed to refresh instance content after directory change. InstanceId={InstanceId} DirectoryKind={DirectoryKind}",
-                watchedInstance.Id,
+                "Failed to refresh instance content after directory change. InstanceDirectory={InstanceDirectory} DirectoryKind={DirectoryKind}",
+                watchedInstance.InstanceDirectory,
                 directoryKind);
             reportFailure(exception);
         }
@@ -314,12 +314,12 @@ internal sealed class InstanceContentRefreshWatcher : IDisposable
         && IsActiveLocked()
         && IsSameWatchTarget(instance, watchedInstance);
 
-    private static bool IsSameWatchTarget(GameInstance? left, GameInstance? right)
+    private bool IsSameWatchTarget(GameInstance? left, GameInstance? right)
     {
+        if (ReferenceEquals(left, right)) return true;
         if (left is null || right is null)
-            return left is null && right is null;
+            return false;
 
-        return string.Equals(left.Id, right.Id, StringComparison.Ordinal)
-            && string.Equals(left.InstanceDirectory, right.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
+        return monitor.IsSameWatchTarget(left, right);
     }
 }

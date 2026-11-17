@@ -65,6 +65,7 @@ private async Task DownloadInstallerAsync(
             Path.GetFileName(destinationPath),
             destinationPath,
             installerUrl.AbsoluteUri);
+        using var diagnosticLogScope = logScope.RestoreContext();
         try
         {
             var resolution = await executor.DownloadFileAsync(
@@ -100,11 +101,11 @@ private async Task DownloadInstallerAsync(
         string gameDirectory,
         string minecraftVersion,
         string forgeVersion,
-        HashSet<string> existingVersionNames)
+        HashSet<string> existingVersionNames, ILogger? diagnosticLogger = null)
     {
         var versionsDirectory = Path.Combine(gameDirectory, "versions");
         if (!Directory.Exists(versionsDirectory))
-            throw new InvalidOperationException("Forge installation did not create a version directory.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("Forge installation did not create a version directory."), "InstallerMetadata", ("Reason", "Forge installation did not create a version directory."));
 
         var candidates = Directory.GetDirectories(versionsDirectory)
             .Select(directory => new DirectoryInfo(directory))
@@ -114,23 +115,23 @@ private async Task DownloadInstallerAsync(
         // 优先匹配本次新建目录；若安装器复用了目录，再以 Maven 坐标和版本文本进行受控兜底。
         var sourceVersion = candidates
             .Where(directory => !existingVersionNames.Contains(directory.Name))
-            .Select(directory => TryCreateSourceMatch(directory.FullName, directory.Name, minecraftVersion, forgeVersion))
+            .Select(directory => TryCreateSourceMatch(directory.FullName, directory.Name, minecraftVersion, forgeVersion, diagnosticLogger))
             .FirstOrDefault(match => match is not null)
             ?? candidates
-                .Select(directory => TryCreateSourceMatch(directory.FullName, directory.Name, minecraftVersion, forgeVersion))
+                .Select(directory => TryCreateSourceMatch(directory.FullName, directory.Name, minecraftVersion, forgeVersion, diagnosticLogger))
                 .FirstOrDefault(match => match is not null);
 
         return sourceVersion?.VersionName
-            ?? throw new InvalidOperationException($"Forge installer did not produce a usable version for {minecraftVersion}-{forgeVersion}.");
+            ?? throw SafeExceptionLog.Describe(new InvalidOperationException($"Forge installer did not produce a usable version for {minecraftVersion}-{forgeVersion}."), "InstalledVersionNotFound", ("MinecraftVersion", minecraftVersion), ("LoaderVersion", forgeVersion), ("CandidateVersions", candidates.Take(100).Select(item => item.Name).ToArray()));
     }
 
     private static ForgeSourceMatch? TryCreateSourceMatch(
         string versionDirectory,
         string versionName,
         string minecraftVersion,
-        string forgeVersion)
+        string forgeVersion, ILogger? diagnosticLogger = null)
     {
-        var metadata = TryReadVersionMetadata(versionDirectory, versionName);
+        var metadata = TryReadVersionMetadata(versionDirectory, versionName, diagnosticLogger);
         if (metadata is null)
             return null;
 
@@ -248,7 +249,8 @@ private async Task DownloadInstallerAsync(
     {
         for (var current = exception; current is not null; current = current.InnerException)
         {
-            if (current.Message.Contains(ForgeInstallerRunner.InstallClientUnrecognizedOptionMessage, StringComparison.OrdinalIgnoreCase)
+            if (current is InstallerProcessException { UnsupportedInstallClient: true }
+                || current.Message.Contains(ForgeInstallerRunner.InstallClientUnrecognizedOptionMessage, StringComparison.OrdinalIgnoreCase)
                 || (current.Message.Contains("installClient", StringComparison.OrdinalIgnoreCase)
                     && current.Message.Contains("UnrecognizedOptionException", StringComparison.OrdinalIgnoreCase)))
             {

@@ -88,7 +88,7 @@ public sealed class ResourcesProjectInstallViewModelTests
             ? ResourcesModInstallTargetItemViewModel.CreateLocalDownload("save as")
             : ResourcesModInstallTargetItemViewModel.FromInstance(new GameInstance
             {
-                Id = "instance",
+
                 Name = "Instance",
                 InstanceDirectory = "instance"
             });
@@ -123,7 +123,7 @@ public sealed class ResourcesProjectInstallViewModelTests
             ? ResourcesModInstallTargetItemViewModel.CreateLocalDownload("save as")
             : ResourcesModInstallTargetItemViewModel.FromInstance(new GameInstance
             {
-                Id = "instance",
+
                 Name = "Instance",
                 InstanceDirectory = "instance"
             });
@@ -152,13 +152,13 @@ public sealed class ResourcesProjectInstallViewModelTests
         var item = CreateVersionItem(ResourceProjectKind.Mod, "same");
         var firstTarget = ResourcesModInstallTargetItemViewModel.FromInstance(new GameInstance
         {
-            Id = "first-instance",
+
             Name = "First",
             InstanceDirectory = "first"
         });
         var secondTarget = ResourcesModInstallTargetItemViewModel.FromInstance(new GameInstance
         {
-            Id = "second-instance",
+
             Name = "Second",
             InstanceDirectory = "second"
         });
@@ -216,7 +216,7 @@ public sealed class ResourcesProjectInstallViewModelTests
             filePickerService: picker);
         var instance = new GameInstance
         {
-            Id = "instance",
+
             InstanceDirectory = Path.Combine(Path.GetTempPath(), "instance")
         };
 
@@ -236,7 +236,7 @@ public sealed class ResourcesProjectInstallViewModelTests
     {
         var instance = new GameInstance
         {
-            Id = "instance",
+
             Name = "Instance",
             InstanceDirectory = Path.Combine(Path.GetTempPath(), "data-pack-instance")
         };
@@ -271,7 +271,7 @@ public sealed class ResourcesProjectInstallViewModelTests
     {
         var instance = new GameInstance
         {
-            Id = "instance",
+
             InstanceDirectory = Path.Combine(Path.GetTempPath(), $"resource-instance-{Guid.NewGuid():N}")
         };
         var ensuredDirectory = Path.Combine(instance.InstanceDirectory, directoryName);
@@ -340,7 +340,7 @@ public sealed class ResourcesProjectInstallViewModelTests
     private static ResourceProjectInstallationResult CreateSuccessfulModpackResult(string instanceId) => new(
         ModpackImportResult: ModpackImportResult.Success(new GameInstance
         {
-            Id = instanceId,
+
             Name = instanceId,
             InstanceDirectory = instanceId
         }));

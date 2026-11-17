@@ -52,9 +52,6 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
         CancellationToken cancellationToken)
     {
         var versionsDirectory = Path.Combine(minecraftDirectory, "versions");
-        if (!Directory.Exists(versionsDirectory))
-            return Task.FromResult<IReadOnlyList<InstalledGameVersion>>([]);
-
         var installedVersions = new List<InstalledGameVersion>();
         foreach (var versionDirectory in EnumerateDirectories(versionsDirectory))
         {
@@ -90,13 +87,12 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
     }
 
     public bool Exists(string versionDirectory, string versionName) =>
-        TryReadVersionMetadata(versionDirectory, versionName, logger) is not null;
+        !ShouldIgnoreDirectory(versionDirectory)
+        && TryReadVersionMetadata(versionDirectory, versionName, logger) is not null;
 
     private static bool ShouldIgnoreDirectory(string versionDirectory)
     {
-        if (PendingInstanceDeletionDirectory.IsPending(versionDirectory)
-            || PendingInstanceInstallDirectory.IsPending(versionDirectory)
-            || PendingInstanceRenameDirectory.IsPending(versionDirectory))
+        if (!InstanceDirectoryClassifier.IsInstanceDirectory(versionDirectory))
         {
             return true;
         }
@@ -108,18 +104,8 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
 
     private static IEnumerable<string> EnumerateDirectories(string directory)
     {
-        try
-        {
-            return Directory.EnumerateDirectories(directory).ToArray();
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
+        try { return Directory.EnumerateDirectories(directory).ToArray(); }
+        catch (DirectoryNotFoundException) { return []; }
     }
 
     /// <summary>
@@ -130,7 +116,7 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
         string versionName,
         ILogger? logger = null)
     {
-        var versionJsonPath = TryResolveVersionJsonPath(versionDirectory, versionName, logger);
+        var versionJsonPath = InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName, logger);
         if (string.IsNullOrWhiteSpace(versionJsonPath))
             return null;
 
@@ -139,6 +125,7 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
             using var stream = File.OpenRead(versionJsonPath);
             using var json = JsonDocument.Parse(stream);
             var root = json.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
             var libraryNames = ReadLibraryNames(root);
             var argumentText = ReadArgumentText(root);
             return new VersionJsonMetadata(
@@ -162,11 +149,7 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
         {
             return null;
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (FileNotFoundException)
         {
             return null;
         }
@@ -175,131 +158,6 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
     /// <summary>
     /// 以同名文件、唯一候选、唯一 id 匹配、唯一文件名匹配的顺序选择版本 JSON。
     /// </summary>
-    private static string? TryResolveVersionJsonPath(
-        string versionDirectory,
-        string versionName,
-        ILogger? logger)
-    {
-        // 标准同名 JSON 优先；非标准目录只有在候选可唯一确定时才接受，避免误认辅助配置文件。
-        var versionJsonPath = Path.Combine(versionDirectory, $"{versionName}.json");
-        if (File.Exists(versionJsonPath))
-            return versionJsonPath;
-
-        var candidates = EnumerateVersionJsonCandidates(versionDirectory).ToList();
-        if (candidates.Count == 0)
-            return null;
-
-        if (candidates.Count == 1)
-        {
-            logger?.LogDebug(
-                "Using non-matching version json file during instance discovery. VersionName={VersionName} VersionJsonPath={VersionJsonPath}",
-                versionName,
-                candidates[0]);
-            return candidates[0];
-        }
-
-        var idMatches = candidates
-            .Where(candidate => VersionJsonIdMatches(candidate, versionName))
-            .ToList();
-        if (idMatches.Count == 1)
-            return idMatches[0];
-
-        var fileNameMatches = candidates
-            .Where(candidate => string.Equals(Path.GetFileNameWithoutExtension(candidate), versionName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (fileNameMatches.Count == 1)
-            return fileNameMatches[0];
-
-        logger?.LogWarning(
-            "Skipping version directory with ambiguous json candidates. VersionName={VersionName} CandidateCount={CandidateCount} VersionDirectory={VersionDirectory}",
-            versionName,
-            candidates.Count,
-            versionDirectory);
-        return null;
-    }
-
-    private static IEnumerable<string> EnumerateVersionJsonCandidates(string versionDirectory)
-    {
-        IEnumerable<string> files;
-        try
-        {
-            files = Directory.EnumerateFiles(versionDirectory, "*.json", SearchOption.AllDirectories).ToArray();
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
-
-        return files.Where(IsVersionJsonCandidate);
-    }
-
-    private static bool IsVersionJsonCandidate(string path)
-    {
-        if (string.Equals(Path.GetFileName(path), InstanceSettingsFileName, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var relativeSegments = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (relativeSegments.Any(segment => string.Equals(segment, LauncherDirectoryName, StringComparison.OrdinalIgnoreCase)))
-            return false;
-
-        try
-        {
-            using var stream = File.OpenRead(path);
-            using var json = JsonDocument.Parse(stream);
-            var root = json.RootElement;
-            if (root.ValueKind is not JsonValueKind.Object)
-                return false;
-
-            return HasStringProperty(root, "mainClass")
-                   || HasStringProperty(root, "inheritsFrom")
-                   || HasStringProperty(root, "minecraftArguments")
-                   || HasStringProperty(root, "clientVersion")
-                   || root.TryGetProperty("arguments", out _)
-                   || root.TryGetProperty("libraries", out _)
-                   || root.TryGetProperty("downloads", out _)
-                   || root.TryGetProperty("patches", out _)
-                   || (HasStringProperty(root, "id") && HasStringProperty(root, "type"));
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
-    private static bool VersionJsonIdMatches(string path, string versionName)
-    {
-        try
-        {
-            using var stream = File.OpenRead(path);
-            using var json = JsonDocument.Parse(stream);
-            return string.Equals(GetStringProperty(json.RootElement, "id"), versionName, StringComparison.OrdinalIgnoreCase);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
     /// <summary>
     /// 按可靠性顺序从显式元数据、继承链、库坐标、名称和 JAR 中解析 Minecraft 版本。
     /// </summary>

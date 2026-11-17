@@ -21,7 +21,7 @@ public enum ResourceProjectIntegrityFailureReason
     HashMismatch
 }
 
-public sealed class ResourceProjectIntegrityException : Exception
+public sealed class ResourceProjectIntegrityException : Exception, ISafeDiagnosticException
 {
     public ResourceProjectIntegrityException(
         string versionId,
@@ -40,4 +40,9 @@ public sealed class ResourceProjectIntegrityException : Exception
     public ResourceProjectIntegrityFailureReason Reason { get; }
 
     public ResourceFileHashAlgorithm? Algorithm { get; }
+    public string DiagnosticCode => "ResourceIntegrity";
+    public IReadOnlyDictionary<string, object?> DiagnosticFields => new Dictionary<string, object?>
+    {
+        ["VersionId"] = VersionId, ["IntegrityFailure"] = Reason.ToString(), ["HashAlgorithm"] = Algorithm?.ToString()
+    };
 }

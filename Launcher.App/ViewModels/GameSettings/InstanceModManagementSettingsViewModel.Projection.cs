@@ -68,8 +68,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to load mods for section activation. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to load mods for section activation. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             HasLoadedMods = false;
             ClearDisplayedMods();
             hasPendingVisualRefresh = false;
@@ -117,8 +117,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to silently refresh cached mods. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to silently refresh cached mods. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_LoadLocalModsFailed);
         }
         finally
@@ -298,7 +298,7 @@ public sealed partial class InstanceModManagementSettingsViewModel
         if (selectedInstance is null || instance is null)
             return selectedInstance is not null || instance is not null;
 
-        return !string.Equals(selectedInstance.Id, instance.Id, StringComparison.OrdinalIgnoreCase)
+        return !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -434,8 +434,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Changing selected mods enabled state. InstanceId={InstanceId} Count={Count} Enabled={Enabled}",
-            selectedInstance?.Id ?? "<none>",
+            "Changing selected mods enabled state. InstanceDirectory={InstanceDirectory} Count={Count} Enabled={Enabled}",
+            selectedInstance?.InstanceDirectory ?? "<none>",
             selectedMods.Count,
             enabled);
         try
@@ -477,8 +477,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             suppressLocalCollectionEvents = false;
             logger.LogError(
                 exception,
-                "Failed to change selected mods enabled state. InstanceId={InstanceId} Enabled={Enabled}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to change selected mods enabled state. InstanceDirectory={InstanceDirectory} Enabled={Enabled}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 enabled);
             statusService.Report(enabled
                 ? Strings.Status_SelectedModsEnableFailed

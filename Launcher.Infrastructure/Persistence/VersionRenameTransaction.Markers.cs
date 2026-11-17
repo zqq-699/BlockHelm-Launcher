@@ -18,6 +18,17 @@ namespace Launcher.Infrastructure.Persistence;
 
 internal sealed partial class VersionRenameTransaction
 {
+    private async Task WriteOwnedMarkerAsync(string directory, PendingInstanceRenameMarker marker, CancellationToken cancellationToken)
+    {
+        using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(directory);
+        await AtomicJsonFileWriter.WriteAsync(PendingInstanceRenameDirectory.GetMarkerPath(directory), marker, JsonOptions,
+            cancellationToken, validateDestination: () =>
+            {
+                if (!GameInstanceSettingsStore.HasIdentity(directory, marker.OwnerProof))
+                    throw new GameInstanceMutationConflictException(directory, marker.OldName);
+            }).ConfigureAwait(false);
+    }
+
     private async Task DeleteOrQuarantineMarkerAsync(string directory, CancellationToken cancellationToken)
     {
         var markerPath = PendingInstanceRenameDirectory.GetMarkerPath(directory);
@@ -62,14 +73,14 @@ internal sealed partial class VersionRenameTransaction
                     markerResult.Marker.TransactionId,
                     marker.TransactionId,
                     StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(markerResult.Marker.InstanceId, marker.InstanceId, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(markerResult.Marker.OwnerProof, marker.OwnerProof, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(markerResult.Marker.OldName, marker.OldName, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(markerResult.Marker.NewName, marker.NewName, StringComparison.OrdinalIgnoreCase))
             {
-                throw new GameInstanceMutationConflictException(marker.InstanceId, marker.OldName);
+                throw new GameInstanceMutationConflictException(marker.OwnerProof, marker.OldName);
             }
 
-            await instanceSettingsStore.EnsureIdentityAsync(directory, marker.InstanceId, cancellationToken)
+            await instanceSettingsStore.EnsureIdentityAsync(directory, marker.OwnerProof, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (GameInstanceMutationConflictException)
@@ -88,16 +99,16 @@ internal sealed partial class VersionRenameTransaction
             if (File.Exists(markerPath))
                 quarantineMarker(markerPath, abortedMarkerPath);
             logger.LogError(
-                "Pending rename marker was quarantined because the directory belongs to another instance. ExpectedInstanceId={ExpectedInstanceId} Directory={Directory}",
-                marker.InstanceId,
+                "Pending rename marker was quarantined because the directory belongs to another instance. ExpectedOwnerProof={ExpectedOwnerProof} Directory={Directory}",
+                marker.OwnerProof,
                 directory);
         }
         catch (Exception exception)
         {
             logger.LogError(
                 exception,
-                "Unsafe pending rename marker could not be quarantined. ExpectedInstanceId={ExpectedInstanceId} Directory={Directory}",
-                marker.InstanceId,
+                "Unsafe pending rename marker could not be quarantined. ExpectedOwnerProof={ExpectedOwnerProof} Directory={Directory}",
+                marker.OwnerProof,
                 directory);
         }
     }

@@ -21,24 +21,30 @@ using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 
+using Microsoft.Extensions.Logging;
+using Launcher.Application.Services;
+using Launcher.Infrastructure.Minecraft;
+
 namespace Launcher.Infrastructure.Accounts;
 
 internal sealed class AccountCapeCacheService
 {
     private const string CapeCacheVersion = "v1";
 
+    private readonly ILogger? logger;
     private readonly HttpClient httpClient;
     private readonly string capeDirectory;
 
-    public AccountCapeCacheService(HttpClient httpClient, LauncherPathProvider pathProvider)
+    public AccountCapeCacheService(HttpClient httpClient, LauncherPathProvider pathProvider, ILogger? logger = null)
         : this(
             httpClient,
-            Path.Combine(pathProvider.DefaultAccountDataDirectory, "microsoft", "capes"))
+            Path.Combine(pathProvider.DefaultAccountDataDirectory, "microsoft", "capes"), logger)
     {
     }
 
-    internal AccountCapeCacheService(HttpClient httpClient, string capeDirectory)
+    internal AccountCapeCacheService(HttpClient httpClient, string capeDirectory, ILogger? logger = null)
     {
+        this.logger = logger;
         this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.capeDirectory = capeDirectory;
         Directory.CreateDirectory(this.capeDirectory);
@@ -65,16 +71,17 @@ internal sealed class AccountCapeCacheService
 
         try
         {
-            var capeBytes = await httpClient.GetByteArrayAsync(capeUrl, cancellationToken);
+            var capeBytes = await DownloadHttpDiagnostics.GetBytesAsync(httpClient, logger, capeUrl, cancellationToken);
             var hash = ComputeHash(capeBytes);
             var capePath = CreateCapePath(accountId, cacheKey, hash);
             if (!File.Exists(capePath) || forceRefresh)
-                await File.WriteAllBytesAsync(capePath, capeBytes, cancellationToken);
+                await DownloadDiagnostics.RunStageAsync(logger, "CapeCacheWrite", () => File.WriteAllBytesAsync(capePath, capeBytes, cancellationToken));
             DeleteStaleCapes(accountId, cacheKey, capePath);
             return new Uri(capePath).AbsoluteUri;
         }
-        catch
+        catch (Exception exception)
         {
+            logger?.LogWarning(exception, "AccountCapeCacheService remote content failed; using available fallback. CancellationRequested={CancellationRequested}", cancellationToken.IsCancellationRequested);
             if (cachedCapePath is not null)
                 return new Uri(cachedCapePath).AbsoluteUri;
 

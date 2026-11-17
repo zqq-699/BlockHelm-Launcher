@@ -35,6 +35,8 @@ namespace Launcher.App.ViewModels.GameSettings;
 /// </summary>
 public sealed partial class InstanceShaderPackManagementSettingsViewModel : GameSettingsDetailsSectionViewModelBase
 {
+    internal long ContentRevision => localShaderPacksViewModel.Revision;
+
     // LocalShaderPacksViewModel 是目录内容的唯一来源；本类只保存筛选、选择和页面生命周期状态。
     private readonly LocalShaderPacksViewModel localShaderPacksViewModel;
     private readonly IStatusService statusService;
@@ -201,9 +203,16 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel : Game
             return true;
         }
 
+        var changed = !ReferenceEquals(selectedInstance, instance);
+        if (changed)
+        {
+            Interlocked.Increment(ref lifecycleGeneration);
+            loadTask = null;
+        }
         selectedInstance = instance;
+        localShaderPacksViewModel.SetSelectedInstance(instance);
         ImportLocalShaderPackCommand.NotifyCanExecuteChanged();
-        return false;
+        return changed;
     }
 
     public override void OnSectionDeactivated()
@@ -291,7 +300,7 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel : Game
     {
         return isSectionActive
             && generation == Volatile.Read(ref lifecycleGeneration)
-            && string.Equals(expectedInstance.Id, selectedInstance?.Id, StringComparison.Ordinal)
+            && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.Ordinal)
             && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 }

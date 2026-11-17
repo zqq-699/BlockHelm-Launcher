@@ -9,6 +9,9 @@ using System.Buffers;
 using System.IO;
 using System.Security.Cryptography;
 
+using Launcher.Application.Services;
+using Microsoft.Extensions.Logging;
+
 namespace Launcher.Infrastructure.Minecraft;
 
 internal static class AtomicSharedFilePublisher
@@ -20,7 +23,7 @@ internal static class AtomicSharedFilePublisher
         string destinationPath,
         string? expectedSha1,
         CancellationToken cancellationToken = default,
-        string? managedRoot = null)
+        string? managedRoot = null, ILogger? logger = null)
     {
         var result = await PublishCoreAsync(
             sourcePath,
@@ -28,7 +31,7 @@ internal static class AtomicSharedFilePublisher
             expectedSha1,
             replaceExisting: false,
             cancellationToken,
-            managedRoot).ConfigureAwait(false);
+            managedRoot, logger).ConfigureAwait(false);
         return result.Sha1;
     }
 
@@ -37,7 +40,7 @@ internal static class AtomicSharedFilePublisher
         string destinationPath,
         string expectedSha1,
         CancellationToken cancellationToken = default,
-        string? managedRoot = null)
+        string? managedRoot = null, ILogger? logger = null)
     {
         if (!MinecraftFileIntegrity.IsSha1(expectedSha1))
             throw new ArgumentException("A valid trusted SHA-1 is required when replacing shared content.", nameof(expectedSha1));
@@ -48,7 +51,7 @@ internal static class AtomicSharedFilePublisher
             expectedSha1,
             replaceExisting: true,
             cancellationToken,
-            managedRoot);
+            managedRoot, logger);
     }
 
     private static async Task<SharedFilePublishResult> PublishCoreAsync(
@@ -57,11 +60,11 @@ internal static class AtomicSharedFilePublisher
         string? expectedSha1,
         bool replaceExisting,
         CancellationToken cancellationToken,
-        string? managedRoot)
+        string? managedRoot, ILogger? logger)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(sourcePath))
-            throw new FileNotFoundException("The shared runtime source file is missing.", sourcePath);
+            throw SafeExceptionLog.Describe(new FileNotFoundException("The shared runtime source file is missing.", sourcePath), "SharedSourceMissing", ("Artifact", sourcePath));
         if (!string.IsNullOrWhiteSpace(managedRoot))
             MinecraftPathGuard.EnsureSafeFileDestination(destinationPath, managedRoot, "Shared runtime destination");
 
@@ -70,21 +73,17 @@ internal static class AtomicSharedFilePublisher
         {
             if (!string.IsNullOrWhiteSpace(managedRoot))
                 MinecraftPathGuard.EnsureSafeFileDestination(destinationPath, managedRoot, "Shared runtime destination");
-            if (!replaceExisting
-                && await FilesMatchAsync(sourcePath, destinationPath, expectedSha1, cancellationToken).ConfigureAwait(false))
-            {
-                var existingSha1 = string.IsNullOrWhiteSpace(expectedSha1)
-                    ? await Task.Run(() => ComputeSha1(sourcePath), cancellationToken).ConfigureAwait(false)
-                    : expectedSha1;
-                return new SharedFilePublishResult(existingSha1, SharedFilePublishDisposition.AlreadyMatched);
-            }
-
             if (!replaceExisting)
-                throw new IOException($"Shared runtime destination contains different content: {destinationPath}");
+            {
+                var comparison = await CompareFilesAsync(sourcePath, destinationPath, expectedSha1, cancellationToken).ConfigureAwait(false);
+                if (comparison.Matches)
+                    return new SharedFilePublishResult(comparison.FirstSha1!, SharedFilePublishDisposition.AlreadyMatched);
+                throw comparison.CreateConflict($"Shared runtime destination contains different content: {destinationPath}", sourcePath, destinationPath);
+            }
         }
 
         var parent = Path.GetDirectoryName(destinationPath)
-            ?? throw new IOException($"Shared runtime destination has no parent directory: {destinationPath}");
+            ?? throw SafeExceptionLog.Describe(new IOException($"Shared runtime destination has no parent directory: {destinationPath}"), "SharedDestinationInvalid", ("Artifact", destinationPath));
         if (string.IsNullOrWhiteSpace(managedRoot))
         {
             Directory.CreateDirectory(parent);
@@ -113,14 +112,14 @@ internal static class AtomicSharedFilePublisher
             if (!string.IsNullOrWhiteSpace(expectedSha1)
                 && !string.Equals(actualSha1, expectedSha1, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException($"Shared runtime source SHA-1 did not match for {sourcePath}.");
+                throw SafeExceptionLog.Describe(new InvalidDataException($"Shared runtime source SHA-1 did not match for {sourcePath}."), "SharedSourceHashMismatch", ("Artifact", sourcePath), ("HashAlgorithm", "SHA1"), ("ExpectedHash", expectedSha1), ("ActualHash", actualSha1));
             }
 
             if (replaceExisting)
             {
                 EnsureSafe();
                 if (File.Exists(destinationPath)
-                    && await FilesMatchAsync(temporaryPath, destinationPath, actualSha1, cancellationToken).ConfigureAwait(false))
+                    && (await CompareFilesAsync(temporaryPath, destinationPath, actualSha1, cancellationToken).ConfigureAwait(false)).Matches)
                 {
                     return new SharedFilePublishResult(actualSha1, SharedFilePublishDisposition.AlreadyMatched);
                 }
@@ -129,7 +128,7 @@ internal static class AtomicSharedFilePublisher
                 if (replacesExisting
                     && (File.GetAttributes(destinationPath) & FileAttributes.ReparsePoint) != 0)
                 {
-                    throw new InvalidDataException($"Shared runtime destination is a reparse point: {destinationPath}");
+                    throw SafeExceptionLog.Describe(new InvalidDataException($"Shared runtime destination is a reparse point: {destinationPath}"), "SharedDestinationReparsePoint", ("Artifact", destinationPath));
                 }
 
                 File.Move(temporaryPath, destinationPath, overwrite: true);
@@ -151,8 +150,9 @@ internal static class AtomicSharedFilePublisher
                 }
                 catch (IOException) when (File.Exists(destinationPath))
                 {
-                    if (!await FilesMatchAsync(temporaryPath, destinationPath, actualSha1, cancellationToken).ConfigureAwait(false))
-                        throw new IOException($"Concurrent shared runtime publication produced different content: {destinationPath}");
+                    var comparison = await CompareFilesAsync(temporaryPath, destinationPath, actualSha1, cancellationToken).ConfigureAwait(false);
+                    if (!comparison.Matches)
+                        throw comparison.CreateConflict($"Concurrent shared runtime publication produced different content: {destinationPath}", temporaryPath, destinationPath);
                     return new SharedFilePublishResult(actualSha1, SharedFilePublishDisposition.AlreadyMatched);
                 }
             }
@@ -161,7 +161,7 @@ internal static class AtomicSharedFilePublisher
         finally
         {
             if (!published)
-                TryDelete(temporaryPath, managedRoot);
+                TryDelete(temporaryPath, managedRoot, logger);
         }
     }
 
@@ -206,7 +206,7 @@ internal static class AtomicSharedFilePublisher
         }
     }
 
-    private static async Task<bool> FilesMatchAsync(
+    private static async Task<SharedFileComparison> CompareFilesAsync(
         string firstPath,
         string secondPath,
         string? knownFirstSha1,
@@ -216,16 +216,24 @@ internal static class AtomicSharedFilePublisher
         var first = new FileInfo(firstPath);
         var second = new FileInfo(secondPath);
         if (first.Length != second.Length)
-            return false;
+            return new(false, first.Length, second.Length, knownFirstSha1, null);
 
         var firstSha1 = string.IsNullOrWhiteSpace(knownFirstSha1)
             ? await Task.Run(() => ComputeSha1(firstPath), cancellationToken).ConfigureAwait(false)
             : knownFirstSha1;
         var secondSha1 = await Task.Run(() => ComputeSha1(secondPath), cancellationToken).ConfigureAwait(false);
-        return string.Equals(firstSha1, secondSha1, StringComparison.OrdinalIgnoreCase);
+        return new(string.Equals(firstSha1, secondSha1, StringComparison.OrdinalIgnoreCase), first.Length, second.Length, firstSha1, secondSha1);
     }
 
-    private static void TryDelete(string path, string? managedRoot)
+    private sealed record SharedFileComparison(bool Matches, long FirstSize, long SecondSize, string? FirstSha1, string? SecondSha1)
+    {
+        public IOException CreateConflict(string message, string source, string destination) => SafeExceptionLog.Describe(
+            new IOException(message), "SharedPublicationConflict", ("Source", source), ("Artifact", destination),
+            ("ExpectedBytes", FirstSize), ("ActualBytes", SecondSize), ("HashAlgorithm", "SHA1"),
+            ("ExpectedHash", FirstSha1 ?? "NotChecked"), ("ActualHash", SecondSha1 ?? "NotChecked"));
+    }
+
+    private static void TryDelete(string path, string? managedRoot, ILogger? logger)
     {
         try
         {
@@ -234,14 +242,9 @@ internal static class AtomicSharedFilePublisher
             if (File.Exists(path))
                 File.Delete(path);
         }
-        catch (InvalidDataException)
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            logger?.LogWarning(exception, "Shared publication temporary file cleanup failed. Artifact={Artifact} Stage=Cleanup", path);
         }
     }
 }

@@ -67,15 +67,13 @@ private async Task<IReadOnlyDictionary<string, ForgeCatalogEntry>> GetCatalogAsy
                         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
                         if (document.RootElement.ValueKind is not JsonValueKind.Array)
                         {
-                            throw new DownloadContentValidationException(
-                                "BMCLAPI Forge catalog is not a JSON array.");
+                            throw SafeExceptionLog.Describe(new DownloadContentValidationException("BMCLAPI Forge catalog is not a JSON array."), "DownloadContentValidationException", ("Reason", "BMCLAPI Forge catalog is not a JSON array."));
                         }
 
                         entries = ParseBmclCatalogEntries(minecraftVersion, document.RootElement);
                         if (document.RootElement.GetArrayLength() > 0 && entries.Count == 0)
                         {
-                            throw new DownloadContentValidationException(
-                                "BMCLAPI Forge catalog contains no valid loader entries.");
+                            throw SafeExceptionLog.Describe(new DownloadContentValidationException("BMCLAPI Forge catalog contains no valid loader entries."), "DownloadContentValidationException", ("Reason", "BMCLAPI Forge catalog contains no valid loader entries."));
                         }
                     }
                     else
@@ -84,8 +82,7 @@ private async Task<IReadOnlyDictionary<string, ForgeCatalogEntry>> GetCatalogAsy
                         if (!html.Contains("<html", StringComparison.OrdinalIgnoreCase)
                             && !html.Contains("<!doctype", StringComparison.OrdinalIgnoreCase))
                         {
-                            throw new DownloadContentValidationException(
-                                "Forge catalog response is not an HTML document.");
+                            throw SafeExceptionLog.Describe(new DownloadContentValidationException("Forge catalog response is not an HTML document."), "DownloadContentValidationException", ("Reason", "Forge catalog response is not an HTML document."));
                         }
 
                         entries = ParseCatalogEntries(minecraftVersion, html);

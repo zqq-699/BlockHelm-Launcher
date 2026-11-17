@@ -36,6 +36,7 @@ public sealed partial class InstanceBackupSettingsViewModel
     {
         if (selectedInstance is null)
             return;
+        var instance = selectedInstance;
 
         // 文件选择器只负责取得候选路径，规范化和设置持久化在确认后完成。
         var selectedDirectory = filePickerService.PickFolder(
@@ -54,8 +55,8 @@ public sealed partial class InstanceBackupSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to change instance backup directory. InstanceId={InstanceId}",
-                selectedInstance.Id);
+                "Failed to change instance backup directory. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
             statusService.Report(Strings.Status_BackupDirectoryChangeFailed);
             return;
         }
@@ -63,23 +64,31 @@ public sealed partial class InstanceBackupSettingsViewModel
         if (string.Equals(BackupDirectory, normalizedDirectory, StringComparison.OrdinalIgnoreCase))
             return;
 
-        var originalDirectory = selectedInstance.BackupDirectory;
         try
         {
-            // 先持久化实例设置，再切换页面目录；保存失败时继续显示原目录。
-            selectedInstance.BackupDirectory = normalizedDirectory;
-            await instanceService.SaveInstanceAsync(selectedInstance);
+            var saved = await persistence.SaveAsync(instance, current =>
+            {
+                var originalDirectory = current.BackupDirectory;
+                current.BackupDirectory = normalizedDirectory;
+                return () => current.BackupDirectory = originalDirectory;
+            });
+            if (!saved)
+            {
+                statusService.Report(Strings.Status_BackupDirectoryChangeFailed);
+                return;
+            }
             BackupDirectory = normalizedDirectory;
-            Parent.NotifyInstanceSettingsSaved(selectedInstance);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
         }
         catch (Exception exception)
         {
-            selectedInstance.BackupDirectory = originalDirectory;
-            BackupDirectory = originalDirectory;
             logger.LogError(
                 exception,
-                "Failed to save instance backup directory. InstanceId={InstanceId}",
-                selectedInstance.Id);
+                "Failed to save instance backup directory. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
             statusService.Report(Strings.Status_BackupDirectoryChangeFailed);
             return;
         }

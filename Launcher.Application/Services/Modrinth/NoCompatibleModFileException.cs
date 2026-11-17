@@ -21,7 +21,7 @@ using Launcher.Domain.Models;
 
 namespace Launcher.Application.Services;
 
-public sealed class NoCompatibleModFileException : Exception
+public sealed class NoCompatibleModFileException : Exception, ISafeDiagnosticException
 {
     public NoCompatibleModFileException(string projectId, string minecraftVersion, LoaderKind loader)
         : base($"No compatible mod file was found for project '{projectId}' on Minecraft {minecraftVersion} with loader {loader}.")
@@ -34,4 +34,9 @@ public sealed class NoCompatibleModFileException : Exception
     public string ProjectId { get; }
     public string MinecraftVersion { get; }
     public LoaderKind Loader { get; }
+    public string DiagnosticCode => "NoCompatibleModFile";
+    public IReadOnlyDictionary<string, object?> DiagnosticFields => new Dictionary<string, object?>
+    {
+        ["ProjectId"] = ProjectId, ["MinecraftVersion"] = MinecraftVersion, ["Loader"] = Loader.ToString()
+    };
 }

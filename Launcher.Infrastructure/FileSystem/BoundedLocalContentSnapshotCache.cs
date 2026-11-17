@@ -31,11 +31,16 @@ internal sealed class BoundedLocalContentSnapshotCache<TIdentity, TItem>
 
     internal int Count => entries.Count;
 
-    public LocalContentSnapshot<TIdentity, TItem> GetOrCreate(string directory)
+    public LocalContentSnapshot<TIdentity, TItem> GetOrCreate(string directory, string? ownerProof = null)
     {
         var key = NormalizeDirectory(directory);
         if (entries.TryGetValue(key, out var existing))
         {
+            if (!string.Equals(existing.OwnerProof, ownerProof, StringComparison.Ordinal))
+            {
+                Remove(directory);
+                return GetOrCreate(directory, ownerProof);
+            }
             Promote(existing);
             return existing.Snapshot;
         }
@@ -45,7 +50,7 @@ internal sealed class BoundedLocalContentSnapshotCache<TIdentity, TItem>
 
         var snapshot = new LocalContentSnapshot<TIdentity, TItem>();
         var node = recency.AddFirst(key);
-        entries.Add(key, new CacheEntry(snapshot, node));
+        entries.Add(key, new CacheEntry(snapshot, node, ownerProof));
         return snapshot;
     }
 
@@ -100,5 +105,6 @@ internal sealed class BoundedLocalContentSnapshotCache<TIdentity, TItem>
 
     private sealed record CacheEntry(
         LocalContentSnapshot<TIdentity, TItem> Snapshot,
-        LinkedListNode<string> Node);
+        LinkedListNode<string> Node,
+        string? OwnerProof);
 }

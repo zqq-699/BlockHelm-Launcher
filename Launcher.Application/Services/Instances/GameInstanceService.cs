@@ -66,15 +66,18 @@ public sealed partial class GameInstanceService : IGameInstanceService
             this.logger);
     }
 
+    public bool CanReuseSettingsSnapshot(GameInstance previous, GameInstance current, bool allowOlderRead = false) =>
+        repository.CanReuseSettingsSnapshot(previous, current, allowOlderRead);
+
     public async Task<IReadOnlyList<GameInstance>> GetInstancesAsync(CancellationToken cancellationToken = default)
     {
         var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
         await repository.RecoverPendingVersionRenamesAsync(settings.MinecraftDirectory, cancellationToken).ConfigureAwait(false);
         var instances = await GetInstancesCoreAsync(settings, cancellationToken).ConfigureAwait(false);
         logger.LogDebug(
-            "Game instances refreshed. Count={InstanceCount} DefaultInstanceId={DefaultInstanceId}",
+            "Game instances refreshed. Count={InstanceCount} DefaultInstanceDirectory={DefaultInstanceDirectory}",
             instances.Count,
-            settings.DefaultInstanceId);
+            settings.DefaultInstanceDirectory);
         return instances;
     }
 
@@ -85,9 +88,9 @@ public sealed partial class GameInstanceService : IGameInstanceService
         await repository.RecoverPendingVersionRenamesAsync(settings.MinecraftDirectory, cancellationToken).ConfigureAwait(false);
         var instances = await repository.GetAllAsync(settings.MinecraftDirectory, cancellationToken).ConfigureAwait(false);
         logger.LogDebug(
-            "Stored game instances loaded. Count={InstanceCount} DefaultInstanceId={DefaultInstanceId}",
+            "Stored game instances loaded. Count={InstanceCount} DefaultInstanceDirectory={DefaultInstanceDirectory}",
             instances.Count,
-            settings.DefaultInstanceId);
+            settings.DefaultInstanceDirectory);
         return instances;
     }
 
@@ -98,56 +101,43 @@ public sealed partial class GameInstanceService : IGameInstanceService
         LauncherSettings settings,
         CancellationToken cancellationToken)
     {
-        var storedInstances = (await repository
-            .GetAllAsync(settings.MinecraftDirectory, cancellationToken)
-            .ConfigureAwait(false)).ToList();
+        var catalog = await repository.ReadCatalogAsync(settings.MinecraftDirectory, cancellationToken).ConfigureAwait(false);
+        var storedInstances = catalog.Instances.ToList();
+        if (catalog.DefaultInstanceDirectory is not null)
+            settings.DefaultInstanceDirectory = catalog.DefaultInstanceDirectory;
         // 安装中的目录可能只包含半成品元数据，完成前不能被发现流程持久化为正式实例。
-        var installedVersions = (await repository
-            .DiscoverInstalledVersionsAsync(settings.MinecraftDirectory, cancellationToken)
-            .ConfigureAwait(false))
+        var installedVersions = catalog.InstalledVersions
             .Where(version => !installCoordinator.IsInstallingVersion(settings.MinecraftDirectory, version.VersionName))
             .ToList();
         var syncedInstances = SynchronizeInstalledInstances(
             storedInstances,
             installedVersions,
             settings,
-            out var instancesChanged);
+            out _).OrderBy(instance => instance.VersionName, StringComparer.OrdinalIgnoreCase).ToList();
 
         var defaultChanged = false;
-        var previousDefaultInstanceId = settings.DefaultInstanceId;
-        if (!string.IsNullOrWhiteSpace(settings.DefaultInstanceId)
-            && syncedInstances.All(instance => instance.Id != settings.DefaultInstanceId))
+        var previousDefaultInstanceDirectory = settings.DefaultInstanceDirectory;
+        if (!string.IsNullOrWhiteSpace(settings.DefaultInstanceDirectory)
+            && syncedInstances.All(instance => !MinecraftDirectoryPath.Equals(instance.InstanceDirectory, settings.DefaultInstanceDirectory)))
         {
-            settings.DefaultInstanceId = syncedInstances.FirstOrDefault()?.Id ?? string.Empty;
+            settings.DefaultInstanceDirectory = syncedInstances.FirstOrDefault()?.InstanceDirectory ?? string.Empty;
             defaultChanged = true;
-        }
-
-        if (instancesChanged)
-        {
-            logger.LogDebug(
-                "Persisting synchronized game instances. StoredCount={StoredCount} InstalledCount={InstalledCount} SyncedCount={SyncedCount}",
-                storedInstances.Count,
-                installedVersions.Count,
-                syncedInstances.Count);
-            await repository
-                .SaveAllAsync(settings.MinecraftDirectory, syncedInstances, cancellationToken)
-                .ConfigureAwait(false);
         }
 
         if (defaultChanged)
         {
-            logger.LogDebug("Default game instance reset during synchronization. DefaultInstanceId={DefaultInstanceId}", settings.DefaultInstanceId);
-            var replacementDefaultInstanceId = settings.DefaultInstanceId;
+            logger.LogDebug("Default game instance reset during synchronization. DefaultInstanceDirectory={DefaultInstanceDirectory}", settings.DefaultInstanceDirectory);
+            var replacementDefaultInstanceDirectory = settings.DefaultInstanceDirectory;
             await settingsService.UpdateAsync(
                     latest =>
                     {
                         if (PathsEqual(latest.MinecraftDirectory, settings.MinecraftDirectory)
                             && string.Equals(
-                                latest.DefaultInstanceId,
-                                previousDefaultInstanceId,
+                                latest.DefaultInstanceDirectory,
+                                previousDefaultInstanceDirectory,
                                 StringComparison.OrdinalIgnoreCase))
                         {
-                            latest.DefaultInstanceId = replacementDefaultInstanceId;
+                            latest.DefaultInstanceDirectory = replacementDefaultInstanceDirectory;
                         }
                     },
                     cancellationToken)
@@ -161,7 +151,7 @@ public sealed partial class GameInstanceService : IGameInstanceService
     {
         var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
         var instances = await GetInstancesCoreAsync(settings, cancellationToken).ConfigureAwait(false);
-        return instances.FirstOrDefault(instance => instance.Id == settings.DefaultInstanceId)
+        return instances.FirstOrDefault(instance => MinecraftDirectoryPath.Equals(instance.InstanceDirectory, settings.DefaultInstanceDirectory))
             ?? instances.FirstOrDefault();
     }
 }

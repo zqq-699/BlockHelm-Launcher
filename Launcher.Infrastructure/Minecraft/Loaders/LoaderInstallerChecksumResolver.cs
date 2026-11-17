@@ -71,16 +71,14 @@ internal static class LoaderInstallerChecksumResolver
                 {
                     if (context.Response.Content.Headers.ContentLength is > MaximumChecksumMetadataBytes)
                     {
-                        throw new DownloadContentValidationException(
-                            "Loader installer SHA1 metadata exceeded the permitted size.");
+                        throw SafeExceptionLog.Describe(new DownloadContentValidationException("Loader installer SHA1 metadata exceeded the permitted size."), "DownloadContentValidationException", ("Reason", "Loader installer SHA1 metadata exceeded the permitted size."));
                     }
 
                     var text = await ReadBoundedTextAsync(context.Response.Content, token).ConfigureAwait(false);
                     return NormalizeSha1(text)
-                        ?? throw new DownloadContentValidationException(
-                            "Loader installer SHA1 metadata has an invalid format.");
+                        ?? throw SafeExceptionLog.Describe(new DownloadContentValidationException("Loader installer SHA1 metadata has an invalid format."), "DownloadContentValidationException", ("Reason", "Loader installer SHA1 metadata has an invalid format."));
                 },
-                timeout.Token).ConfigureAwait(false);
+                timeout.Token, logExhaustion: false).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -88,7 +86,7 @@ internal static class LoaderInstallerChecksumResolver
         }
         catch (Exception exception) when (exception is OperationCanceledException or MinecraftDownloadRequestExecutor.DownloadSourceRequestException)
         {
-            logger.LogWarning("Loader installer SHA1 metadata unavailable; using structural validation. Loader={Loader} FailureType={FailureType}",
+            logger.LogWarning(exception, "Loader installer SHA1 metadata unavailable; using structural validation. Loader={Loader} FailureType={FailureType}",
                 categoryHint, exception.GetType().Name);
             return null;
         }
@@ -120,8 +118,7 @@ internal static class LoaderInstallerChecksumResolver
                 break;
             if (memory.Length + read > MaximumChecksumMetadataBytes)
             {
-                throw new DownloadContentValidationException(
-                    "Loader installer SHA1 metadata exceeded the permitted size.");
+                throw SafeExceptionLog.Describe(new DownloadContentValidationException("Loader installer SHA1 metadata exceeded the permitted size."), "DownloadContentValidationException", ("Reason", "Loader installer SHA1 metadata exceeded the permitted size."));
             }
 
             await memory.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);

@@ -44,8 +44,8 @@ public sealed partial class HomePageViewModel
 
         var instance = SelectedInstance;
         logger.LogInformation(
-            "Launch cancellation requested. InstanceId={InstanceId} InstanceName={InstanceName} VersionName={VersionName}",
-            instance?.Id,
+            "Launch cancellation requested. InstanceDirectory={InstanceDirectory} InstanceName={InstanceName} VersionName={VersionName}",
+            instance?.InstanceDirectory,
             instance?.Name,
             instance?.VersionName);
         // 仅发出协作式取消，清理由 LaunchService 的阶段边界和 finally 负责。

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.Application.Services;
+
 namespace Launcher.Infrastructure.Minecraft;
 
 internal sealed class AdaptiveSegmentDownloadSession
@@ -125,7 +127,7 @@ internal sealed class AdaptiveSegmentDownloadSession
             if (!active.Remove(segment))
                 return;
             if (!segment.IsComplete)
-                throw new InvalidOperationException("An incomplete segmented range cannot be completed.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("An incomplete segmented range cannot be completed."), "DownloadValidation", ("Reason", "An incomplete segmented range cannot be completed."));
             completedChunks++;
         }
     }
@@ -293,7 +295,7 @@ internal sealed class AdaptiveDownloadSegment
         lock (syncRoot)
         {
             if (offset != nextOffset)
-                throw new InvalidOperationException("The segmented write cursor did not match the adaptive range cursor.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("The segmented write cursor did not match the adaptive range cursor."), "DownloadValidation", ("Reason", "The segmented write cursor did not match the adaptive range cursor."));
             if (offset > logicalEnd || availableBytes == 0)
                 return 0;
 

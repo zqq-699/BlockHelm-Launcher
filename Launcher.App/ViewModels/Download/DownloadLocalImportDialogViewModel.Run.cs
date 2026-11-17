@@ -39,6 +39,7 @@ private async Task RunImportTaskAsync(
         DownloadSourcePreference taskDownloadSourcePreference,
         int taskDownloadSpeedLimitMbPerSecond)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "ModpackImport", importTask.Id);
         // 后台任务项与对话框共享进度源，结束后无论成败都必须解除 Busy 状态。
         try
         {

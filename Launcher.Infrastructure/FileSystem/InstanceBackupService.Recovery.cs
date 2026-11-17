@@ -76,6 +76,13 @@ public sealed partial class InstanceBackupService
     {
         var versionsDirectory = Path.GetFullPath(Path.Combine(minecraftDirectory, "versions"));
         var normalizedStagingDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagingDirectory));
+        cancellationToken.ThrowIfCancellationRequested();
+        // A refresh must not queue behind an active restore and then act on its old marker.
+        using var mutationLock = CrossProcessVersionLock.TryAcquire(
+            CrossProcessVersionLock.GetMutationPath(minecraftDirectory));
+        if (mutationLock is null || !Directory.Exists(normalizedStagingDirectory))
+            return;
+
         if (!string.Equals(
                 Path.GetDirectoryName(normalizedStagingDirectory),
                 versionsDirectory,
@@ -92,26 +99,47 @@ public sealed partial class InstanceBackupService
             return;
         if (!TryReadValidRestoreMarker(normalizedStagingDirectory, out var marker))
         {
+            if (!File.Exists(Path.Combine(normalizedStagingDirectory, RestoreMarkerFileName)))
+            {
+                var suffix = Path.GetFileName(normalizedStagingDirectory)[RestoreDirectoryPrefix.Length..];
+                if (Guid.TryParseExact(suffix, "N", out _))
+                {
+                    using var activeLock = TryAcquireRestoreActiveLock(minecraftDirectory, suffix);
+                    if (activeLock is null) return;
+                    if (TryRemoveLegacyRestoreExtraction(normalizedStagingDirectory, versionsDirectory)) return;
+                }
+            }
             logger.LogWarning(
                 "Restore staging was preserved because its transaction marker is missing or invalid. Directory={Directory}",
                 normalizedStagingDirectory);
             return;
         }
 
-        await using var mutationLock = await CrossProcessVersionLock.AcquireAsync(
-            CrossProcessVersionLock.GetMutationPath(minecraftDirectory),
-            progress: null,
-            cancellationToken).ConfigureAwait(false);
         var currentDirectory = Path.Combine(versionsDirectory, marker.VersionName);
         var previousDirectory = Path.Combine(normalizedStagingDirectory, "previous");
         var restoredDirectory = Path.Combine(normalizedStagingDirectory, "restored");
         var markerPath = Path.Combine(normalizedStagingDirectory, RestoreMarkerFileName);
 
+        if (string.Equals(marker.State, RestoreStateExtracting, StringComparison.Ordinal))
+        {
+            using var activeLock = TryAcquireRestoreActiveLock(minecraftDirectory, marker.TransactionId);
+            if (activeLock is null) return;
+            if (Directory.Exists(previousDirectory) || File.Exists(previousDirectory)
+                || !InstanceDirectoryOwnership.Matches(normalizedStagingDirectory, marker.OwnerProof))
+            {
+                logger.LogWarning("Interrupted restore extraction was preserved because its ownership cannot be verified. Directory={Directory}", normalizedStagingDirectory);
+                return;
+            }
+            DeleteLocallyOwnedRestoreStaging(normalizedStagingDirectory, versionsDirectory, marker.TransactionId);
+            logger.LogInformation("Removed interrupted restore extraction. Directory={Directory}", normalizedStagingDirectory);
+            return;
+        }
+
         if (string.Equals(marker.State, RestoreStatePrepared, StringComparison.Ordinal))
         {
             if (Directory.Exists(previousDirectory))
             {
-                if (!GameInstanceSettingsStore.HasIdentity(previousDirectory, marker.InstanceId))
+                if (!GameInstanceSettingsStore.HasIdentity(previousDirectory, marker.PreviousOwnerProof ?? marker.OwnerProof))
                 {
                     QuarantineRestoreMarker(normalizedStagingDirectory, "previous directory identity mismatch");
                     return;
@@ -123,12 +151,12 @@ public sealed partial class InstanceBackupService
                     File.Delete(markerPath);
                     TryDeleteEmptyDirectory(normalizedStagingDirectory);
                     logger.LogWarning(
-                        "Rolled back interrupted instance restore. InstanceId={InstanceId} Directory={Directory}",
-                        marker.InstanceId,
+                        "Rolled back interrupted instance restore. OwnerProof={OwnerProof} Directory={Directory}",
+                        marker.OwnerProof,
                         currentDirectory);
                     return;
                 }
-                if (!HasRestoreOwner(currentDirectory, marker.TransactionId, marker.InstanceId))
+                if (!HasRestoreOwner(currentDirectory, marker.TransactionId, marker.OwnerProof))
                 {
                     QuarantineRestoreMarker(normalizedStagingDirectory, "current directory is not owned by the restore transaction");
                     return;
@@ -137,11 +165,10 @@ public sealed partial class InstanceBackupService
                 marker = marker with { State = RestoreStateCommitted };
                 await AtomicJsonFileWriter.WriteAsync(markerPath, marker, JsonOptions, CancellationToken.None)
                     .ConfigureAwait(false);
-                DeleteRestoreOwnerIfOwned(currentDirectory, marker.TransactionId);
             }
             else
             {
-                if (!GameInstanceSettingsStore.HasIdentity(currentDirectory, marker.InstanceId))
+                if (!GameInstanceSettingsStore.HasIdentity(currentDirectory, marker.PreviousOwnerProof ?? marker.OwnerProof))
                 {
                     QuarantineRestoreMarker(normalizedStagingDirectory, "current instance identity mismatch before restore swap");
                     return;
@@ -162,7 +189,7 @@ public sealed partial class InstanceBackupService
         {
             if (File.Exists(currentDirectory)
                 || !Directory.Exists(previousDirectory)
-                || !GameInstanceSettingsStore.HasIdentity(previousDirectory, marker.InstanceId))
+                || !GameInstanceSettingsStore.HasIdentity(previousDirectory, marker.PreviousOwnerProof ?? marker.OwnerProof))
             {
                 QuarantineRestoreMarker(normalizedStagingDirectory, "committed instance is missing and rollback ownership is unavailable");
                 return;
@@ -173,26 +200,26 @@ public sealed partial class InstanceBackupService
             File.Delete(markerPath);
             TryDeleteEmptyDirectory(normalizedStagingDirectory);
             logger.LogWarning(
-                "Rolled back committed restore because the published instance was missing. InstanceId={InstanceId} Directory={Directory}",
-                marker.InstanceId,
+                "Rolled back committed restore because the published instance was missing. OwnerProof={OwnerProof} Directory={Directory}",
+                marker.OwnerProof,
                 currentDirectory);
             return;
         }
-        if (!GameInstanceSettingsStore.HasIdentity(currentDirectory, marker.InstanceId)
-            || !HasRestoreOwner(currentDirectory, marker.TransactionId, marker.InstanceId))
+        if (!GameInstanceSettingsStore.HasIdentity(currentDirectory, marker.OwnerProof)
+            || !HasRestoreOwner(currentDirectory, marker.TransactionId, marker.OwnerProof))
         {
             QuarantineRestoreMarker(normalizedStagingDirectory, "committed path ownership could not be proven");
             return;
         }
 
-        DeleteOwnedRestorePrevious(previousDirectory, marker.InstanceId);
+        DeleteOwnedRestorePrevious(previousDirectory, marker.PreviousOwnerProof ?? marker.OwnerProof);
         DeleteOwnedRestoredDirectory(restoredDirectory, marker);
         File.Delete(markerPath);
         DeleteRestoreOwnerIfOwned(currentDirectory, marker.TransactionId);
         TryDeleteEmptyDirectory(normalizedStagingDirectory);
         logger.LogInformation(
-            "Completed interrupted instance restore cleanup. InstanceId={InstanceId}",
-            marker.InstanceId);
+            "Completed interrupted instance restore cleanup. OwnerProof={OwnerProof}",
+            marker.OwnerProof);
         logger.LogDebug("Interrupted instance restore cleanup directory. Directory={Directory}", currentDirectory);
     }
 }

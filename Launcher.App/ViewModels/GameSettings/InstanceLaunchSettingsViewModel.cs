@@ -159,7 +159,8 @@ public sealed partial class InstanceLaunchSettingsViewModel : GameSettingsDetail
         selectedInstance = instance;
         CancelModCountRefresh();
         enabledModCount = 0;
-        LoadEditorFromInstance();
+        if (!persistence.HasPendingSave("launch"))
+            LoadEditorFromInstance();
         RefreshSystemMemorySnapshot();
         _ = RefreshEnabledModCountAsync(instance);
     }

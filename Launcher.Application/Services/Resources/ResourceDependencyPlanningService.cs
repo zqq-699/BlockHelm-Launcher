@@ -192,10 +192,10 @@ public sealed class ResourceDependencyPlanningService : IResourceDependencyPlann
             // 立即更新内存目录，使同一计划中的后续分支能看到刚安装的依赖而无需重新扫描磁盘。
             AddIdentifiers(installedDependencies, candidate.Dependency, version);
             logger.LogInformation(
-                "Installed required resource dependency. DependencyProjectId={DependencyProjectId} VersionId={VersionId} InstanceId={InstanceId}",
+                "Installed required resource dependency. DependencyProjectId={DependencyProjectId} VersionId={VersionId} InstanceDirectory={InstanceDirectory}",
                 project.ProjectId,
                 version.VersionId,
-                instance.Id);
+                instance.InstanceDirectory);
         }
         finally
         {

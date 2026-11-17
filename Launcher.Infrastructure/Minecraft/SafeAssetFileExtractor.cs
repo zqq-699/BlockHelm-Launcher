@@ -84,6 +84,7 @@ internal sealed class SafeAssetFileExtractor : IFileExtractor
                 indexPath,
                 metadata.Url,
                 metadata.Size > 0 ? metadata.Size : null);
+            using var diagnosticLogScope = logScope.RestoreContext();
             try
             {
                 var resolution = await downloadExecutor.DownloadFileAsync(
@@ -141,7 +142,7 @@ internal sealed class SafeAssetFileExtractor : IFileExtractor
                             path.Assets,
                             "Virtual asset"),
                         item.Hash,
-                        path.Assets));
+                        path.Assets, logger));
                 }
                 if (assetIndex.MapToResources)
                 {
@@ -151,7 +152,7 @@ internal sealed class SafeAssetFileExtractor : IFileExtractor
                             path.Resource,
                             "Legacy resource"),
                         item.Hash,
-                        path.Resource));
+                        path.Resource, logger));
                 }
 
                 yield return new GameFile(item.Name)
@@ -174,19 +175,19 @@ internal sealed class SafeAssetFileExtractor : IFileExtractor
     private sealed class AtomicAssetCopyTask(
         string destinationPath,
         string expectedSha1,
-        string managedRoot) : IUpdateTask
+        string managedRoot, ILogger? logger) : IUpdateTask
     {
         public async ValueTask Execute(GameFile file, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(file.Path))
-                throw new InvalidDataException("Asset object path is missing.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Asset object path is missing."), "DownloadValidation", ("Reason", "Asset object path is missing."));
 
             await AtomicSharedFilePublisher.PublishVerifiedReplacementAsync(
                 file.Path,
                 destinationPath,
                 expectedSha1,
                 cancellationToken,
-                managedRoot).ConfigureAwait(false);
+                managedRoot, logger).ConfigureAwait(false);
         }
     }
 }

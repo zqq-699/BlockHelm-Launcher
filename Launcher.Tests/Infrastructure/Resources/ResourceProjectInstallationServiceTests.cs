@@ -59,7 +59,7 @@ public sealed class ResourceProjectInstallationServiceTests
     public async Task ModpackWorkspaceIsRemovedAfterSuccessfulImport()
     {
         var catalog = new RecordingCatalogService();
-        var importedInstance = new GameInstance { Id = "imported", Name = "Pack" };
+        var importedInstance = new GameInstance {  Name = "Pack" };
         var instanceService = new FakeGameInstanceService();
         var service = new ResourceProjectInstallationService(
             catalog,
@@ -78,19 +78,22 @@ public sealed class ResourceProjectInstallationServiceTests
     }
 
     [Fact]
-    public async Task ModpackIconPersistenceFailureKeepsImportSuccessfulAndRestoresFallback()
+    public async Task ModpackIconIsPreparedBeforeCommitWithoutOverwritingExistingIcon()
     {
         var root = Path.Combine(Path.GetTempPath(), $"launcher-resource-icon-{Guid.NewGuid():N}");
         var sourcePath = Path.Combine(root, "cached.png");
         var instanceDirectory = Path.Combine(root, "instance");
         Directory.CreateDirectory(instanceDirectory);
+        Directory.CreateDirectory(Path.Combine(instanceDirectory, "BHL"));
+        var previousIcon = Path.Combine(instanceDirectory, "BHL", "resource-project-icon.png");
+        await File.WriteAllBytesAsync(previousIcon, [9]);
         await File.WriteAllBytesAsync(sourcePath, [5, 6, 7]);
         var project = CreateProject("project");
         var catalog = new RecordingCatalogService();
         catalog.ThumbnailSources[project.ProjectId] = new Uri(sourcePath).AbsoluteUri;
         var importedInstance = new GameInstance
         {
-            Id = "imported",
+
             Name = "Pack",
             InstanceDirectory = instanceDirectory
         };
@@ -112,13 +115,46 @@ public sealed class ResourceProjectInstallationServiceTests
                 Project: project));
 
             Assert.True(result.ModpackImportResult?.IsSuccess);
-            Assert.Null(importedInstance.IconSource);
-            Assert.False(File.Exists(Path.Combine(instanceDirectory, "BHL", "resource-project-icon.png")));
+            Assert.Equal([5, 6, 7], await ReadInstalledIconAsync(result));
+            Assert.Equal([9], await File.ReadAllBytesAsync(previousIcon));
+            Assert.Equal(0, instanceService.SaveCallCount);
         }
         finally
         {
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ModpackIconUsesFinalDirectoryAfterStagingIsCommitted()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"launcher-staged-icon-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.png");
+            await File.WriteAllBytesAsync(source, [4, 2]);
+            var project = CreateProject("staged");
+            var catalog = new RecordingCatalogService();
+            catalog.ThumbnailSources[project.ProjectId] = new Uri(source).AbsoluteUri;
+            var importer = new StagingModpackImportService(root);
+            var service = new ResourceProjectInstallationService(catalog, importer,
+                new FakeGameInstanceService(), NullLogger<ResourceProjectInstallationService>.Instance);
+
+            var result = await service.ExecuteAsync(new ResourceProjectInstallationRequest(
+                CreateVersion(ResourceProjectKind.Modpack),
+                ResourceProjectInstallationTargetKind.NewModpackInstance, Project: project));
+
+            Assert.True(importer.PreparedBeforeCommit);
+            Assert.Equal([4, 2], await ReadInstalledIconAsync(result));
+            Assert.StartsWith(Path.Combine(root, "final"),
+                new Uri(result.ModpackImportResult!.ImportedInstance!.IconSource!).LocalPath,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
 
@@ -160,7 +196,7 @@ public sealed class ResourceProjectInstallationServiceTests
             Assert.NotEqual(
                 results[0].ModpackImportResult?.ImportedInstance?.IconSource,
                 results[1].ModpackImportResult?.ImportedInstance?.IconSource);
-            Assert.Equal(2, instanceService.SaveCallCount);
+            Assert.Equal(0, instanceService.SaveCallCount);
         }
         finally
         {
@@ -393,16 +429,19 @@ public sealed class ResourceProjectInstallationServiceTests
         public Task<ModpackRecognitionResult> RecognizeArchiveAsync(string archivePath, CancellationToken cancellationToken = default) =>
             Task.FromResult(ModpackRecognitionResult.Failure(ModpackRecognitionFailureReason.UnsupportedArchive));
 
-        public Task<ModpackImportResult> ImportFromArchiveAsync(
+        public async Task<ModpackImportResult> ImportFromArchiveAsync(
             string archivePath,
             IProgress<LauncherProgress>? progress,
             CancellationToken cancellationToken = default,
             DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
-            int downloadSpeedLimitMbPerSecond = 0)
+            int downloadSpeedLimitMbPerSecond = 0,
+            Func<StagedModpackInstance, Task>? prepareInstanceAsync = null)
         {
-            return exception is null
-                ? Task.FromResult(result!)
-                : Task.FromException<ModpackImportResult>(exception);
+            if (exception is not null)
+                throw exception;
+            if (prepareInstanceAsync is not null && result?.ImportedInstance is { } instance)
+                await prepareInstanceAsync(new StagedModpackInstance { Instance = instance, InstanceDirectory = instance.InstanceDirectory });
+            return result!;
         }
     }
 
@@ -418,17 +457,60 @@ public sealed class ResourceProjectInstallationServiceTests
             IProgress<LauncherProgress>? progress,
             CancellationToken cancellationToken = default,
             DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
-            int downloadSpeedLimitMbPerSecond = 0)
+            int downloadSpeedLimitMbPerSecond = 0,
+            Func<StagedModpackInstance, Task>? prepareInstanceAsync = null)
         {
             var id = await File.ReadAllTextAsync(archivePath, cancellationToken);
             var instanceDirectory = Path.Combine(root, $"instance-{id}");
             Directory.CreateDirectory(instanceDirectory);
-            return ModpackImportResult.Success(new GameInstance
+            var instance = new GameInstance
             {
-                Id = id,
+
                 Name = id,
                 InstanceDirectory = instanceDirectory
-            });
+            };
+            if (prepareInstanceAsync is not null)
+                await prepareInstanceAsync(new StagedModpackInstance { Instance = instance, InstanceDirectory = instanceDirectory });
+            return ModpackImportResult.Success(instance);
         }
+    }
+
+    private sealed class StagingModpackImportService(string root) : ILocalModpackImportService
+    {
+        public bool PreparedBeforeCommit { get; private set; }
+        public Task<ModpackRecognitionResult> RecognizeArchiveAsync(string archivePath, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ModpackRecognitionResult.Failure(ModpackRecognitionFailureReason.UnsupportedArchive));
+
+        public async Task<ModpackImportResult> ImportFromArchiveAsync(string archivePath, IProgress<LauncherProgress>? progress,
+            CancellationToken cancellationToken = default,
+            DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
+            int downloadSpeedLimitMbPerSecond = 0, Func<StagedModpackInstance, Task>? prepareInstanceAsync = null)
+        {
+            var pending = Path.Combine(root, "pending");
+            var final = Path.Combine(root, "final");
+            Directory.CreateDirectory(pending);
+            var instance = new GameInstance { Name = "Pack", InstanceDirectory = pending };
+            var transaction = new TestInstallTransaction(pending, final);
+            if (prepareInstanceAsync is not null)
+                await prepareInstanceAsync(new StagedModpackInstance
+                    { Instance = instance, InstanceDirectory = pending, InstallTransaction = transaction });
+            PreparedBeforeCommit = instance.IconSource is not null && !Directory.Exists(final);
+            Directory.Move(pending, final);
+            instance.InstanceDirectory = final;
+            return ModpackImportResult.Success(instance);
+        }
+    }
+
+    private sealed class TestInstallTransaction(string pending, string final) : IInstanceInstallTransaction
+    {
+        public string MinecraftDirectory => Path.GetDirectoryName(pending)!;
+        public string LogicalVersionName => "Pack";
+        public string PendingDirectory => pending;
+        public string FinalDirectory => final;
+        public bool IsCommitted => false;
+        public Task CommitAsync(GameInstance instance, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task CompleteLogicalCommitAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task AbortAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

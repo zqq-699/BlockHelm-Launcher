@@ -91,17 +91,17 @@ public sealed partial class HomeLaunchGameListViewModel : ObservableObject
 
     private bool ReconcileLaunchInstances(IEnumerable<GameInstance> instances)
     {
-        var selectedInstanceId = SelectedInstance?.Id;
+        var selectedInstanceDirectory = SelectedInstance?.InstanceDirectory;
         var existing = LaunchInstances
-            .Where(item => !string.IsNullOrWhiteSpace(item.Instance.Id))
-            .GroupBy(item => item.Instance.Id, StringComparer.OrdinalIgnoreCase)
+            .Where(item => !string.IsNullOrWhiteSpace(item.Instance.InstanceDirectory))
+            .GroupBy(item => item.Instance.InstanceDirectory, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         var next = new List<HomeLaunchInstanceItem>();
         var itemChanged = false;
         foreach (var instance in instances.OrderByDescending(instance => instance.CreatedAt))
         {
-            if (!string.IsNullOrWhiteSpace(instance.Id)
-                && existing.TryGetValue(instance.Id, out var item))
+            if (!string.IsNullOrWhiteSpace(instance.InstanceDirectory)
+                && existing.TryGetValue(instance.InstanceDirectory, out var item))
             {
                 itemChanged |= item.Update(instance, instance.VersionType);
                 next.Add(item);
@@ -114,7 +114,7 @@ public sealed partial class HomeLaunchGameListViewModel : ObservableObject
         }
 
         var collectionChanged = ApplyLaunchInstances(next);
-        UpdateLaunchInstanceSelection(selectedInstanceId);
+        UpdateLaunchInstanceSelection(selectedInstanceDirectory);
         if (itemChanged || collectionChanged)
             NotifyLaunchInstancesChanged();
         return itemChanged || collectionChanged;
@@ -172,7 +172,7 @@ public sealed partial class HomeLaunchGameListViewModel : ObservableObject
 
     partial void OnSelectedInstanceChanged(GameInstance? value)
     {
-        UpdateLaunchInstanceSelection(value?.Id);
+        UpdateLaunchInstanceSelection(value?.InstanceDirectory);
     }
 
     partial void OnIsLaunchMenuPinnedChanged(bool value)
@@ -188,12 +188,12 @@ public sealed partial class HomeLaunchGameListViewModel : ObservableObject
         OnPropertyChanged(nameof(HasSelectedLaunchInstance));
     }
 
-    private void UpdateLaunchInstanceSelection(string? selectedInstanceId)
+    private void UpdateLaunchInstanceSelection(string? selectedInstanceDirectory)
     {
         foreach (var item in LaunchInstances)
         {
-            item.IsSelected = !string.IsNullOrWhiteSpace(selectedInstanceId)
-                && string.Equals(item.Instance.Id, selectedInstanceId, StringComparison.OrdinalIgnoreCase);
+            item.IsSelected = !string.IsNullOrWhiteSpace(selectedInstanceDirectory)
+                && string.Equals(item.Instance.InstanceDirectory, selectedInstanceDirectory, StringComparison.OrdinalIgnoreCase);
         }
 
         OnPropertyChanged(nameof(SelectedLaunchInstanceItem));

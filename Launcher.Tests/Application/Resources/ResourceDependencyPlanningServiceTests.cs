@@ -120,7 +120,7 @@ public sealed class ResourceDependencyPlanningServiceTests
     {
         return new GameInstance
         {
-            Id = "instance",
+
             MinecraftVersion = "1.20.1",
             Loader = LoaderKind.Fabric,
             InstanceDirectory = "instance"

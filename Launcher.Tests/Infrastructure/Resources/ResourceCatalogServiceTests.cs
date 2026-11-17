@@ -409,6 +409,29 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
         Assert.Empty(Directory.GetFiles(TempRoot, "*.download"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InstanceInstallRejectsAnExternallyRenamedOrReplacedTarget(bool replace)
+    {
+        var directory = Path.Combine(TempRoot, "instance");
+        Directory.CreateDirectory(directory);
+        var instance = new GameInstance { InstanceDirectory = directory };
+        Launcher.Infrastructure.Persistence.InstanceDirectoryOwnership.Observe(instance);
+        var moved = directory + "-moved";
+        Directory.Move(directory, moved);
+        if (replace) Directory.CreateDirectory(directory);
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("mod") });
+        var version = new ResourceProjectVersion
+        {
+            Kind = ResourceProjectKind.Mod, FileName = "mod.jar", PrimaryDownloadUrl = "https://download.test/mod.jar"
+        };
+        await Assert.ThrowsAnyAsync<Exception>(() => CreateService(handler).InstallProjectVersionAsync(version, instance));
+        Assert.Equal(replace, Directory.Exists(directory));
+        Assert.False(Directory.Exists(Path.Combine(directory, "mods")));
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task InstanceInstallRejectsSameNameDifferentContentWithoutDownloadingOrOverwriting()
     {
@@ -432,7 +455,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
                     ExpectedFileSize = Encoding.UTF8.GetByteCount("dependency"),
                     FileHashes = [CreateHash(ResourceFileHashAlgorithm.Sha512, "dependency")]
                 },
-                new GameInstance { Id = "instance", InstanceDirectory = instanceDirectory }));
+                new GameInstance {  InstanceDirectory = instanceDirectory }));
 
         Assert.Equal(ResourceProjectDestinationConflictReason.ExistingDifferentContent, exception.Reason);
         Assert.Equal("user-owned", await File.ReadAllTextAsync(target));
@@ -494,7 +517,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
                     VersionId = "mod",
                     FileName = "mod.jar"
                 },
-                new GameInstance { Id = "instance", InstanceDirectory = instanceDirectory },
+                new GameInstance {  InstanceDirectory = instanceDirectory },
                 outside,
                 CancellationToken.None));
 
@@ -586,7 +609,7 @@ public sealed class ResourceCatalogServiceTests : TestTempDirectory
                     ExpectedFileSize = Encoding.UTF8.GetByteCount("replacement"),
                     FileHashes = [CreateHash(ResourceFileHashAlgorithm.Sha512, "replacement")]
                 },
-                new GameInstance { Id = "instance", InstanceDirectory = instanceDirectory }));
+                new GameInstance {  InstanceDirectory = instanceDirectory }));
 
             Assert.Empty(handler.Requests);
             Assert.Equal("external-original", await File.ReadAllTextAsync(externalFile));

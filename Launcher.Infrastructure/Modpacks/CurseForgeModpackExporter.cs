@@ -51,11 +51,12 @@ internal sealed class CurseForgeModpackExporter
 
     public async Task<ModpackExportResult> ExportAsync(
         ModpackExportRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? isCurrent = null)
     {
         logger.LogInformation(
-            "CurseForge modpack export started. InstanceId={InstanceId} IncludeMods={IncludeMods} IncludeDisabledMods={IncludeDisabledMods} IncludeResourcePacks={IncludeResourcePacks} IncludeShaderPacks={IncludeShaderPacks} IncludeConfig={IncludeConfig}",
-            request.Instance.Id,
+            "CurseForge modpack export started. InstanceDirectory={InstanceDirectory} IncludeMods={IncludeMods} IncludeDisabledMods={IncludeDisabledMods} IncludeResourcePacks={IncludeResourcePacks} IncludeShaderPacks={IncludeShaderPacks} IncludeConfig={IncludeConfig}",
+            request.Instance.InstanceDirectory,
             request.IncludeMods,
             request.IncludeDisabledMods,
             request.IncludeResourcePacks,
@@ -92,12 +93,13 @@ internal sealed class CurseForgeModpackExporter
                     "manifest.json",
                     CreateManifest(request, manifestFiles),
                     overrideFiles,
-                    cancellationToken)
+                    cancellationToken,
+                    isCurrent)
                 .ConfigureAwait(false);
 
             logger.LogInformation(
-                "CurseForge modpack export completed. InstanceId={InstanceId} ManifestFileCount={ManifestFileCount} OverrideFileCount={OverrideFileCount}",
-                request.Instance.Id,
+                "CurseForge modpack export completed. InstanceDirectory={InstanceDirectory} ManifestFileCount={ManifestFileCount} OverrideFileCount={OverrideFileCount}",
+                request.Instance.InstanceDirectory,
                 manifestFiles.Count,
                 overrideFiles.Count);
             logger.LogDebug("CurseForge modpack export path resolved. OutputArchivePath={OutputArchivePath}", outputPath);
@@ -118,22 +120,22 @@ internal sealed class CurseForgeModpackExporter
         }
         catch (HttpRequestException exception)
         {
-            logger.LogWarning(exception, "CurseForge modpack export API request failed. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogWarning(exception, "CurseForge modpack export API request failed. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.CurseForgeApiFailed);
         }
         catch (IOException exception)
         {
-            logger.LogError(exception, "CurseForge modpack export file operation failed. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogError(exception, "CurseForge modpack export file operation failed. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.FileSystemError);
         }
         catch (UnauthorizedAccessException exception)
         {
-            logger.LogError(exception, "CurseForge modpack export file access failed. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogError(exception, "CurseForge modpack export file access failed. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.FileSystemError);
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "CurseForge modpack export failed unexpectedly. InstanceId={InstanceId}", request.Instance.Id);
+            logger.LogError(exception, "CurseForge modpack export failed unexpectedly. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
             return Failure(ModpackExportFailureReason.UnexpectedError);
         }
     }

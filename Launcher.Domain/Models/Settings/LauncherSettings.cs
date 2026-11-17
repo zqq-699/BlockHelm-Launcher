@@ -61,5 +61,5 @@ public sealed class LauncherSettings
     public string DefaultPostExitCommand { get; set; } = string.Empty;
     public string DefaultJvmArguments { get; set; } = string.Empty;
     public string DefaultGameArguments { get; set; } = string.Empty;
-    public string? DefaultInstanceId { get; set; }
+    public string? DefaultInstanceDirectory { get; set; }
 }

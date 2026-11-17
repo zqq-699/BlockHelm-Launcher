@@ -37,27 +37,31 @@ internal sealed class ModpackExportArchiveWriter
         string manifestEntryName,
         TManifest manifest,
         IReadOnlyList<ModpackExportArchiveFile> overrideFiles,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? isCurrent = null)
     {
         var outputPath = Path.GetFullPath(outputArchivePath);
         var tempPath = CreateTempArchivePath(outputPath);
         try
         {
+            EnsureCurrent(isCurrent);
             Directory.CreateDirectory(Path.GetDirectoryName(tempPath)!);
             await WriteArchiveAsync(
                     tempPath,
                     manifestEntryName,
                     manifest,
                     overrideFiles,
-                    cancellationToken)
+                    cancellationToken,
+                    isCurrent)
                 .ConfigureAwait(false);
+            EnsureCurrent(isCurrent);
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             File.Move(tempPath, outputPath, overwrite: true);
             return outputPath;
         }
         catch
         {
-            TryDeleteFile(tempPath);
+            if (isCurrent?.Invoke() is not false) TryDeleteFile(tempPath);
             throw;
         }
     }
@@ -67,7 +71,8 @@ internal sealed class ModpackExportArchiveWriter
         string manifestEntryName,
         TManifest manifest,
         IReadOnlyList<ModpackExportArchiveFile> overrideFiles,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? isCurrent)
     {
         await using var stream = File.Create(archivePath);
         using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: false);
@@ -84,7 +89,15 @@ internal sealed class ModpackExportArchiveWriter
         }
 
         foreach (var file in overrideFiles)
+        {
+            EnsureCurrent(isCurrent);
             await AddOverrideFileAsync(archive, file, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static void EnsureCurrent(Func<bool>? isCurrent)
+    {
+        if (isCurrent?.Invoke() is false) throw new IOException("The source instance changed during export.");
     }
 
     private static async Task AddOverrideFileAsync(

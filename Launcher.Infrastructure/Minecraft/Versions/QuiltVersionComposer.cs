@@ -149,8 +149,9 @@ internal static class QuiltVersionComposer
                 var profileNode = await JsonNode.ParseAsync(profileStream, cancellationToken: token);
                 if (profileNode is not JsonObject profileObject)
                 {
-                    throw new DownloadContentValidationException(
-                        $"Quilt profile metadata is not a JSON object: {minecraftVersion} {loaderVersion}");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                        $"Quilt profile metadata is not a JSON object: {minecraftVersion} {loaderVersion}"), "LoaderProfileRootInvalid",
+                        ("ExpectedFormat", "JSON object"), ("MinecraftVersion", minecraftVersion), ("LoaderVersion", loaderVersion), ("Loader", "Quilt"));
                 }
 
                 return profileObject;

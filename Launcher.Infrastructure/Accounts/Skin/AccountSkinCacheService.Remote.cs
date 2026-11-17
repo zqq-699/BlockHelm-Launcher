@@ -23,7 +23,11 @@ using System.Security.Cryptography;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Launcher.Application.Accounts;
+using Launcher.Application.Services;
 using Launcher.Domain.Models;
+
+using Microsoft.Extensions.Logging;
+using Launcher.Infrastructure.Minecraft;
 
 namespace Launcher.Infrastructure.Accounts;
 
@@ -44,13 +48,13 @@ internal sealed partial class AccountSkinCacheService
 
         try
         {
-            var skinBytes = await httpClient.GetByteArrayAsync(skinUrl, cancellationToken);
-            var hash = ComputeSkinContentHash(skinBytes);
+            var skinBytes = await DownloadHttpDiagnostics.GetBytesAsync(httpClient, logger, skinUrl, cancellationToken);
+            var hash = DownloadDiagnostics.RunStage(logger, "SkinImageDecode", () => ComputeSkinContentHash(skinBytes));
             var skinPath = useSharedLibrary
                 ? CreateSharedLibrarySkinPath(hash, skinModel)
                 : CreateSkinPath(uuid, hash);
             if (!File.Exists(skinPath) || forceRefresh)
-                await File.WriteAllBytesAsync(skinPath, skinBytes, cancellationToken);
+                await DownloadDiagnostics.RunStageAsync(logger, "SkinCacheWrite", () => File.WriteAllBytesAsync(skinPath, skinBytes, cancellationToken));
 
             if (useSharedLibrary)
                 return CreateRecord(hash, skinModel, new Uri(skinPath).AbsoluteUri);
@@ -60,8 +64,9 @@ internal sealed partial class AccountSkinCacheService
                 ? CreateRecord(hash, skinModel, new Uri(skinPath).AbsoluteUri)
                 : CopyRecordWithSource(existing, new Uri(skinPath).AbsoluteUri, hash);
         }
-        catch
+        catch (Exception exception)
         {
+            logger?.LogWarning(exception, "Remote skin download, decode or cache write failed. CancellationRequested={CancellationRequested}", cancellationToken.IsCancellationRequested);
             return null;
         }
     }

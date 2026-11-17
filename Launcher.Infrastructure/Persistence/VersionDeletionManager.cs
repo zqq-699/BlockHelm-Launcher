@@ -48,7 +48,7 @@ internal sealed class VersionDeletionManager
     public async Task<string> StageAsync(
         string minecraftDirectory,
         string versionName,
-        string expectedInstanceId,
+        string expectedOwnerProof,
         CancellationToken cancellationToken)
     {
         var sourceDirectory = directoryManager.GetVersionDirectory(minecraftDirectory, versionName);
@@ -62,7 +62,7 @@ internal sealed class VersionDeletionManager
             versionsDirectory,
             markerPath,
             versionName,
-            expectedInstanceId);
+            expectedOwnerProof);
         for (var attempt = 1; attempt <= MaxStageAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -85,7 +85,7 @@ internal sealed class VersionDeletionManager
                 return stagedResult;
         }
 
-        TryDeleteOwnedPreparationMarker(sourceDirectory, markerPath, expectedInstanceId);
+        TryDeleteOwnedPreparationMarker(sourceDirectory, markerPath, expectedOwnerProof);
         throw new IOException(
             $"Unable to stage version directory for deletion after {MaxStageAttempts} destination collisions: {sourceDirectory}");
     }
@@ -114,7 +114,7 @@ internal sealed class VersionDeletionManager
             TryDeleteOwnedPreparationMarker(
                 context.SourceDirectory,
                 context.MarkerPath,
-                context.ExpectedInstanceId);
+                context.ExpectedOwnerProof);
             return null;
         }
         catch
@@ -122,7 +122,7 @@ internal sealed class VersionDeletionManager
             TryDeleteOwnedPreparationMarker(
                 context.SourceDirectory,
                 context.MarkerPath,
-                context.ExpectedInstanceId);
+                context.ExpectedOwnerProof);
             throw;
         }
     }
@@ -132,22 +132,28 @@ internal sealed class VersionDeletionManager
         string transactionId,
         CancellationToken cancellationToken)
     {
+        using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(context.SourceDirectory);
         await AtomicJsonFileWriter.WriteAsync(
             context.MarkerPath,
             new PendingInstanceDeletionMarker(
-                2,
+                3,
                 transactionId,
                 context.VersionName,
-                context.ExpectedInstanceId,
+                context.ExpectedOwnerProof,
                 DateTimeOffset.UtcNow),
             PendingInstanceDeletionDirectory.MarkerJsonOptions,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            validateDestination: () =>
+            {
+                if (!GameInstanceSettingsStore.HasIdentity(context.SourceDirectory, context.ExpectedOwnerProof))
+                    throw new GameInstanceMutationConflictException(context.SourceDirectory, context.VersionName);
+            }).ConfigureAwait(false);
     }
 
     private void MoveToStagedDirectory(StageContext context, string stagedDirectory)
     {
-        if (!GameInstanceSettingsStore.HasIdentity(context.SourceDirectory, context.ExpectedInstanceId))
-            throw new GameInstanceMutationConflictException(context.ExpectedInstanceId, context.VersionName);
+        if (!GameInstanceSettingsStore.HasIdentity(context.SourceDirectory, context.ExpectedOwnerProof))
+            throw new GameInstanceMutationConflictException(context.ExpectedOwnerProof, context.VersionName);
 
         if (useIdentitySafeMove)
         {
@@ -168,7 +174,7 @@ internal sealed class VersionDeletionManager
                 stagedDirectory,
                 () => GameInstanceSettingsStore.HasIdentity(
                     context.SourceDirectory,
-                    context.ExpectedInstanceId),
+                    context.ExpectedOwnerProof),
                 beforeMove is null
                     ? null
                     : () => beforeMove(context.SourceDirectory, stagedDirectory));
@@ -176,18 +182,18 @@ internal sealed class VersionDeletionManager
         catch (InvalidOperationException)
         {
             throw new GameInstanceMutationConflictException(
-                context.ExpectedInstanceId,
+                context.ExpectedOwnerProof,
                 context.VersionName);
         }
     }
 
     private void EnsureStagedIdentity(StageContext context, string stagedDirectory)
     {
-        if (GameInstanceSettingsStore.HasIdentity(stagedDirectory, context.ExpectedInstanceId))
+        if (GameInstanceSettingsStore.HasIdentity(stagedDirectory, context.ExpectedOwnerProof))
             return;
 
         QuarantineMarker(stagedDirectory);
-        throw new GameInstanceMutationConflictException(context.ExpectedInstanceId, context.VersionName);
+        throw new GameInstanceMutationConflictException(context.ExpectedOwnerProof, context.VersionName);
     }
 
     private static string GetStagedDirectory(StageContext context, string transactionId)
@@ -210,14 +216,27 @@ internal sealed class VersionDeletionManager
 
         if (!Directory.Exists(normalizedStagedDirectory))
             return true;
-        if (File.Exists(Path.Combine(
-                normalizedStagedDirectory,
-                PendingInstanceDeletionDirectory.AbortedMarkerFileName)))
+        var abortedMarkerPath = Path.Combine(normalizedStagedDirectory, PendingInstanceDeletionDirectory.AbortedMarkerFileName);
+        if (File.Exists(abortedMarkerPath))
         {
-            logger.LogWarning(
-                "Pending deletion directory was preserved because its transaction was aborted. StagedDirectory={StagedDirectory}",
-                normalizedStagedDirectory);
-            return false;
+            if (!PendingInstanceDeletionDirectory.TryReadValidMarker(normalizedStagedDirectory, out var abortedMarker, readAbortedMarker: true)
+                || abortedMarker.SchemaVersion != 1)
+            {
+                logger.LogWarning(
+                    "Pending deletion directory was preserved because its transaction was aborted. StagedDirectory={StagedDirectory}",
+                    normalizedStagedDirectory);
+                return false;
+            }
+            try
+            {
+                File.Move(abortedMarkerPath, PendingInstanceDeletionDirectory.GetMarkerPath(normalizedStagedDirectory));
+                logger.LogInformation("Resuming legacy schema-1 staged deletion. StagedDirectory={StagedDirectory}", normalizedStagedDirectory);
+            }
+            catch (Exception exception) when (IsFileSystemFailure(exception))
+            {
+                logger.LogWarning(exception, "Failed to resume legacy staged deletion. StagedDirectory={StagedDirectory}", normalizedStagedDirectory);
+                return false;
+            }
         }
         if (!PendingInstanceDeletionDirectory.TryReadValidMarker(normalizedStagedDirectory, out var marker))
         {
@@ -226,13 +245,15 @@ internal sealed class VersionDeletionManager
                 normalizedStagedDirectory);
             return false;
         }
-        if (marker.SchemaVersion == 2
-            && !GameInstanceSettingsStore.HasIdentity(normalizedStagedDirectory, marker.InstanceId!))
+        // Schema 1 predates ownership credentials. Keep its original cleanup contract:
+        // a valid transaction marker in the matching deletion staging directory.
+        if (marker.SchemaVersion >= 2
+            && !GameInstanceSettingsStore.HasIdentity(normalizedStagedDirectory, marker.OwnerProof!))
         {
             QuarantineMarker(normalizedStagedDirectory);
             logger.LogError(
-                "Pending deletion directory was preserved because its instance identity changed. ExpectedInstanceId={ExpectedInstanceId} StagedDirectory={StagedDirectory}",
-                marker.InstanceId,
+                "Pending deletion directory was preserved because its instance identity changed. ExpectedOwnerProof={ExpectedOwnerProof} StagedDirectory={StagedDirectory}",
+                marker.OwnerProof,
                 normalizedStagedDirectory);
             return false;
         }
@@ -271,6 +292,32 @@ internal sealed class VersionDeletionManager
                 "Failed to delete staged version directory; it will be retried on startup. StagedDirectory={StagedDirectory}",
                 normalizedStagedDirectory);
             return false;
+        }
+    }
+
+    // The caller holds the version mutation lock. A marker still in a regular directory
+    // cannot represent a staged deletion; preserve the record without blocking migration.
+    public void CleanupOrphanPreparationMarkers(string minecraftDirectory, CancellationToken cancellationToken)
+    {
+        var versionsDirectory = GetVersionsDirectory(minecraftDirectory);
+        if (!Directory.Exists(versionsDirectory)) return;
+        foreach (var directory in Directory.EnumerateDirectories(versionsDirectory).Where(InstanceDirectoryClassifier.IsInstanceDirectory))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var markerPath = PendingInstanceDeletionDirectory.GetMarkerPath(directory);
+            if (!File.Exists(markerPath)) continue;
+            try
+            {
+                using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(directory);
+                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) continue;
+                var preservedPath = markerPath + $".{Guid.NewGuid():N}.orphaned";
+                File.Move(markerPath, preservedPath);
+                logger.LogWarning("Preserved orphaned deletion preparation marker. MarkerPath={MarkerPath} PreservedPath={PreservedPath}", markerPath, preservedPath);
+            }
+            catch (Exception exception) when (IsFileSystemFailure(exception))
+            {
+                logger.LogWarning(exception, "Failed to preserve orphaned deletion preparation marker. MarkerPath={MarkerPath}", markerPath);
+            }
         }
     }
 
@@ -331,10 +378,18 @@ internal sealed class VersionDeletionManager
     private void TryDeleteOwnedPreparationMarker(
         string sourceDirectory,
         string markerPath,
-        string expectedInstanceId)
+        string expectedOwnerProof)
     {
-        if (GameInstanceSettingsStore.HasIdentity(sourceDirectory, expectedInstanceId))
-            TryDeletePreparationMarker(markerPath);
+        try
+        {
+            using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(sourceDirectory);
+            if (GameInstanceSettingsStore.HasIdentity(sourceDirectory, expectedOwnerProof))
+                TryDeletePreparationMarker(markerPath);
+        }
+        catch (Exception exception) when (IsFileSystemFailure(exception))
+        {
+            logger.LogWarning(exception, "Deletion preparation marker retained because its source could not be verified. MarkerPath={MarkerPath}", markerPath);
+        }
     }
 
     private void QuarantineMarker(string directory)
@@ -363,15 +418,13 @@ internal sealed class VersionDeletionManager
             return false;
         if (!PendingInstanceDeletionDirectory.TryReadValidMarker(stagedDirectory, out var marker))
             return false;
-        if (marker.SchemaVersion != 2)
-            return true;
-        if (GameInstanceSettingsStore.HasIdentity(stagedDirectory, marker.InstanceId!))
+        if (marker.SchemaVersion == 1 || GameInstanceSettingsStore.HasIdentity(stagedDirectory, marker.OwnerProof!))
             return true;
 
         QuarantineMarker(stagedDirectory);
         logger.LogError(
-            "Pending deletion directory lost transaction ownership before permanent deletion. ExpectedInstanceId={ExpectedInstanceId} StagedDirectory={StagedDirectory}",
-            marker.InstanceId,
+            "Pending deletion directory lost transaction ownership before permanent deletion. ExpectedOwnerProof={ExpectedOwnerProof} StagedDirectory={StagedDirectory}",
+            marker.OwnerProof,
             stagedDirectory);
         return false;
     }
@@ -395,5 +448,5 @@ internal sealed class VersionDeletionManager
         string VersionsDirectory,
         string MarkerPath,
         string VersionName,
-        string ExpectedInstanceId);
+        string ExpectedOwnerProof);
 }

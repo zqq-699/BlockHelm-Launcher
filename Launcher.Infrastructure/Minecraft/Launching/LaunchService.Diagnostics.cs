@@ -73,9 +73,9 @@ public sealed partial class LaunchService
         {
             logger.LogWarning(
                 diagnosticException,
-                "Failed to write launch diagnostic. FailureKind={FailureKind} InstanceId={InstanceId}",
+                "Failed to write launch diagnostic. FailureKind={FailureKind} InstanceDirectory={InstanceDirectory}",
                 failureKind,
-                context.InstanceId);
+                context.InstanceDirectory);
         }
 
         var report = new LaunchFailureReport(
@@ -114,14 +114,14 @@ public sealed partial class LaunchService
             if (result.FailureReport is null)
             {
                 logger.LogInformation(
-                    "Minecraft process exited normally. InstanceId={InstanceId} VersionName={VersionName} ExitCode={ExitCode} Runtime={Runtime} JavaVersion={JavaVersion} JavaSource={JavaSource}",
-                    context.InstanceId,
+                    "Minecraft process exited normally. InstanceDirectory={InstanceDirectory} VersionName={VersionName} ExitCode={ExitCode} Runtime={Runtime} JavaVersion={JavaVersion} JavaSource={JavaSource}",
+                    context.InstanceDirectory,
                     context.VersionName,
                     result.ExitCode,
                     FormatRuntime(result.Runtime),
                     context.JavaVersion,
                     context.JavaSource);
-                logger.LogDebug("Minecraft process Java path. InstanceId={InstanceId} JavaPath={JavaPath}", context.InstanceId, context.JavaPath);
+                logger.LogDebug("Minecraft process Java path. InstanceDirectory={InstanceDirectory} JavaPath={JavaPath}", context.InstanceDirectory, context.JavaPath);
                 return result;
             }
 
@@ -136,8 +136,8 @@ public sealed partial class LaunchService
         {
             logger.LogError(
                 exception,
-                "Failed while monitoring Minecraft process exit. InstanceId={InstanceId} VersionName={VersionName} JavaPath={JavaPath} JavaVersion={JavaVersion} JavaSource={JavaSource}",
-                context.InstanceId,
+                "Failed while monitoring Minecraft process exit. InstanceDirectory={InstanceDirectory} VersionName={VersionName} JavaPath={JavaPath} JavaVersion={JavaVersion} JavaSource={JavaSource}",
+                context.InstanceDirectory,
                 context.VersionName,
                 context.JavaPath,
                 context.JavaVersion,
@@ -204,7 +204,6 @@ public sealed partial class LaunchService
         return new LaunchDiagnosticContext(
             settings.MinecraftDirectory,
             instance.InstanceDirectory,
-            instance.Id,
             string.IsNullOrWhiteSpace(instance.Name) ? versionName : instance.Name,
             versionName,
             instance.MinecraftVersion,
@@ -214,7 +213,10 @@ public sealed partial class LaunchService
             javaRuntime?.Version,
             javaRuntime?.Source,
             memoryMb,
-            sensitiveValues);
+            sensitiveValues)
+        {
+            InstanceDirectoryProof = Persistence.InstanceDirectoryOwnership.GetObservedProof(instance)
+        };
     }
 
     private static string ResolveDiagnosticDirectory(LaunchDiagnosticContext context, string? diagnosticPath)
@@ -235,7 +237,7 @@ public sealed partial class LaunchService
     {
         var sharedPath = new MinecraftPath(minecraftDirectory);
         var versionDirectory = Path.Combine(sharedPath.Versions, versionName);
-        var isolatedPath = new MinecraftPath(versionDirectory)
+        var isolatedPath = new InstanceMinecraftPath(versionDirectory)
         {
             Versions = sharedPath.Versions,
             Library = sharedPath.Library,

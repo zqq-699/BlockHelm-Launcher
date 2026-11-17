@@ -8,12 +8,12 @@
 namespace Launcher.Application.Services;
 
 public sealed class GameInstanceMutationConflictException(
-    string expectedInstanceId,
+    string expectedInstanceDirectory,
     string versionName)
     : InvalidOperationException(
-        $"The instance at version '{versionName}' no longer matches instance '{expectedInstanceId}'.")
+        $"The instance at version '{versionName}' no longer matches instance '{expectedInstanceDirectory}'.")
 {
-    public string ExpectedInstanceId { get; } = expectedInstanceId;
+    public string ExpectedInstanceDirectory { get; } = expectedInstanceDirectory;
 
     public string VersionName { get; } = versionName;
 }

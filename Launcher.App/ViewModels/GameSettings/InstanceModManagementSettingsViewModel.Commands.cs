@@ -62,7 +62,7 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             var result = await modUpdateService.CheckAsync(instance, localMod);
             if (selectedInstance is null
-                || !string.Equals(instance.Id, selectedInstance.Id, StringComparison.Ordinal)
+                || !string.Equals(instance.InstanceDirectory, selectedInstance.InstanceDirectory, StringComparison.Ordinal)
                 || !string.Equals(
                     instance.InstanceDirectory,
                     selectedInstance.InstanceDirectory,
@@ -123,8 +123,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to check mod update. InstanceId={InstanceId} FileName={FileName}",
-                instance.Id,
+                "Failed to check mod update. InstanceDirectory={InstanceDirectory} FileName={FileName}",
+                instance.InstanceDirectory,
                 Path.GetFileName(operationPath));
             ReportModUpdateStatus(Strings.Status_ModUpdateCheckUnavailable);
             ReleaseModUpdate(operationPath, mod);
@@ -305,8 +305,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             if (task is not null)
                 downloadTasksPage?.CancelTask(task);
             logger.LogInformation(
-                "Mod update batch canceled. InstanceId={InstanceId} Count={Count}",
-                instance.Id,
+                "Mod update batch canceled. InstanceDirectory={InstanceDirectory} Count={Count}",
+                instance.InstanceDirectory,
                 mods.Count);
             if (updateStarted)
                 await RefreshModsAfterBulkUpdateAsync(instance);
@@ -317,8 +317,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             if (task is not null)
                 downloadTasksPage?.CancelTask(task);
             logger.LogInformation(
-                "Mod update batch canceled while the current operation was completing. InstanceId={InstanceId} Count={Count}",
-                instance.Id,
+                "Mod update batch canceled while the current operation was completing. InstanceDirectory={InstanceDirectory} Count={Count}",
+                instance.InstanceDirectory,
                 mods.Count);
             if (updateStarted)
                 await RefreshModsAfterBulkUpdateAsync(instance);
@@ -327,8 +327,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Mod update batch failed. InstanceId={InstanceId} Count={Count}",
-                instance.Id,
+                "Mod update batch failed. InstanceDirectory={InstanceDirectory} Count={Count}",
+                instance.InstanceDirectory,
                 mods.Count);
             task?.Fail(Strings.Status_ModBulkUpdateFailed);
             ReportModUpdateStatus(Strings.Status_ModBulkUpdateFailed);
@@ -361,14 +361,14 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             logger.LogWarning(
                 exception,
-                "Mod update batch completed but the local mod list could not be refreshed. InstanceId={InstanceId}",
-                instance.Id);
+                "Mod update batch completed but the local mod list could not be refreshed. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
         }
     }
 
     private bool IsSelectedInstance(GameInstance instance) =>
         selectedInstance is not null
-        && string.Equals(instance.Id, selectedInstance.Id, StringComparison.Ordinal)
+        && string.Equals(instance.InstanceDirectory, selectedInstance.InstanceDirectory, StringComparison.Ordinal)
         && string.Equals(
             instance.InstanceDirectory,
             selectedInstance.InstanceDirectory,
@@ -413,16 +413,16 @@ public sealed partial class InstanceModManagementSettingsViewModel
             {
                 logger.LogWarning(
                     exception,
-                    "Mod update completed but the local mod list could not be refreshed. InstanceId={InstanceId} FileName={FileName}",
-                    instance.Id,
+                    "Mod update completed but the local mod list could not be refreshed. InstanceDirectory={InstanceDirectory} FileName={FileName}",
+                    instance.InstanceDirectory,
                     Path.GetFileName(operationPath));
             }
         }
         catch (OperationCanceledException) when (task.CancellationToken.IsCancellationRequested)
         {
             logger.LogInformation(
-                "Mod update canceled. InstanceId={InstanceId} FileName={FileName}",
-                instance.Id,
+                "Mod update canceled. InstanceDirectory={InstanceDirectory} FileName={FileName}",
+                instance.InstanceDirectory,
                 Path.GetFileName(operationPath));
         }
         catch (ModUpdateConflictException exception)
@@ -439,8 +439,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             ReportModUpdateStatus(message);
             logger.LogWarning(
                 exception,
-                "Mod update stopped by a file conflict. InstanceId={InstanceId} FileName={FileName} Reason={Reason}",
-                instance.Id,
+                "Mod update stopped by a file conflict. InstanceDirectory={InstanceDirectory} FileName={FileName} Reason={Reason}",
+                instance.InstanceDirectory,
                 Path.GetFileName(operationPath),
                 exception.Reason);
         }
@@ -450,8 +450,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             ReportModUpdateStatus(Strings.Status_ModUpdateIntegrityFailed);
             logger.LogWarning(
                 exception,
-                "Mod update integrity validation failed. InstanceId={InstanceId} FileName={FileName} VersionId={VersionId}",
-                instance.Id,
+                "Mod update integrity validation failed. InstanceDirectory={InstanceDirectory} FileName={FileName} VersionId={VersionId}",
+                instance.InstanceDirectory,
                 Path.GetFileName(operationPath),
                 candidate.TargetVersion.VersionId);
         }
@@ -461,8 +461,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             ReportModUpdateStatus(Strings.Status_ModUpdateFailed);
             logger.LogError(
                 exception,
-                "Mod update failed. InstanceId={InstanceId} FileName={FileName} Provider={Provider} VersionId={VersionId}",
-                instance.Id,
+                "Mod update failed. InstanceDirectory={InstanceDirectory} FileName={FileName} Provider={Provider} VersionId={VersionId}",
+                instance.InstanceDirectory,
                 Path.GetFileName(operationPath),
                 candidate.Source,
                 candidate.TargetVersion.VersionId);
@@ -558,8 +558,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             return;
 
         logger.LogInformation(
-            "Online mod install requested from instance mod management. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}, Loader={Loader}",
-            selectedInstance.Id,
+            "Online mod install requested from instance mod management. InstanceDirectory={InstanceDirectory}, MinecraftVersion={MinecraftVersion}, Loader={Loader}",
+            selectedInstance.InstanceDirectory,
             selectedInstance.MinecraftVersion,
             selectedInstance.Loader);
         OnlineModInstallRequested?.Invoke(selectedInstance);
@@ -671,8 +671,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         }
 
         logger.LogDebug(
-            "Toggling local mod enabled state. InstanceId={InstanceId} Path={Path} Enabled={Enabled}",
-            selectedInstance?.Id ?? "<none>",
+            "Toggling local mod enabled state. InstanceDirectory={InstanceDirectory} Path={Path} Enabled={Enabled}",
+            selectedInstance?.InstanceDirectory ?? "<none>",
             localMod.FullPath,
             !localMod.IsEnabled);
 
@@ -695,8 +695,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             suppressLocalCollectionEvents = false;
             logger.LogWarning(
                 exception,
-                "Local mod enabled state target already exists. InstanceId={InstanceId} Path={Path} TargetPath={TargetPath}",
-                selectedInstance?.Id ?? "<none>",
+                "Local mod enabled state target already exists. InstanceDirectory={InstanceDirectory} Path={Path} TargetPath={TargetPath}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 localMod.FullPath,
                 exception.TargetPath);
             var message = FormatModEnabledStateTargetExists(exception.TargetPath);
@@ -710,8 +710,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             suppressLocalCollectionEvents = false;
             logger.LogError(
                 exception,
-                "Failed to toggle local mod enabled state. InstanceId={InstanceId} Path={Path}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to toggle local mod enabled state. InstanceDirectory={InstanceDirectory} Path={Path}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 localMod.FullPath);
             statusService.Report(localMod.IsEnabled
                 ? Strings.Status_SelectedModsDisableFailed
@@ -732,8 +732,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             if (!instanceFolderService.TryRevealFile(mod.FullPath))
             {
                 logger.LogWarning(
-                    "Failed to reveal local mod file. InstanceId={InstanceId} Path={Path}",
-                    selectedInstance?.Id ?? "<none>",
+                    "Failed to reveal local mod file. InstanceDirectory={InstanceDirectory} Path={Path}",
+                    selectedInstance?.InstanceDirectory ?? "<none>",
                     mod.FullPath);
                 statusService.Report(Strings.Status_OpenModFileLocationFailed);
             }
@@ -742,8 +742,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to reveal local mod file. InstanceId={InstanceId} Path={Path}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to reveal local mod file. InstanceDirectory={InstanceDirectory} Path={Path}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 mod.FullPath);
             statusService.Report(Strings.Status_OpenModFileLocationFailed);
         }
@@ -810,8 +810,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Deleting selected mods. InstanceId={InstanceId} Count={Count}",
-            selectedInstance?.Id ?? "<none>",
+            "Deleting selected mods. InstanceDirectory={InstanceDirectory} Count={Count}",
+            selectedInstance?.InstanceDirectory ?? "<none>",
             modsToDelete.Count);
         try
         {
@@ -828,8 +828,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to delete selected mods. InstanceId={InstanceId}",
-                selectedInstance?.Id ?? "<none>");
+                "Failed to delete selected mods. InstanceDirectory={InstanceDirectory}",
+                selectedInstance?.InstanceDirectory ?? "<none>");
             statusService.Report(Strings.Status_SelectedModsDeleteFailed);
         }
     }

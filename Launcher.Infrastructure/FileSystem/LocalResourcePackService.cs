@@ -72,6 +72,7 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
             var result = await Task.Run<IReadOnlyList<LocalResourcePack>>(
                 () =>
                 {
+                    using var contentScope = InstanceContentOwnership.Open(instance, resourcePacksDirectory);
                     cancellationToken.ThrowIfCancellationRequested();
                     var inventory = Directory.Exists(resourcePacksDirectory)
                         ? Directory.EnumerateFiles(
@@ -91,19 +92,21 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
                     {
                         snapshots.Remove(resourcePacksDirectory);
                         logger.LogDebug(
-                            "Local resource pack inventory checked. InstanceId={InstanceId} Count=0",
-                            instance.Id);
+                            "Local resource pack inventory checked. InstanceDirectory={InstanceDirectory} Count=0",
+                            instance.InstanceDirectory);
                         return [];
                     }
 
-                    var snapshot = snapshots.GetOrCreate(resourcePacksDirectory);
+                    var snapshot = snapshots.GetOrCreate(resourcePacksDirectory, contentScope.CacheIdentity);
                     var resourcePacks = snapshot.Reconcile(
                         inventory,
                         static item => item.FullPath,
-                        CreateResourcePack);
+                        CreateResourcePack,
+                        pack => InstanceContentOwnership.CanReuse(pack, pack.FullPath));
+                    foreach (var pack in resourcePacks) contentScope.Bind(pack);
                     logger.LogDebug(
-                        "Local resource pack inventory checked. InstanceId={InstanceId} Count={ResourcePackCount}",
-                        instance.Id,
+                        "Local resource pack inventory checked. InstanceDirectory={InstanceDirectory} Count={ResourcePackCount}",
+                        instance.InstanceDirectory,
                         resourcePacks.Count);
                     return resourcePacks;
                 },
@@ -138,6 +141,7 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
             () =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                using var contentLease = InstanceContentOwnership.Acquire(resourcePack, resourcePack.FullPath);
 
                 if (!File.Exists(resourcePack.FullPath))
                 {
@@ -182,8 +186,8 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
         if (!File.Exists(normalizedArchivePath))
         {
             logger.LogDebug(
-                "Skipping local resource pack import because archive does not exist. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instance.Id,
+                "Skipping local resource pack import because archive does not exist. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instance.InstanceDirectory,
                 normalizedArchivePath);
             return LocalResourcePackImportResult.Failure(LocalResourcePackImportFailureReason.FileNotFound);
         }
@@ -191,21 +195,21 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
         if (!normalizedArchivePath.EndsWith(SupportedArchiveExtension, StringComparison.OrdinalIgnoreCase))
         {
             logger.LogDebug(
-                "Skipping local resource pack import because archive type is unsupported. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instance.Id,
+                "Skipping local resource pack import because archive type is unsupported. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instance.InstanceDirectory,
                 normalizedArchivePath);
             return LocalResourcePackImportResult.Failure(LocalResourcePackImportFailureReason.UnsupportedArchive);
         }
 
         logger.LogDebug(
-            "Importing local resource pack archive. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-            instance.Id,
+            "Importing local resource pack archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+            instance.InstanceDirectory,
             normalizedArchivePath);
 
         try
         {
             var resourcePacksDirectory = GetResourcePacksDirectory(instance);
-            Directory.CreateDirectory(resourcePacksDirectory);
+            using var contentScope = InstanceContentOwnership.Open(instance, resourcePacksDirectory, createDirectory: true);
 
             var targetPath = ResolveUniqueFilePath(resourcePacksDirectory, Path.GetFileName(normalizedArchivePath));
             File.Copy(normalizedArchivePath, targetPath, overwrite: false);
@@ -221,11 +225,11 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
                 CreatedAt = new DateTimeOffset(importedIdentity.CreationTimeUtcTicks, TimeSpan.Zero)
             };
             logger.LogDebug(
-                "Local resource pack archive imported. InstanceId={InstanceId} ArchivePath={ArchivePath} ResourcePackPath={ResourcePackPath}",
-                instance.Id,
+                "Local resource pack archive imported. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath} ResourcePackPath={ResourcePackPath}",
+                instance.InstanceDirectory,
                 normalizedArchivePath,
                 targetPath);
-            return LocalResourcePackImportResult.Success(importedResourcePack);
+            return LocalResourcePackImportResult.Success(contentScope.Bind(importedResourcePack));
         }
         catch (OperationCanceledException)
         {
@@ -235,8 +239,8 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
         {
             logger.LogWarning(
                 exception,
-                "Failed to import local resource pack archive because a file operation failed. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instance.Id,
+                "Failed to import local resource pack archive because a file operation failed. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instance.InstanceDirectory,
                 normalizedArchivePath);
             return LocalResourcePackImportResult.Failure(LocalResourcePackImportFailureReason.UnexpectedError);
         }
@@ -244,8 +248,8 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
         {
             logger.LogWarning(
                 exception,
-                "Failed to import local resource pack archive because access was denied. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instance.Id,
+                "Failed to import local resource pack archive because access was denied. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instance.InstanceDirectory,
                 normalizedArchivePath);
             return LocalResourcePackImportResult.Failure(LocalResourcePackImportFailureReason.UnexpectedError);
         }
@@ -253,8 +257,8 @@ public sealed class LocalResourcePackService : ILocalResourcePackService
         {
             logger.LogError(
                 exception,
-                "Unexpected failure while importing local resource pack archive. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                instance.Id,
+                "Unexpected failure while importing local resource pack archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                instance.InstanceDirectory,
                 normalizedArchivePath);
             return LocalResourcePackImportResult.Failure(LocalResourcePackImportFailureReason.UnexpectedError);
         }

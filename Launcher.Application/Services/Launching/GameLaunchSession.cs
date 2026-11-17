@@ -24,18 +24,18 @@ public sealed class GameLaunchSession
     private int exitHandled;
 
     public GameLaunchSession(
-        string instanceId,
+        string instanceDirectory,
         string instanceName,
         Task<LaunchExitResult> exitTask,
         IReadOnlyList<LaunchWarningKind>? warnings = null)
     {
-        InstanceId = instanceId;
+        InstanceDirectory = instanceDirectory;
         InstanceName = instanceName;
         ExitTask = exitTask;
         Warnings = warnings ?? [];
     }
 
-    public string InstanceId { get; }
+    public string InstanceDirectory { get; }
 
     public string InstanceName { get; }
 

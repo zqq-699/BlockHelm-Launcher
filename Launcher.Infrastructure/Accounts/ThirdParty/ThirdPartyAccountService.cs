@@ -43,9 +43,9 @@ internal sealed partial class ThirdPartyAccountService : IThirdPartyAccountServi
         var thirdPartyDataDirectory = Path.Combine(pathProvider.DefaultAccountDataDirectory, "third-party");
         appearanceService = new ThirdPartyAccountAppearanceService(
             httpClient,
-            new AccountAvatarService(httpClient, Path.Combine(thirdPartyDataDirectory, "avatars")),
-            new AccountSkinCacheService(httpClient, Path.Combine(thirdPartyDataDirectory, "skins")),
-            new AccountCapeCacheService(httpClient, Path.Combine(thirdPartyDataDirectory, "capes")),
+            new AccountAvatarService(httpClient, Path.Combine(thirdPartyDataDirectory, "avatars"), this.logger),
+            new AccountSkinCacheService(httpClient, Path.Combine(thirdPartyDataDirectory, "skins"), this.logger),
+            new AccountCapeCacheService(httpClient, Path.Combine(thirdPartyDataDirectory, "capes"), this.logger),
             this.logger);
     }
 

@@ -13,6 +13,49 @@ namespace Launcher.Tests.Infrastructure.FileSystem;
 public sealed class ModUpdateFileTransactionTests
 {
     [Fact]
+    public async Task OldUpdateCandidateCannotApplyToAReplacementWithIdenticalSourceBytes()
+    {
+        using var directory = new TemporaryDirectory();
+        var root = Path.Combine(directory.Path, "game");
+        var mods = Directory.CreateDirectory(Path.Combine(root, "mods")).FullName;
+        var source = Path.Combine(mods, "mod.jar");
+        await File.WriteAllTextAsync(source, "old");
+        var service = new ModService(new Launcher.Infrastructure.LauncherPathProvider(Path.Combine(directory.Path, "data")));
+        var old = Assert.Single(await service.GetModsAsync(CreateInstance(root)));
+        var installer = new WritingInstallationService(mods, "new");
+        var transaction = CreateTransaction(installer);
+        var state = await transaction.CaptureAsync(old);
+        Directory.Move(root, root + "-moved");
+        Directory.CreateDirectory(mods);
+        await File.WriteAllTextAsync(source, "old");
+        await Assert.ThrowsAsync<GameInstanceMutationConflictException>(() => transaction.ApplyAsync(CreateInstance(root), CreateCandidate(state, "mod.jar")));
+        Assert.Equal(0, installer.ExecuteCount);
+        Assert.Equal("old", await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
+    public async Task UpdatePreventsDirectoryReplacementDuringDownloadAndCommitsOriginalFiles()
+    {
+        using var directory = new TemporaryDirectory();
+        var root = Path.Combine(directory.Path, "game");
+        var mods = Directory.CreateDirectory(Path.Combine(root, "mods")).FullName;
+        var source = Path.Combine(mods, "mod.jar");
+        await File.WriteAllTextAsync(source, "old");
+        var installer = new WritingInstallationService(mods, "new")
+        {
+            DuringDownload = () =>
+            {
+                Assert.Throws<IOException>(() => Directory.Move(root, root + "-moved"));
+            }
+        };
+        var transaction = CreateTransaction(installer);
+        var state = await transaction.CaptureAsync(new LocalMod { FullPath = source, IsEnabled = true });
+        var result = await transaction.ApplyAsync(CreateInstance(root), CreateCandidate(state, "mod.jar"));
+        Assert.Equal("new", await File.ReadAllTextAsync(source));
+        Assert.Equal("old", await File.ReadAllTextAsync(result.BackupPath));
+    }
+
+    [Fact]
     public async Task VersionedUpdatesAccumulateDistinctOldFiles()
     {
         using var directory = new TemporaryDirectory();
@@ -180,7 +223,7 @@ public sealed class ModUpdateFileTransactionTests
 
     private static GameInstance CreateInstance(string root) => new()
     {
-        Id = "instance",
+
         InstanceDirectory = root,
         MinecraftVersion = "1.20.1",
         Loader = LoaderKind.Fabric
@@ -209,6 +252,7 @@ public sealed class ModUpdateFileTransactionTests
         public string Content { get; set; } = content;
         public bool Fail { get; init; }
         public int ExecuteCount { get; private set; }
+        public Action? DuringDownload { get; init; }
 
         public Task<string> EnsureInstanceContentDirectoryAsync(
             ResourceProjectKind kind,
@@ -229,6 +273,7 @@ public sealed class ModUpdateFileTransactionTests
             CancellationToken cancellationToken = default)
         {
             ExecuteCount++;
+            DuringDownload?.Invoke();
             if (Fail)
                 throw new IOException("Simulated download failure.");
             await File.WriteAllTextAsync(request.DestinationPath!, Content, cancellationToken);

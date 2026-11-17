@@ -30,6 +30,7 @@ public sealed class ModpackExportService : IModpackExportService
 {
     private readonly CurseForgeModpackExporter curseForgeExporter;
     private readonly ModrinthModpackExporter modrinthExporter;
+    private readonly ILogger logger;
 
     public ModpackExportService(
         IModService modService,
@@ -41,6 +42,7 @@ public sealed class ModpackExportService : IModpackExportService
         ILogger<ModpackExportService>? logger = null)
     {
         var effectiveLogger = logger ?? NullLogger<ModpackExportService>.Instance;
+        this.logger = effectiveLogger;
         var candidateCollector = new ModpackExportCandidateCollector(
             modService,
             resourcePackService,
@@ -61,20 +63,29 @@ public sealed class ModpackExportService : IModpackExportService
             effectiveLogger);
     }
 
-    public Task<ModpackExportResult> ExportAsync(
+    public async Task<ModpackExportResult> ExportAsync(
         ModpackExportRequest request,
         CancellationToken cancellationToken = default)
     {
         var validationFailure = ValidateRequest(request);
         if (validationFailure is not null)
-            return Task.FromResult(validationFailure);
+            return validationFailure;
 
-        return request.Kind switch
+        try
         {
-            ModpackExportKind.CurseForge => curseForgeExporter.ExportAsync(request, cancellationToken),
-            ModpackExportKind.Modrinth => modrinthExporter.ExportAsync(request, cancellationToken),
-            _ => Task.FromResult(Failure(ModpackExportFailureReason.UnsupportedType))
-        };
+            using var instanceScope = FileSystem.InstanceContentOwnership.Open(request.Instance, request.Instance.InstanceDirectory);
+            return request.Kind switch
+            {
+                ModpackExportKind.CurseForge => await curseForgeExporter.ExportAsync(request, cancellationToken, () => instanceScope.IsCurrent).ConfigureAwait(false),
+                ModpackExportKind.Modrinth => await modrinthExporter.ExportAsync(request, cancellationToken, () => instanceScope.IsCurrent).ConfigureAwait(false),
+                _ => Failure(ModpackExportFailureReason.UnsupportedType)
+            };
+        }
+        catch (Exception exception) when (exception is GameInstanceMutationConflictException or IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(exception, "Instance export target is unavailable or changed. InstanceDirectory={InstanceDirectory}", request.Instance.InstanceDirectory);
+            return Failure(ModpackExportFailureReason.FileSystemError);
+        }
     }
 
     private static ModpackExportResult? ValidateRequest(ModpackExportRequest request)

@@ -184,7 +184,7 @@ internal sealed class ModpackFileResolutionService
                             return;
                         }
                         if (resolution.Download is null)
-                            throw new InvalidOperationException("Resolved modpack download was unexpectedly missing.");
+                            throw SafeExceptionLog.Describe(new InvalidOperationException("Resolved modpack download was unexpectedly missing."), "DownloadValidation", ("Reason", "Resolved modpack download was unexpectedly missing."));
 
                         context.ReserveDownloadTarget(index, resolution.Download.RelativePath);
                         await writer.WriteAsync(
@@ -246,6 +246,7 @@ internal sealed class ModpackFileResolutionService
         ResolvedPackFileWorkItem workItem,
         CancellationToken cancellationToken)
     {
+        using var diagnosticContext = workItem.LogScope.RestoreContext();
         var networkTransferStarted = 0;
         try
         {

@@ -99,26 +99,24 @@ internal static class VanillaVersionMetadataClient
                 if (manifestNode is not JsonObject manifestObject
                     || manifestObject["versions"] is not JsonArray versionEntries)
                 {
-                    throw new DownloadContentValidationException(
-                        "Minecraft version manifest is missing a versions array.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest is missing a versions array."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest is missing a versions array."));
                 }
 
                 if (versionEntries.Any(entry => !IsValidManifestEntry(entry)))
                 {
-                    throw new DownloadContentValidationException(
-                        "Minecraft version manifest contains an invalid version entry.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest contains an invalid version entry."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest contains an invalid version entry."));
                 }
 
                 var resolvedVersionMetadata = FindVersionMetadata(versionEntries, minecraftVersion);
                 if (resolvedVersionMetadata is null)
                 {
-                    throw new DownloadContentValidationException(
-                        $"Minecraft version manifest does not contain {minecraftVersion}.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                        $"Minecraft version manifest does not contain {minecraftVersion}."), "VersionManifestEntryMissing", ("MinecraftVersion", minecraftVersion));
                 }
                 if (requireManifestSha1 && !IsSha1(resolvedVersionMetadata.Sha1))
                 {
-                    throw new DownloadContentValidationException(
-                        $"Minecraft version manifest does not contain a valid SHA1 for {minecraftVersion}.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                        $"Minecraft version manifest does not contain a valid SHA1 for {minecraftVersion}."), "VersionManifestHashInvalid", ("MinecraftVersion", minecraftVersion), ("Field", "sha1"));
                 }
 
                 return resolvedVersionMetadata;
@@ -137,24 +135,25 @@ internal static class VanillaVersionMetadataClient
                     var actualSha1 = Convert.ToHexString(SHA1.HashData(versionBytes));
                     if (!string.Equals(actualSha1, versionMetadata.Sha1, StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new DownloadContentValidationException(
-                            $"Minecraft version metadata SHA1 does not match the official manifest: {minecraftVersion}");
+                        throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                            $"Minecraft version metadata SHA1 does not match the official manifest: {minecraftVersion}"), "VersionMetadataHashMismatch", ("MinecraftVersion", minecraftVersion),
+                            ("HashAlgorithm", "SHA1"), ("ExpectedHash", versionMetadata.Sha1), ("ActualHash", actualSha1));
                     }
                 }
 
                 var versionNode = JsonNode.Parse(versionBytes);
                 if (versionNode is not JsonObject versionObject)
                 {
-                    throw new DownloadContentValidationException(
-                        $"Minecraft version metadata is not a JSON object: {minecraftVersion}");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                        $"Minecraft version metadata is not a JSON object: {minecraftVersion}"), "VersionMetadataRootInvalid", ("MinecraftVersion", minecraftVersion), ("ExpectedFormat", "JSON object"));
                 }
                 if (requireManifestSha1
                     && (versionObject["id"] is not JsonValue idValue
                         || !idValue.TryGetValue<string>(out var id)
                         || !string.Equals(id, minecraftVersion, StringComparison.Ordinal)))
                 {
-                    throw new DownloadContentValidationException(
-                        $"Minecraft version metadata id does not match the requested version: {minecraftVersion}");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                        $"Minecraft version metadata id does not match the requested version: {minecraftVersion}"), "VersionMetadataIdMismatch", ("MinecraftVersion", minecraftVersion), ("Field", "id"));
                 }
 
                 return versionObject;

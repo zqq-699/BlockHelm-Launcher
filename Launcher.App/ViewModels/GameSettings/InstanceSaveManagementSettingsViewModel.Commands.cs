@@ -39,32 +39,31 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
             return;
 
         logger.LogInformation(
-            "Online save install requested from instance save management. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}",
-            selectedInstance.Id,
+            "Online save install requested from instance save management. InstanceDirectory={InstanceDirectory}, MinecraftVersion={MinecraftVersion}",
+            selectedInstance.InstanceDirectory,
             selectedInstance.MinecraftVersion);
         OnlineSaveInstallRequested?.Invoke(selectedInstance);
     }
 
 [RelayCommand]
-    private void OpenSaveFolder()
+    private async Task OpenSaveFolder()
     {
         if (selectedInstance is null)
             return;
 
         try
         {
-            var savesDirectory = instanceFolderService.EnsureDirectoryExists(
-                Path.Combine(selectedInstance.InstanceDirectory, "saves"));
+            var savesDirectory = await instanceFolderService.EnsureInstanceContentDirectoryAsync(selectedInstance, ResourceProjectKind.World);
             logger.LogDebug(
-                "Opening save folder. InstanceId={InstanceId} SavesDirectory={SavesDirectory}",
-                selectedInstance.Id,
+                "Opening save folder. InstanceDirectory={InstanceDirectory} SavesDirectory={SavesDirectory}",
+                selectedInstance.InstanceDirectory,
                 savesDirectory);
 
             if (!instanceFolderService.TryOpen(savesDirectory))
             {
                 logger.LogWarning(
-                    "Failed to open save folder. InstanceId={InstanceId} SavesDirectory={SavesDirectory}",
-                    selectedInstance.Id,
+                    "Failed to open save folder. InstanceDirectory={InstanceDirectory} SavesDirectory={SavesDirectory}",
+                    selectedInstance.InstanceDirectory,
                     savesDirectory);
                 statusService.Report(Strings.Status_OpenLocalSaveFolderFailed);
             }
@@ -73,8 +72,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to prepare save folder for opening. InstanceId={InstanceId}",
-                selectedInstance.Id);
+                "Failed to prepare save folder for opening. InstanceDirectory={InstanceDirectory}",
+                selectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_OpenLocalSaveFolderFailed);
         }
     }
@@ -156,8 +155,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
             if (!instanceFolderService.TryOpen(save.FullPath))
             {
                 logger.LogWarning(
-                    "Failed to open local save directory. InstanceId={InstanceId} Path={Path}",
-                    selectedInstance?.Id ?? "<none>",
+                    "Failed to open local save directory. InstanceDirectory={InstanceDirectory} Path={Path}",
+                    selectedInstance?.InstanceDirectory ?? "<none>",
                     save.FullPath);
                 statusService.Report(Strings.Status_OpenLocalSaveFolderFailed);
             }
@@ -166,8 +165,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to open local save directory. InstanceId={InstanceId} Path={Path}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to open local save directory. InstanceDirectory={InstanceDirectory} Path={Path}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 save.FullPath);
             statusService.Report(Strings.Status_OpenLocalSaveFolderFailed);
         }
@@ -225,8 +224,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Deleting selected saves. InstanceId={InstanceId} Count={Count}",
-            selectedInstance?.Id ?? "<none>",
+            "Deleting selected saves. InstanceDirectory={InstanceDirectory} Count={Count}",
+            selectedInstance?.InstanceDirectory ?? "<none>",
             savesToDelete.Count);
         try
         {
@@ -243,8 +242,8 @@ public sealed partial class InstanceSaveManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to delete selected saves. InstanceId={InstanceId}",
-                selectedInstance?.Id ?? "<none>");
+                "Failed to delete selected saves. InstanceDirectory={InstanceDirectory}",
+                selectedInstance?.InstanceDirectory ?? "<none>");
             statusService.Report(Strings.Status_SelectedSavesDeleteFailed);
         }
     }

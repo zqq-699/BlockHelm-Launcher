@@ -67,8 +67,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to load resource packs for section activation. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to load resource packs for section activation. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             HasLoadedResourcePacks = false;
             ClearDisplayedResourcePacks();
             hasPendingVisualRefresh = false;
@@ -116,8 +116,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to silently refresh cached resource packs. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to silently refresh cached resource packs. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_LoadLocalResourcePacksFailed);
         }
         finally
@@ -263,7 +263,7 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
         if (selectedInstance is null || instance is null)
             return selectedInstance is not null || instance is not null;
 
-        return !string.Equals(selectedInstance.Id, instance.Id, StringComparison.OrdinalIgnoreCase)
+        return !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 

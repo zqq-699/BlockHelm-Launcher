@@ -74,8 +74,8 @@ public sealed partial class HomePageViewModel
         {
             logger.LogDebug(
                 exception,
-                "Launch cancellation completed. InstanceId={InstanceId} InstanceName={InstanceName}",
-                launchInstance.Id,
+                "Launch cancellation completed. InstanceDirectory={InstanceDirectory} InstanceName={InstanceName}",
+                launchInstance.InstanceDirectory,
                 launchInstance.Name);
             statusService.Report(Strings.Status_LaunchCanceled);
             floatingMessageService.Show(Strings.Status_LaunchCanceled);

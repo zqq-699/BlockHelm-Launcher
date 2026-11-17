@@ -86,9 +86,8 @@ internal sealed class ModpackInstanceStagingService : IModpackInstanceStagingSer
                     var transaction = await installTransactionService.BeginAsync(
                         settings.MinecraftDirectory,
                         resolvedInstanceName,
-                        instance.Id,
                         "modpack",
-                        string.IsNullOrWhiteSpace(settings.DefaultInstanceId),
+                        string.IsNullOrWhiteSpace(settings.DefaultInstanceDirectory),
                         progress: null,
                         cancellationToken).ConfigureAwait(false);
                     instance.InstanceDirectory = transaction.PendingDirectory;
@@ -125,7 +124,7 @@ internal sealed class ModpackInstanceStagingService : IModpackInstanceStagingSer
     {
         var instance = stagedInstance.Instance;
         var transaction = stagedInstance.InstallTransaction
-            ?? throw new InvalidOperationException("Modpack install transaction is missing.");
+            ?? throw SafeExceptionLog.Describe(new InvalidOperationException("Modpack install transaction is missing."), "DownloadValidation", ("Reason", "Modpack install transaction is missing."));
         instance.VersionName = stagedInstance.ResolvedInstanceName;
         instance.InstanceDirectory = stagedInstance.InstanceDirectory;
         instance.UpdatedAt = DateTimeOffset.UtcNow;
@@ -145,8 +144,8 @@ internal sealed class ModpackInstanceStagingService : IModpackInstanceStagingSer
                         rootMatches = PathsEqual(
                             latestSettings.MinecraftDirectory,
                             stagedInstance.MinecraftDirectory);
-                        if (rootMatches && string.IsNullOrWhiteSpace(latestSettings.DefaultInstanceId))
-                            latestSettings.DefaultInstanceId = instance.Id;
+                        if (rootMatches && string.IsNullOrWhiteSpace(latestSettings.DefaultInstanceDirectory))
+                            latestSettings.DefaultInstanceDirectory = instance.InstanceDirectory;
                     },
                     CancellationToken.None)
                 .ConfigureAwait(false);
@@ -154,8 +153,8 @@ internal sealed class ModpackInstanceStagingService : IModpackInstanceStagingSer
             {
                 logicalCommitCompleted = false;
                 logger.LogWarning(
-                    "Modpack installation committed after the Minecraft directory changed; leaving recovery marker for the original directory. InstanceId={InstanceId} InstallMinecraftDirectory={InstallMinecraftDirectory} CurrentMinecraftDirectory={CurrentMinecraftDirectory}",
-                    instance.Id,
+                    "Modpack installation committed after the Minecraft directory changed; leaving recovery marker for the original directory. InstanceDirectory={InstanceDirectory} InstallMinecraftDirectory={InstallMinecraftDirectory} CurrentMinecraftDirectory={CurrentMinecraftDirectory}",
+                    instance.InstanceDirectory,
                     stagedInstance.MinecraftDirectory,
                     currentMinecraftDirectory);
             }
@@ -163,7 +162,7 @@ internal sealed class ModpackInstanceStagingService : IModpackInstanceStagingSer
         catch (Exception exception)
         {
             logicalCommitCompleted = false;
-            logger.LogError(exception, "Modpack installation committed but logical persistence needs reconciliation. InstanceId={InstanceId}", instance.Id);
+            logger.LogError(exception, "Modpack installation committed but logical persistence needs reconciliation. InstanceDirectory={InstanceDirectory}", instance.InstanceDirectory);
         }
         if (logicalCommitCompleted)
             await transaction.CompleteLogicalCommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -193,8 +192,8 @@ internal sealed class ModpackInstanceStagingService : IModpackInstanceStagingSer
         }
 
         logger.LogWarning(
-            "Skipped non-transactional modpack cleanup because directory ownership cannot be proven. InstanceId={InstanceId} ResolvedInstanceName={ResolvedInstanceName} FinalVersionName={FinalVersionName} MinecraftDirectory={MinecraftDirectory}",
-            stagedInstance.Instance.Id,
+            "Skipped non-transactional modpack cleanup because directory ownership cannot be proven. InstanceDirectory={InstanceDirectory} ResolvedInstanceName={ResolvedInstanceName} FinalVersionName={FinalVersionName} MinecraftDirectory={MinecraftDirectory}",
+            stagedInstance.Instance.InstanceDirectory,
             stagedInstance.ResolvedInstanceName,
             finalVersionName,
             settings.MinecraftDirectory);

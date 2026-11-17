@@ -12,6 +12,21 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 
 public sealed class GameLanguageServiceTests : TestTempDirectory
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LanguageSynchronizationDoesNotRecreateOrModifyAnObsoleteInstance(bool replace)
+    {
+        var instance = CreateInstance("1.20.1");
+        Directory.CreateDirectory(instance.InstanceDirectory);
+        Launcher.Infrastructure.Persistence.InstanceDirectoryOwnership.Observe(instance);
+        Directory.Move(instance.InstanceDirectory, instance.InstanceDirectory + "-moved");
+        if (replace) Directory.CreateDirectory(instance.InstanceDirectory);
+        await Assert.ThrowsAnyAsync<Exception>(() => new GameLanguageService().ApplyLauncherLanguageAsync(instance, LauncherLanguages.SimplifiedChinese));
+        Assert.Equal(replace, Directory.Exists(instance.InstanceDirectory));
+        Assert.False(File.Exists(Path.Combine(instance.InstanceDirectory, "options.txt")));
+    }
+
     // 1.11（16w32a）之前的语言代码大小写敏感：写成 zh_cn 游戏找不到该语言，会回退成
     // en_US 并改写 options.txt，于是每次启动都变回英文。
     [Theory]
@@ -103,6 +118,7 @@ public sealed class GameLanguageServiceTests : TestTempDirectory
     {
         var instance = CreateInstance(string.Empty);
         instance.VersionName = "1.7.10-forge-10.13.4.1614-1.7.10";
+        Directory.CreateDirectory(instance.InstanceDirectory);
 
         var applied = await new GameLanguageService()
             .ApplyLauncherLanguageAsync(instance, LauncherLanguages.SimplifiedChinese);

@@ -13,13 +13,22 @@ namespace Launcher.Application.Services;
 public static class SensitiveLogText
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(250);
-    private const string Name = @"(?:(?:access|refresh|client|id)[_-]?token|token|session|password|passwd|(?:client[_-]?)?secret|(?:x[_-]?)?api[_-]?key|authorization|auth(?:orization)?[_-]?code)";
+    // Java properties and third-party tools commonly qualify or prefix credential names.
+    // Match credential suffixes too (proxyPassword, aws.secretAccessKey, customAccessToken).
+    private const string Name = @"(?:[\w.-]*(?:token|password|passwd|secret|secretaccesskey|accesskeysecret|api[_-]?key|authorization|auth(?:orization)?[_-]?code)|session)";
     // Consume escaped characters as pairs so escaped quotes cannot terminate a secret.
     // An unfinished quoted value (including a trailing backslash) is redacted through EOF.
     private const string QuotedValue = """(?:"(?:\\[\s\S]|[^"\\])*(?:"|\\?\z)|'(?:\\[\s\S]|[^'\\])*(?:'|\\?\z))""";
     private static readonly Regex Assignment = Create($@"(?i)(?<![\w-])((?:-D|--?)?(?:""|')?{Name}(?:""|')?\s*[:=]\s*)(?<value>{QuotedValue}|[^\s&,;}}]+)");
     private static readonly Regex Argument = Create($@"(?i)(?<![\w-])((?:--?{Name})\s+)(?<value>{QuotedValue}|\S+)");
     private static readonly Regex Credentials = Create($"(?:{Assignment})|(?:{Argument})");
+    private static readonly Regex PendingCredential = Create($@"(?i)(?<![\w-])(?:(?:-D|--?)?(?:""|')?{Name}(?:""|')?\s*[:=]\s*|--?{Name}\s*|(?:proxy-)?authorization[""']?\s*[:=]\s*[""']?(?:bearer|basic)\s*|\bbearer\s*)\z");
+    private static readonly Regex ContinuedValue = Create($@"\A\s*(?:(?i:bearer|basic)\s+)?(?<value>{QuotedValue}|[^\s&,;}}]+)");
+    // Non-Bearer schemes (Digest, NTLM, Negotiate) can contain several fields.
+    // Hide the complete unquoted header value, rather than only its scheme word.
+    private static readonly Regex Authorization = Create($@"(?i)(?<![\w-])(?:proxy-)?authorization[""']?\s*[:=]\s*(?<value>{QuotedValue}|[^\r\n]+)");
+    private static readonly Regex PendingAuthorization = Create(@"(?i)(?<![\w-])(?:proxy-)?authorization[""']?\s*[:=]\s*[""']?(?:(?:bearer|basic|digest|ntlm|negotiate)\s*)?\z");
+    private static readonly Regex ContinuedAuthorization = Create($@"\A\s*(?<value>{QuotedValue}|[^\r\n]+)");
     private static readonly Regex Bearer = Create(@"(?i)\b((?:proxy-)?authorization[""']?\s*[:=]\s*[""']?(?:bearer|basic)\s+|\bbearer\s+)([^\s""',;}]+)");
     private static readonly Regex Url = Create(@"(?i)\b[a-z][a-z0-9+.-]*://[^\s<>""']+");
 
@@ -41,6 +50,11 @@ public static class SensitiveLogText
             foreach (Match match in Bearer.Matches(text))
             {
                 var value = match.Groups[2];
+                ranges.Add((value.Index, value.Index + value.Length));
+            }
+            foreach (Match match in Authorization.Matches(text))
+            {
+                var value = match.Groups["value"];
                 ranges.Add((value.Index, value.Index + value.Length));
             }
             if (sensitiveValues is not null)
@@ -92,6 +106,8 @@ public static class SensitiveLogText
     {
         private readonly IReadOnlyList<string> sensitiveValues;
         private char? openQuote;
+        private bool pendingValue;
+        private bool pendingAuthorization;
         private bool suppressRemainder;
 
         public LineRedactor(IReadOnlyList<string> sensitiveValues)
@@ -121,15 +137,28 @@ public static class SensitiveLogText
 
             try
             {
+                if (pendingValue)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) return "<redacted>";
+                    if (line.Trim().Equals("Bearer", StringComparison.OrdinalIgnoreCase)
+                        || line.Trim().Equals("Basic", StringComparison.OrdinalIgnoreCase)) return "<redacted>";
+                    if (pendingAuthorization && line.Trim().ToLowerInvariant() is "digest" or "ntlm" or "negotiate") return "<redacted>";
+                    var continuation = (pendingAuthorization ? ContinuedAuthorization : ContinuedValue).Match(line);
+                    // An ambiguous continuation cannot safely be emitted.
+                    if (!continuation.Success) return "<redacted>";
+                    TrackQuote(continuation.Groups["value"].Value);
+                    line = line[(continuation.Index + continuation.Length)..];
+                    prefix += "<redacted>";
+                    pendingValue = false;
+                }
                 // Scan in text order. A credential-like fragment inside a quoted secret
                 // must not replace the quote state of the enclosing value.
                 foreach (Match match in Credentials.Matches(line))
                 {
-                    var value = match.Groups["value"].Value;
-                    if (value.Length > 0 && value[0] is '\'' or '"'
-                        && FindClosingQuote(value, value[0], 1) < 0)
-                        openQuote = value[0];
+                    TrackQuote(match.Groups["value"].Value);
                 }
+                pendingAuthorization = openQuote is null && PendingAuthorization.IsMatch(line);
+                pendingValue = pendingAuthorization || openQuote is null && PendingCredential.IsMatch(line);
                 return prefix + Redact(line, sensitiveValues);
             }
             catch (RegexMatchTimeoutException)
@@ -137,6 +166,13 @@ public static class SensitiveLogText
                 suppressRemainder = true;
                 return "<redacted: log text exceeded safe processing limits>";
             }
+        }
+
+        private void TrackQuote(string value)
+        {
+            if (value.Length > 0 && value[0] is '\'' or '"'
+                && FindClosingQuote(value, value[0], 1) < 0)
+                openQuote = value[0];
         }
 
         private static int FindClosingQuote(string text, char quote, int start)

@@ -46,6 +46,9 @@ public interface IInstanceDirectoryWatch : IDisposable
 
 public interface IInstanceDirectoryMonitor
 {
+    bool IsSameWatchTarget(GameInstance previous, GameInstance current) =>
+        string.Equals(previous.InstanceDirectory, current.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// Observes an existing instance directory without creating or repairing the instance root
     /// or any content subdirectory. A missing instance root produces an inert watch.

@@ -19,6 +19,7 @@
 
 using System.Collections.Concurrent;
 using System.IO;
+using Launcher.App.Logging;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -46,6 +47,7 @@ internal static class IconSourceImageLoader
                 return cachedImage;
 
             var image = new BitmapImage();
+            ImageLoadDiagnostics.Observe(image, text);
             image.BeginInit();
             if (ShouldLoadImmediately(uri))
             {
@@ -60,8 +62,9 @@ internal static class IconSourceImageLoader
             CacheImage(uri, image);
             return image;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            ImageLoadDiagnostics.Failed(text, exception);
             return null;
         }
     }

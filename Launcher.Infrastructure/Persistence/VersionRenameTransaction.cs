@@ -71,18 +71,41 @@ internal sealed partial class VersionRenameTransaction
         var oldVersionName = string.IsNullOrWhiteSpace(instance.VersionName)
             ? instance.MinecraftVersion
             : instance.VersionName;
-        if (string.Equals(oldVersionName, newVersionName, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(oldVersionName, newVersionName, StringComparison.Ordinal))
             return;
 
         var sourceDirectory = directoryManager.GetVersionDirectory(minecraftDirectory, oldVersionName);
         var destinationDirectory = directoryManager.GetVersionDirectory(minecraftDirectory, newVersionName);
-        ValidateNewTransaction(sourceDirectory, destinationDirectory, oldVersionName);
-        await instanceSettingsStore.EnsureIdentityAsync(sourceDirectory, instance.Id, cancellationToken)
-            .ConfigureAwait(false);
-
-        var marker = CreateMarker(instance.Id, oldVersionName, newVersionName, newIconSource, updatedAt);
+        if (!MinecraftDirectoryPath.Equals(sourceDirectory, instance.InstanceDirectory))
+            throw new GameInstanceMutationConflictException(instance.InstanceDirectory, oldVersionName);
+        PendingInstanceRenameMarker marker;
         var markerPath = PendingInstanceRenameDirectory.GetMarkerPath(sourceDirectory);
-        await AtomicJsonFileWriter.WriteAsync(markerPath, marker, JsonOptions, cancellationToken).ConfigureAwait(false);
+        using (InstanceDirectoryOwnership.AcquireReadLease(instance))
+        {
+            ValidateNewTransaction(sourceDirectory, destinationDirectory, oldVersionName);
+            var ownerProof = InstanceDirectoryOwnership.EnsureCurrent(instance);
+            var sourceJsonPath = InstanceVersionFiles.GetJsonPath(sourceDirectory, oldVersionName);
+            var originalJson = JsonNode.Parse(await File.ReadAllTextAsync(sourceJsonPath, cancellationToken))!.AsObject();
+            foreach (var pair in new[]
+            {
+                (sourceJsonPath, Path.Combine(sourceDirectory, newVersionName + ".json")),
+                (Path.ChangeExtension(sourceJsonPath, ".jar"), Path.Combine(sourceDirectory, newVersionName + ".jar")),
+                (Path.Combine(sourceDirectory, oldVersionName + "-natives"), Path.Combine(sourceDirectory, newVersionName + "-natives"))
+            })
+            {
+                if (!string.Equals(pair.Item1, pair.Item2, StringComparison.OrdinalIgnoreCase) && IsPathOccupied(pair.Item2))
+                    throw new IOException("A destination artifact already exists in the instance directory.");
+            }
+            await instanceSettingsStore.UpdateAsync(instance, minecraftDirectory, cancellationToken)
+                .ConfigureAwait(false);
+            marker = CreateMarker(ownerProof, oldVersionName, newVersionName, newIconSource, updatedAt) with
+            {
+                OriginalJsonRelativePath = Path.GetRelativePath(sourceDirectory, sourceJsonPath),
+                OriginalJsonId = originalJson["id"]?.GetValue<string>(),
+                OriginalJarReference = originalJson["jar"]?.GetValue<string>()
+            };
+            await WriteOwnedMarkerAsync(sourceDirectory, marker, cancellationToken).ConfigureAwait(false);
+        }
 
         string stagedDirectory;
         try
@@ -94,6 +117,11 @@ internal sealed partial class VersionRenameTransaction
         }
         catch (Exception moveException)
         {
+            if (!InstanceDirectoryOwnership.Matches(sourceDirectory, marker.OwnerProof))
+                throw;
+            using var cleanupLease = WindowsDirectoryHandleMover.AcquireReadLease(sourceDirectory);
+            if (!InstanceDirectoryOwnership.Matches(sourceDirectory, marker.OwnerProof))
+                throw;
             try
             {
                 await DeleteMarkerWithRetryAsync(markerPath, CancellationToken.None).ConfigureAwait(false);

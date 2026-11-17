@@ -108,7 +108,7 @@ internal sealed class ModpackFileDownloader
         catch (MinecraftDownloadRequestExecutor.DownloadSourceRequestException exception)
             when (exception.InnerException is DownloadHashMismatchException)
         {
-            throw new ModpackImportException(ModpackImportFailureReason.HashMismatch, "Downloaded modpack file did not match its expected hash.");
+            throw new ModpackImportException(ModpackImportFailureReason.HashMismatch, "Downloaded modpack file did not match its expected hash.", exception);
         }
     }
 

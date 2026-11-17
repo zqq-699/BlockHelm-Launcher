@@ -40,7 +40,6 @@ public interface IInstanceInstallTransactionService
     Task<IInstanceInstallTransaction> BeginAsync(
         string minecraftDirectory,
         string logicalVersionName,
-        string instanceId,
         string installKind,
         bool initializeDefaultIfEmpty,
         IProgress<LauncherProgress>? progress = null,

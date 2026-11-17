@@ -19,7 +19,7 @@
 
 namespace Launcher.Application.Services;
 
-public sealed class JavaRuntimeSelectionException : Exception
+public sealed class JavaRuntimeSelectionException : Exception, ISafeDiagnosticException
 {
     public JavaRuntimeSelectionException(
         string message,
@@ -54,6 +54,12 @@ public sealed class JavaRuntimeSelectionException : Exception
         RecommendedMajorVersion = recommendedMajorVersion ?? requiredMajorVersion;
     }
 
+    public string DiagnosticCode => "JavaRuntimeSelection";
+    public IReadOnlyDictionary<string, object?> DiagnosticFields => new Dictionary<string, object?>
+    {
+        ["SelectionFailure"] = Reason.ToString(), ["RequiredJavaMajor"] = RequiredMajorVersion,
+        ["ActualJavaMajor"] = CurrentMajorVersion, ["RecommendedJavaMajor"] = RecommendedMajorVersion
+    };
     public JavaRuntimeSelectionFailureReason Reason { get; }
 
     public int? RequiredMajorVersion { get; }

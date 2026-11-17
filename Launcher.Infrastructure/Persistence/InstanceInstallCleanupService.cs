@@ -85,7 +85,8 @@ public sealed class InstanceInstallCleanupService(
 
     private async Task CleanupPendingInstallDirectoryAsync(string pendingDirectory)
     {
-        if (!PendingInstanceInstallDirectory.TryReadValidPendingMarker(pendingDirectory, out _))
+        if (!PendingInstanceInstallDirectory.TryReadValidPendingMarker(pendingDirectory, out var marker)
+            || !InstanceDirectoryOwnership.Matches(pendingDirectory, marker.OwnerProof))
         {
             logger.LogWarning(
                 "Install staging directory was preserved because its transaction marker is missing or invalid. Directory={Directory}",
@@ -154,6 +155,8 @@ public sealed class InstanceInstallCleanupService(
         if (!marker.InitializeDefaultIfEmpty)
             return true;
 
+        if (settingsService is JsonSettingsService jsonSettings)
+            await jsonSettings.MigrateInstanceSelectionAsync(settings.MinecraftDirectory, CancellationToken.None).ConfigureAwait(false);
         var rootMatches = false;
         await settingsService.UpdateAsync(
                 latestSettings =>
@@ -161,8 +164,8 @@ public sealed class InstanceInstallCleanupService(
                     rootMatches = PathsEqual(
                         latestSettings.MinecraftDirectory,
                         settings.MinecraftDirectory);
-                    if (rootMatches && string.IsNullOrWhiteSpace(latestSettings.DefaultInstanceId))
-                        latestSettings.DefaultInstanceId = marker.InstanceId;
+                    if (rootMatches && string.IsNullOrWhiteSpace(latestSettings.DefaultInstanceDirectory))
+                        latestSettings.DefaultInstanceDirectory = Path.GetDirectoryName(markerPath);
                 },
                 CancellationToken.None)
             .ConfigureAwait(false);
@@ -204,6 +207,11 @@ public sealed class InstanceInstallCleanupService(
                     continue;
                 }
 
+                if (!InstanceDirectoryOwnership.Matches(directory, marker.OwnerProof))
+                {
+                    logger.LogWarning("Install preparation was preserved because operation ownership changed. Directory={Directory}", directory);
+                    continue;
+                }
                 InstanceInstallTransactionService.TryDeleteTree(directory, logger);
                 logger.LogDebug(
                     "Cleaned interrupted instance install preparation. TransactionId={TransactionId} Directory={Directory}",

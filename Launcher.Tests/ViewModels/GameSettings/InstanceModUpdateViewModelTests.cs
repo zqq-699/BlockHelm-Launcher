@@ -340,7 +340,7 @@ public sealed class InstanceModUpdateViewModelTests
             downloadTasksPage: tasks);
         var instance = new GameInstance
         {
-            Id = "instance",
+
             InstanceDirectory = "instance",
             MinecraftVersion = "1.20.1",
             Loader = LoaderKind.Fabric

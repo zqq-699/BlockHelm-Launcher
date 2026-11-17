@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-using System.ComponentModel;
 using System.Globalization;
 using System.IO;
-using System.Net.Http;
-using System.Net.Sockets;
 using Launcher.Application.Services;
 using Serilog.Events;
 using Serilog.Formatting;
@@ -22,24 +19,28 @@ internal sealed class RedactingLogFormatter : ITextFormatter
         "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext} {Message:lj}",
         CultureInfo.InvariantCulture);
 
+    internal static readonly string SessionId = Guid.NewGuid().ToString("N");
+    private static long sequence;
+
     public void Format(LogEvent logEvent, TextWriter output)
     {
         using var buffer = new StringWriter(CultureInfo.InvariantCulture);
         formatter.Format(logEvent, buffer);
+        foreach (var key in new[] { "OperationId", "BranchId", "FileId", "RequestId", "ParentRequestId", "Stage", "FailureId", "PrimaryFailureId", "Attempt", "SourceKind", "ResourceCategory", "MinecraftVersion", "LoaderVersion", "DownloadSourcePreference", "DownloadSpeedLimitMbPerSecond" })
+        {
+            if (!logEvent.MessageTemplate.Text.Contains("{" + key, StringComparison.Ordinal)
+                && logEvent.Properties.TryGetValue(key, out var value))
+                buffer.Write($" {key}={value}");
+        }
+        buffer.Write($" LogSession={SessionId} LogSequence={Interlocked.Increment(ref sequence)}");
+        var safeMessage = SensitiveLogText.Redact(buffer.ToString());
+        output.Write(safeMessage);
         if (logEvent.Exception is { } exception)
         {
-            var depth = 0;
-            for (Exception? current = exception; current is not null && depth < 8; current = current.InnerException, depth++)
-            {
-                buffer.Write($" ExceptionType={current.GetType().FullName} HResult={current.HResult}");
-                if (current is HttpRequestException httpException)
-                    buffer.Write($" HttpStatus={(int?)httpException.StatusCode} HttpRequestError={httpException.HttpRequestError}");
-                if (current is SocketException socketException)
-                    buffer.Write($" SocketError={socketException.SocketErrorCode} NativeErrorCode={socketException.NativeErrorCode}");
-                else if (current is Win32Exception win32Exception)
-                    buffer.Write($" NativeErrorCode={win32Exception.NativeErrorCode}");
-            }
+            // Keep structured failure evidence even if redacting a very large message hits its safety limit.
+            output.Write($" LauncherBuild={typeof(RedactingLogFormatter).Assembly.GetName().Version} ProcessArchitecture={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
+            output.Write(SafeExceptionLog.Format(exception));
         }
-        output.WriteLine(SensitiveLogText.Redact(buffer.ToString()));
+        output.WriteLine();
     }
 }

@@ -208,7 +208,7 @@ public sealed class InstanceModManagementConflictTests
 
     private static GameInstance CreateInstance() => new()
     {
-        Id = "instance",
+
         Name = "Instance",
         InstanceDirectory = "instance",
         MinecraftVersion = "1.21.1",

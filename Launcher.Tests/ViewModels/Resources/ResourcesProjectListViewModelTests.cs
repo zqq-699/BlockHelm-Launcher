@@ -86,7 +86,7 @@ public sealed class ResourcesProjectListViewModelTests
         var resources = new ResourcesPageViewModel(service, gameVersionService: versions);
         var instance = new GameInstance
         {
-            Id = "instance",
+
             MinecraftVersion = "1.21.1",
             Loader = LoaderKind.Fabric
         };

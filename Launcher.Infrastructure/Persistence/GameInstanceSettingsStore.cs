@@ -17,8 +17,11 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.Infrastructure.FileSystem;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Security.Cryptography;
 using Launcher.Application;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
@@ -38,12 +41,10 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
 
     public async Task<IReadOnlyList<GameInstance>> LoadAsync(
         string minecraftDirectory,
+        int defaultMemoryMb,
         CancellationToken cancellationToken)
     {
         var versionsDirectory = Path.Combine(minecraftDirectory, "versions");
-        if (!Directory.Exists(versionsDirectory))
-            return [];
-
         var storedInstances = new List<GameInstance>();
         foreach (var versionDirectory in EnumerateDirectories(versionsDirectory))
         {
@@ -52,18 +53,27 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
                 continue;
 
             var settingsPath = GetSettingsPath(versionDirectory);
-            if (!File.Exists(settingsPath))
-                continue;
-
-            var instance = await TryLoadAsync(settingsPath, cancellationToken).ConfigureAwait(false);
-            if (instance is null)
-                continue;
-
             var versionName = Path.GetFileName(versionDirectory);
-            if (string.IsNullOrWhiteSpace(instance.VersionName))
-                instance.VersionName = versionName;
-
-            instance.InstanceDirectory = versionDirectory;
+            if (!File.Exists(settingsPath) && InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) is null)
+                continue;
+            using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(versionDirectory);
+            var proof = InstanceDirectoryOwnership.Capture(versionDirectory);
+            var digest = InstanceDirectoryOwnership.Digest(versionDirectory);
+            var instance = File.Exists(settingsPath)
+                ? await TryLoadAsync(settingsPath, cancellationToken).ConfigureAwait(false)
+                : null;
+            if (instance is null)
+            {
+                var createdAt = new DateTimeOffset(Directory.GetCreationTimeUtc(versionDirectory));
+                instance = new GameInstance { CreatedAt = createdAt, UpdatedAt = createdAt, MemoryMb = defaultMemoryMb };
+            }
+            instance.IconSource = InstanceIconPaths.Resolve(instance.IconSource, instance.InstanceDirectory, versionDirectory);
+            instance.Name = versionName;
+            instance.VersionName = versionName;
+            instance.InstanceDirectory = MinecraftDirectoryPath.Normalize(versionDirectory);
+            if (digest != InstanceDirectoryOwnership.Digest(versionDirectory))
+                throw new GameInstanceMutationConflictException(versionDirectory, versionName);
+            InstanceDirectoryOwnership.Observe(instance, proof, digest);
             storedInstances.Add(instance);
         }
 
@@ -86,39 +96,15 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
             if (string.IsNullOrWhiteSpace(versionName) || !persistedVersionNames.Add(versionName))
                 continue;
 
-            var versionDirectory = Path.Combine(minecraftDirectory, "versions", versionName);
+            var versionDirectory = new VersionDirectoryManager(logger).GetVersionDirectory(minecraftDirectory, versionName);
+            if (!MinecraftDirectoryPath.Equals(versionDirectory, instance.InstanceDirectory))
+                throw new GameInstanceMutationConflictException(instance.InstanceDirectory, versionName);
             if (!Directory.Exists(versionDirectory))
                 continue;
 
-            var settingsPath = GetSettingsPath(versionDirectory);
-            if (File.Exists(settingsPath))
-            {
-                var current = await TryLoadAsync(settingsPath, cancellationToken).ConfigureAwait(false);
-                if (current is null
-                    || !string.Equals(current.Id, instance.Id, StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogWarning(
-                        "Skipped stale game instance settings update. ExpectedInstanceId={ExpectedInstanceId} CurrentInstanceId={CurrentInstanceId} VersionName={VersionName}",
-                        instance.Id,
-                        current?.Id,
-                        versionName);
-                    continue;
-                }
-
-                if (current.UpdatedAt > instance.UpdatedAt)
-                {
-                    logger.LogWarning(
-                        "Skipped older game instance settings snapshot. InstanceId={InstanceId} VersionName={VersionName} SnapshotUpdatedAt={SnapshotUpdatedAt} CurrentUpdatedAt={CurrentUpdatedAt}",
-                        instance.Id,
-                        versionName,
-                        instance.UpdatedAt,
-                        current.UpdatedAt);
-                    continue;
-                }
-            }
-
+            using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(versionDirectory);
             var snapshot = CreateStorageSnapshot(instance, versionDirectory, versionName);
-            await AtomicJsonFileWriter.WriteAsync(settingsPath, snapshot, JsonOptions, cancellationToken)
+            await SaveSnapshotAsync(instance, versionDirectory, snapshot, cancellationToken)
                 .ConfigureAwait(false);
             persistedCount++;
         }
@@ -132,68 +118,76 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
         CancellationToken cancellationToken)
     {
         var versionName = GetVersionName(instance);
-        var versionDirectory = Path.Combine(minecraftDirectory, "versions", versionName);
-        await EnsureIdentityAsync(versionDirectory, instance.Id, cancellationToken).ConfigureAwait(false);
+        var versionDirectory = new VersionDirectoryManager(logger).GetVersionDirectory(minecraftDirectory, versionName);
+        if (!MinecraftDirectoryPath.Equals(versionDirectory, instance.InstanceDirectory))
+            throw new GameInstanceMutationConflictException(instance.InstanceDirectory, versionName);
+        using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(versionDirectory);
+        InstanceDirectoryOwnership.EnsureCurrent(instance);
         var snapshot = CreateStorageSnapshot(instance, versionDirectory, versionName);
-        await AtomicJsonFileWriter.WriteAsync(
-                GetSettingsPath(versionDirectory),
-                snapshot,
-                JsonOptions,
-                cancellationToken)
+        await SaveSnapshotAsync(instance, versionDirectory, snapshot, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static async Task SaveSnapshotAsync(
+        GameInstance instance,
+        string directory,
+        GameInstance snapshot,
+        CancellationToken cancellationToken)
+    {
+        var ownerProof = InstanceDirectoryOwnership.Capture(directory);
+        var previousDigest = InstanceDirectoryOwnership.Digest(directory);
+        if (InstanceDirectoryOwnership.IsObserved(instance))
+            InstanceDirectoryOwnership.EnsureCurrent(instance);
+        else if (previousDigest != "missing")
+            throw new GameInstanceMutationConflictException(directory, snapshot.VersionName);
+        var storage = JsonSerializer.SerializeToNode(snapshot, JsonOptions)!.AsObject();
+        var settingsPath = GetSettingsPath(directory);
+        if (previousDigest != "missing")
+        {
+            try
+            {
+                var original = JsonNode.Parse(await File.ReadAllTextAsync(settingsPath, cancellationToken)) as JsonObject;
+                if (original is not null)
+                {
+                    var legacyId = original.FirstOrDefault(property => property.Key.Equals("Id", StringComparison.OrdinalIgnoreCase));
+                    var versionsDirectory = Path.GetDirectoryName(directory)!;
+                    if (legacyId.Key is not null && legacyId.Value is not null
+                        && InstanceDirectoryClassifier.HasPendingTransactions(Directory.EnumerateDirectories(versionsDirectory)))
+                        storage[legacyId.Key] = legacyId.Value.DeepClone();
+                }
+            }
+            catch (JsonException) { /* Damaged settings can be replaced by an explicit user save. */ }
+        }
+        var writtenDigest = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(storage, JsonOptions)));
+        await AtomicJsonFileWriter.WriteAsync(settingsPath, storage, JsonOptions, cancellationToken,
+            validateDestination: () =>
+            {
+                if (!InstanceDirectoryOwnership.Matches(directory, ownerProof) || previousDigest != InstanceDirectoryOwnership.Digest(directory))
+                    throw new GameInstanceMutationConflictException(directory, snapshot.VersionName);
+            }).ConfigureAwait(false);
+        if (writtenDigest != InstanceDirectoryOwnership.Digest(directory))
+            throw new GameInstanceMutationConflictException(directory, snapshot.VersionName);
+        // Keep the digest of our own bytes, never adopt an external writer's later contents.
+        InstanceDirectoryOwnership.Observe(instance, ownerProof, writtenDigest);
     }
 
     public async Task EnsureIdentityAsync(
         string versionDirectory,
-        string expectedInstanceId,
+        string expectedInstanceDirectory,
         CancellationToken cancellationToken)
     {
-        var settingsPath = GetSettingsPath(versionDirectory);
-        var current = File.Exists(settingsPath)
-            ? await TryLoadAsync(settingsPath, cancellationToken).ConfigureAwait(false)
-            : null;
-        if (current is null
-            || !string.Equals(current.Id, expectedInstanceId, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new GameInstanceMutationConflictException(
-                expectedInstanceId,
-                Path.GetFileName(Path.TrimEndingDirectorySeparator(versionDirectory)));
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!InstanceDirectoryOwnership.Matches(versionDirectory, expectedInstanceDirectory))
+            throw new GameInstanceMutationConflictException(versionDirectory, Path.GetFileName(versionDirectory));
+        await Task.CompletedTask;
     }
 
-    public static bool HasIdentity(string versionDirectory, string expectedInstanceId)
-    {
-        try
-        {
-            var settingsPath = GetSettingsPath(versionDirectory);
-            if (!File.Exists(settingsPath))
-                return false;
-            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                if (string.Equals(property.Name, "Id", StringComparison.OrdinalIgnoreCase))
-                {
-                    return property.Value.ValueKind == JsonValueKind.String
-                        && string.Equals(
-                            property.Value.GetString(),
-                            expectedInstanceId,
-                            StringComparison.OrdinalIgnoreCase);
-                }
-            }
-
-            return false;
-        }
-        catch (Exception exception) when (exception is IOException
-                                          or UnauthorizedAccessException
-                                          or JsonException)
-        {
-            return false;
-        }
-    }
+    public static bool HasIdentity(string versionDirectory, string expectedInstanceDirectory)
+        => InstanceDirectoryOwnership.Matches(versionDirectory, expectedInstanceDirectory);
 
     public async Task CompleteRenameAsync(
         string versionDirectory,
-        string instanceId,
+        string instanceDirectory,
         string newVersionName,
         string? newIconSource,
         DateTimeOffset updatedAt,
@@ -203,9 +197,10 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
         if (!File.Exists(settingsPath))
             throw new FileNotFoundException("Instance settings were not found while completing rename.", settingsPath);
 
+        var digest = InstanceDirectoryOwnership.Digest(versionDirectory);
         var instance = await TryLoadAsync(settingsPath, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidDataException("Instance settings could not be read while completing rename.");
-        if (!string.Equals(instance.Id, instanceId, StringComparison.OrdinalIgnoreCase))
+        if (!HasIdentity(versionDirectory, instanceDirectory))
             throw new InvalidDataException("Pending rename marker does not match the instance settings.");
 
         instance.Name = newVersionName;
@@ -214,20 +209,39 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
         instance.IconSource = newIconSource;
         instance.UpdatedAt = updatedAt;
         var snapshot = CreateStorageSnapshot(instance, versionDirectory, newVersionName);
-        await AtomicJsonFileWriter.WriteAsync(settingsPath, snapshot, JsonOptions, cancellationToken)
+        // A legacy default may still refer to this ID. Keep that existing evidence
+        // through crash recovery until selection migration has committed.
+        var legacy = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(settingsPath, cancellationToken)) as System.Text.Json.Nodes.JsonObject;
+        var stored = JsonSerializer.SerializeToNode(snapshot, JsonOptions)!.AsObject();
+        var oldId = legacy?.FirstOrDefault(property => property.Key.Equals("Id", StringComparison.OrdinalIgnoreCase));
+        if (oldId?.Value is { } legacyId)
+            stored["Id"] = legacyId.DeepClone();
+        await AtomicJsonFileWriter.WriteAsync(settingsPath, stored, JsonOptions, cancellationToken,
+                validateDestination: () =>
+                {
+                    if (!HasIdentity(versionDirectory, instanceDirectory) || digest != InstanceDirectoryOwnership.Digest(versionDirectory))
+                        throw new GameInstanceMutationConflictException(versionDirectory, newVersionName);
+                })
             .ConfigureAwait(false);
     }
 
-    public Task PrepareInstallAsync(
+    public async Task PrepareInstallAsync(
         string pendingDirectory,
         string finalDirectory,
         string logicalVersionName,
         GameInstance instance,
+        string expectedOwnerProof,
         CancellationToken cancellationToken)
     {
+        using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(pendingDirectory);
         var settingsPath = GetSettingsPath(pendingDirectory);
         var snapshot = CreateStorageSnapshot(instance, finalDirectory, logicalVersionName);
-        return AtomicJsonFileWriter.WriteAsync(settingsPath, snapshot, JsonOptions, cancellationToken);
+        await AtomicJsonFileWriter.WriteAsync(settingsPath, snapshot, JsonOptions, cancellationToken,
+            validateDestination: () =>
+            {
+                if (!HasIdentity(pendingDirectory, expectedOwnerProof))
+                    throw new GameInstanceMutationConflictException(pendingDirectory, logicalVersionName);
+            }).ConfigureAwait(false);
     }
 
     private async Task<GameInstance?> TryLoadAsync(string settingsPath, CancellationToken cancellationToken)
@@ -270,15 +284,14 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
     {
         return new GameInstance
         {
-            Id = instance.Id,
-            Name = instance.Name,
+            Name = versionName,
             MinecraftVersion = instance.MinecraftVersion,
             Loader = instance.Loader,
             LoaderVersion = instance.LoaderVersion,
             VersionName = versionName,
             VersionType = instance.VersionType,
             Description = instance.Description,
-            IconSource = instance.IconSource,
+            IconSource = InstanceIconPaths.ToStorage(instance.IconSource, versionDirectory),
             InstanceDirectory = versionDirectory,
             BackupDirectory = instance.BackupDirectory,
             MemorySettingsMode = instance.MemorySettingsMode,
@@ -309,9 +322,7 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
 
     private static bool ShouldIgnoreDirectory(string versionDirectory)
     {
-        if (PendingInstanceDeletionDirectory.IsPending(versionDirectory)
-            || PendingInstanceInstallDirectory.IsPending(versionDirectory)
-            || PendingInstanceRenameDirectory.IsPending(versionDirectory))
+        if (!InstanceDirectoryClassifier.IsInstanceDirectory(versionDirectory))
         {
             return true;
         }
@@ -326,17 +337,7 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
 
     private static IEnumerable<string> EnumerateDirectories(string directory)
     {
-        try
-        {
-            return Directory.EnumerateDirectories(directory).ToArray();
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
+        try { return Directory.EnumerateDirectories(directory).ToArray(); }
+        catch (DirectoryNotFoundException) { return []; }
     }
 }

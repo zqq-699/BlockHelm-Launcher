@@ -51,7 +51,6 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
     public async Task<IInstanceInstallTransaction> BeginAsync(
         string minecraftDirectory,
         string logicalVersionName,
-        string instanceId,
         string installKind,
         bool initializeDefaultIfEmpty,
         IProgress<LauncherProgress>? progress = null,
@@ -93,16 +92,9 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
             FileStream? pendingLock = null;
             var preparationRootOwned = false;
             var preparationDirectoryOwned = false;
+            string? preparationProof = null;
             try
             {
-                var marker = new PendingInstanceInstallMarker(
-                    1,
-                    transactionId,
-                    instanceId,
-                    logicalVersionName,
-                    installKind,
-                    initializeDefaultIfEmpty,
-                    DateTimeOffset.UtcNow);
                 // Build the recoverable metadata in a launcher-owned preparation area first.
                 // Publishing the directory into the pending namespace is then a same-volume atomic move,
                 // so a crash can never expose a markerless pending directory created by this service.
@@ -114,6 +106,16 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
                 EnsureOrdinaryPathBelowRoot(minecraftDirectory, preparationRoot, "Install preparation root");
                 EnsureOrdinaryDirectory(preparationDirectory, "Install preparation directory");
                 preparationDirectoryOwned = true;
+                preparationProof = InstanceDirectoryOwnership.Capture(preparationDirectory);
+                var marker = new PendingInstanceInstallMarker(
+                    2,
+                    transactionId,
+                    preparationProof,
+                    logicalVersionName,
+                    installKind,
+                    initializeDefaultIfEmpty,
+                    DateTimeOffset.UtcNow);
+
                 await AtomicJsonFileWriter.WriteAsync(
                     Path.Combine(preparationDirectory, PendingInstanceInstallDirectory.MarkerFileName),
                     marker,
@@ -131,15 +133,15 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
                     FileAccess.ReadWrite,
                     FileShare.Read | FileShare.Delete);
                 logger.LogDebug(
-                    "Instance installation staged. InstanceId={InstanceId} LogicalVersionName={LogicalVersionName} PendingDirectory={PendingDirectory}",
-                    instanceId,
+                    "Instance installation staged. OwnerProof={OwnerProof} LogicalVersionName={LogicalVersionName} PendingDirectory={PendingDirectory}",
+                    finalDirectory,
                     logicalVersionName,
                     pendingDirectory);
                 return new Transaction(
                     minecraftDirectory,
                     logicalVersionName,
                     transactionId,
-                    instanceId,
+                    marker.OwnerProof,
                     pendingDirectory,
                     finalDirectory,
                     pendingLock,
@@ -150,12 +152,13 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
             {
                 if (pendingLock is not null)
                     await pendingLock.DisposeAsync().ConfigureAwait(false);
-                if (preparationDirectoryOwned)
+                if (preparationDirectoryOwned && InstanceDirectoryOwnership.Matches(preparationDirectory, preparationProof))
                     TryDeleteTree(preparationDirectory, logger);
                 if (preparationRootOwned)
                     TryDeleteEmptyDirectory(preparationRoot);
                 if (PendingInstanceInstallDirectory.TryReadValidPendingMarker(pendingDirectory, out var pendingMarker)
-                    && string.Equals(pendingMarker.TransactionId, transactionId, StringComparison.Ordinal))
+                    && string.Equals(pendingMarker.TransactionId, transactionId, StringComparison.Ordinal)
+                    && InstanceDirectoryOwnership.Matches(pendingDirectory, pendingMarker.OwnerProof))
                 {
                     TryDeleteTree(pendingDirectory, logger);
                 }
@@ -222,14 +225,14 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
         private readonly GameInstanceSettingsStore settingsStore;
         private readonly ILogger logger;
         private readonly string transactionId;
-        private readonly string instanceId;
+        private readonly string ownerProof;
         private bool aborted;
 
         public Transaction(
             string minecraftDirectory,
             string logicalVersionName,
             string transactionId,
-            string instanceId,
+            string ownerProof,
             string pendingDirectory,
             string finalDirectory,
             FileStream pendingLock,
@@ -239,7 +242,7 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
             MinecraftDirectory = minecraftDirectory;
             LogicalVersionName = logicalVersionName;
             this.transactionId = transactionId;
-            this.instanceId = instanceId;
+            this.ownerProof = ownerProof;
             PendingDirectory = pendingDirectory;
             FinalDirectory = finalDirectory;
             this.pendingLock = pendingLock;
@@ -259,8 +262,8 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
                 return;
             if (aborted)
                 throw new InvalidOperationException("The installation transaction was already aborted.");
-            if (!string.Equals(instance.Id, instanceId, StringComparison.Ordinal))
-                throw new GameInstanceMutationConflictException(instanceId, LogicalVersionName);
+            if (!MinecraftDirectoryPath.Equals(instance.InstanceDirectory, FinalDirectory) && !MinecraftDirectoryPath.Equals(instance.InstanceDirectory, PendingDirectory))
+                throw new GameInstanceMutationConflictException(ownerProof, LogicalVersionName);
 
             await ValidateAsync(cancellationToken).ConfigureAwait(false);
             await settingsStore.PrepareInstallAsync(
@@ -268,6 +271,7 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
                 FinalDirectory,
                 LogicalVersionName,
                 instance,
+                ownerProof,
                 cancellationToken).ConfigureAwait(false);
 
             var versionsDirectory = Path.GetDirectoryName(FinalDirectory)!;
@@ -291,17 +295,19 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
                     FinalDirectory,
                     () => PendingInstanceInstallDirectory.TryReadValidPendingMarker(PendingDirectory, out var marker)
                           && string.Equals(marker.TransactionId, transactionId, StringComparison.Ordinal)
-                          && string.Equals(marker.InstanceId, instanceId, StringComparison.Ordinal)
-                          && GameInstanceSettingsStore.HasIdentity(PendingDirectory, instanceId));
+                          && string.Equals(marker.OwnerProof, ownerProof, StringComparison.Ordinal)
+                          && GameInstanceSettingsStore.HasIdentity(PendingDirectory, ownerProof));
             }
             catch (InvalidOperationException)
             {
-                throw new GameInstanceMutationConflictException(instanceId, LogicalVersionName);
+                throw new GameInstanceMutationConflictException(ownerProof, LogicalVersionName);
             }
             IsCommitted = true;
+            instance.InstanceDirectory = FinalDirectory;
+            InstanceDirectoryOwnership.Observe(instance);
             logger.LogDebug(
-                "Instance installation committed. InstanceId={InstanceId} LogicalVersionName={LogicalVersionName} FinalDirectory={FinalDirectory}",
-                instance.Id,
+                "Instance installation committed. OwnerProof={OwnerProof} LogicalVersionName={LogicalVersionName} FinalDirectory={FinalDirectory}",
+                instance.InstanceDirectory,
                 LogicalVersionName,
                 FinalDirectory);
         }
@@ -313,6 +319,8 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
+                if (!InstanceDirectoryOwnership.Matches(FinalDirectory, ownerProof))
+                    throw new GameInstanceMutationConflictException(FinalDirectory, LogicalVersionName);
                 File.Delete(Path.Combine(FinalDirectory, PendingInstanceInstallDirectory.PendingLockFileName));
                 File.Delete(Path.Combine(FinalDirectory, PendingInstanceInstallDirectory.MarkerFileName));
             }
@@ -337,7 +345,10 @@ public sealed class InstanceInstallTransactionService : IInstanceInstallTransact
                 progress: null,
                 cancellationToken).ConfigureAwait(false);
             await ReleasePendingLockAsync().ConfigureAwait(false);
-            TryDeleteTree(PendingDirectory, logger);
+            if (InstanceDirectoryOwnership.Matches(PendingDirectory, ownerProof))
+                TryDeleteTree(PendingDirectory, logger);
+            else
+                logger.LogWarning("Install staging was preserved because operation ownership changed. Directory={Directory}", PendingDirectory);
             aborted = true;
         }
 

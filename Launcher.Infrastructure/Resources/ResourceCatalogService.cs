@@ -69,7 +69,7 @@ public sealed class ResourceCatalogService :
 
         var clients = new IResourceProviderClient[]
         {
-            new ModrinthResourceClient(resolvedHttpClient),
+            new ModrinthResourceClient(resolvedHttpClient, this.logger),
             new CurseForgeResourceClient(resolvedHttpClient, keyResolver, this.logger)
         };
         providers = clients.ToDictionary(client => client.Source);
@@ -276,7 +276,7 @@ public sealed class ResourceCatalogService :
         }
         catch (Exception exception)
         {
-            logger.LogDebug(
+            logger.LogWarning(
                 exception,
                 "Resource provider search failed. Kind={Kind} Source={Source} ElapsedMilliseconds={ElapsedMilliseconds}",
                 request.Kind,

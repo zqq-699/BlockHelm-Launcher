@@ -8,6 +8,8 @@ using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
 
+using Launcher.Application.Services;
+
 namespace Launcher.Infrastructure.Minecraft;
 
 internal static class LoaderInstallerFallbackValidator
@@ -21,15 +23,15 @@ internal static class LoaderInstallerFallbackValidator
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
             var profile = archive.GetEntry("install_profile.json")
-                ?? throw new InvalidDataException("Installer profile is missing.");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException("Installer profile is missing."), "InstallerMetadata", ("Reason", "Installer profile is missing."));
             if (profile.Length is <= 0 or > MaximumProfileBytes)
-                throw new InvalidDataException("Installer profile size is invalid.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Installer profile size is invalid."), "InstallerMetadata", ("Reason", "Installer profile size is invalid."));
 
             await using var profileStream = profile.Open();
             using var document = await JsonDocument.ParseAsync(profileStream, cancellationToken: cancellationToken).ConfigureAwait(false);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
-                throw new InvalidDataException("Installer profile is not an object.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Installer profile is not an object."), "InstallerMetadata", ("Reason", "Installer profile is not an object."));
 
             // Both modern processor profiles and legacy Forge profiles are supported.
             var hasModernProfile = root.TryGetProperty("spec", out var spec)
@@ -41,13 +43,13 @@ internal static class LoaderInstallerFallbackValidator
                 && root.TryGetProperty("versionInfo", out var versionInfo)
                 && versionInfo.ValueKind == JsonValueKind.Object;
             if (!hasModernProfile && !hasLegacyProfile)
-                throw new InvalidDataException("Installer profile format is unsupported.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Installer profile format is unsupported."), "InstallerMetadata", ("Reason", "Installer profile format is unsupported."));
 
             var versionContainer = hasLegacyProfile ? install : root;
             if (versionContainer.TryGetProperty("minecraft", out var version))
             {
                 if (version.ValueKind != JsonValueKind.String || version.GetString() != minecraftVersion)
-                    throw new InvalidDataException("Installer Minecraft version does not match the requested version.");
+                    throw SafeExceptionLog.Describe(new InvalidDataException("Installer Minecraft version does not match the requested version."), "InstallerMetadata", ("Reason", "Installer Minecraft version does not match the requested version."));
             }
             else if (!hasLegacyProfile
                 || !install.TryGetProperty("path", out var coordinate)
@@ -55,12 +57,12 @@ internal static class LoaderInstallerFallbackValidator
                 || coordinate.GetString()?.Split(':') is not ["net.minecraftforge", "forge", var artifactVersion]
                 || !artifactVersion.StartsWith(minecraftVersion + "-", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException("Installer Minecraft version does not match the requested version.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Installer Minecraft version does not match the requested version."), "InstallerMetadata", ("Reason", "Installer Minecraft version does not match the requested version."));
             }
         }
         catch (Exception exception) when (exception is InvalidDataException or JsonException)
         {
-            throw new DownloadContentValidationException("Loader installer archive or profile is invalid.", exception);
+            throw SafeExceptionLog.Describe(new DownloadContentValidationException("Loader installer archive or profile is invalid.", exception), "DownloadContentValidationException", ("Reason", "Loader installer archive or profile is invalid."));
         }
     }
 }

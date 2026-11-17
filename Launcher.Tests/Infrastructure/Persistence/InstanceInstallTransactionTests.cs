@@ -25,7 +25,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
             logger: null,
             guidFactory: () => Guid.ParseExact("a83f21c4000000000000000000000000", "N"));
         await using var transaction = await service.BeginAsync(
-            minecraftDirectory, "Test", "instance", "game", true);
+            minecraftDirectory, "Test", "game", true);
         var versionsDirectory = Path.Combine(minecraftDirectory, "versions");
         Assert.False(File.Exists(Path.Combine(versionsDirectory, ".bhl-install-transaction.lock")));
         Assert.False(File.Exists(Path.Combine(versionsDirectory, ".bhl-version-mutation.lock")));
@@ -83,7 +83,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         var service = new InstanceInstallTransactionService();
 
         await Assert.ThrowsAnyAsync<IOException>(() => service.BeginAsync(
-            minecraftDirectory, "Test", "instance", "game", false));
+            minecraftDirectory, "Test", "game", false));
 
         Assert.False(Directory.Exists(Path.Combine(minecraftDirectory, "versions", "Test")));
         Assert.Empty(Directory.EnumerateDirectories(
@@ -98,7 +98,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         var service = new InstanceInstallTransactionService();
 
         await using var transaction = await service.BeginAsync(
-            minecraftDirectory, "Test", "instance", "game", false);
+            minecraftDirectory, "Test", "game", false);
 
         Assert.True(File.Exists(Path.Combine(
             transaction.PendingDirectory,
@@ -106,7 +106,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         Assert.True(PendingInstanceInstallDirectory.TryReadValidPendingMarker(
             transaction.PendingDirectory,
             out var marker));
-        Assert.Equal("instance", marker.InstanceId);
+        Assert.True(InstanceDirectoryOwnership.Matches(transaction.PendingDirectory, marker.OwnerProof));
         Assert.False(Directory.Exists(PendingInstanceInstallDirectory.GetPreparationRoot(
             minecraftDirectory)));
     }
@@ -117,7 +117,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");
         var service = new InstanceInstallTransactionService();
         await using var transaction = await service.BeginAsync(
-            minecraftDirectory, "Test", "instance", "game", false);
+            minecraftDirectory, "Test", "game", false);
         await File.WriteAllTextAsync(
             Path.Combine(transaction.PendingDirectory, "Test.json"),
             """{"id":"Test"}""");
@@ -141,7 +141,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");
         var transactionService = new InstanceInstallTransactionService();
         await using var transaction = await transactionService.BeginAsync(
-            minecraftDirectory, "Test", "instance", "game", false);
+            minecraftDirectory, "Test", "game", false);
         var provider = new FakeLoaderProvider();
         var installer = new ModpackGameInstaller([provider]);
         var target = new LoaderInstallTarget(minecraftDirectory, "Test", transaction.PendingDirectory);
@@ -163,7 +163,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");
         var transactionService = new InstanceInstallTransactionService();
         await using var transaction = await transactionService.BeginAsync(
-            minecraftDirectory, "Test", "instance", "game", false);
+            minecraftDirectory, "Test", "game", false);
         var provider = new FakeLoaderProvider { WaitBeforeInstall = Task.Delay(Timeout.InfiniteTimeSpan) };
         var cleanupService = new RecordingSandboxCleanupService(TempRoot);
         var installer = new ModpackGameInstaller(
@@ -200,9 +200,9 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         var first = new InstanceInstallTransactionService();
         var second = new InstanceInstallTransactionService();
         await using var transaction = await first.BeginAsync(
-            minecraftDirectory, "Test", "instance", "game", false);
+            minecraftDirectory, "Test", "game", false);
         await using var otherTransaction = await second.BeginAsync(
-            minecraftDirectory, "Other", "other", "game", false);
+            minecraftDirectory, "Other", "game", false);
         var cleanup = new InstanceInstallCleanupService(settingsService);
         await cleanup.CleanupPendingAsync();
 
@@ -271,7 +271,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         [
             new GameInstance
             {
-                Id = "old",
+
                 Name = "Old",
                 MinecraftVersion = "1.20.1",
                 VersionName = "Old",
@@ -280,9 +280,9 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         ]);
         var installService = new InstanceInstallTransactionService();
         await using var transaction = await installService.BeginAsync(
-            settings.MinecraftDirectory, "Downloading", "downloading", "game", false);
+            settings.MinecraftDirectory, "Downloading", "game", false);
 
-        var stagedDelete = await repository.StageVersionForDeletionAsync(settings.MinecraftDirectory, "Old", "old");
+        var stagedDelete = await repository.StageVersionForDeletionAsync(settings.MinecraftDirectory, "Old", oldDirectory);
 
         Assert.False(Directory.Exists(oldDirectory));
         Assert.True(Directory.Exists(stagedDelete));
@@ -311,10 +311,10 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
             Array.Empty<ILoaderProvider>(),
             installTransactionService: installService);
         await using var transaction = await installService.BeginAsync(
-            settings.MinecraftDirectory, "Test", "installing", "game", false);
+            settings.MinecraftDirectory, "Test", "game", false);
 
         await Assert.ThrowsAsync<DuplicateGameInstanceNameException>(() => instanceService.RenameInstanceAsync(
-            oldInstance.Id,
+            oldInstance.InstanceDirectory,
             "Test",
             newIconSource: null));
 
@@ -344,7 +344,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         {
             await File.WriteAllTextAsync(
                 Path.Combine(preparationDirectory, PendingInstanceInstallDirectory.MarkerFileName),
-                """{"schemaVersion":1,"transactionId":"a83f21c4000000000000000000000000","instanceId":"test","logicalVersionName":"Test","installKind":"game","initializeDefaultIfEmpty":false,"createdAtUtc":"2026-07-13T00:00:00Z"}""");
+                JsonSerializer.Serialize(new { schemaVersion = 2, transactionId = "a83f21c4000000000000000000000000", ownerProof = InstanceDirectoryOwnership.Capture(preparationDirectory), logicalVersionName = "Test", installKind = "game", initializeDefaultIfEmpty = false, createdAtUtc = DateTimeOffset.UtcNow }));
         }
 
         await new InstanceInstallCleanupService(new TestSettingsService(settings)).CleanupPendingAsync();
@@ -373,7 +373,7 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
         Assert.True(Directory.Exists(finalDirectory));
         Assert.True(File.Exists(Path.Combine(finalDirectory, "Test.json")));
         Assert.False(File.Exists(Path.Combine(finalDirectory, ".bhl-install-pending.json")));
-        Assert.Equal("instance", (await settingsService.LoadAsync()).DefaultInstanceId);
+        Assert.Equal(finalDirectory, (await settingsService.LoadAsync()).DefaultInstanceDirectory);
     }
 
     [Fact]
@@ -424,15 +424,12 @@ public sealed class InstanceInstallTransactionTests : TestTempDirectory
             }));
         await File.WriteAllTextAsync(
             Path.Combine(finalDirectory, "BHL", "instance-settings.json"),
-            JsonSerializer.Serialize(CreateInstance(
-                settingsInstanceId,
-                settingsVersionName,
-                settingsDirectory ?? finalDirectory)));
+            JsonSerializer.Serialize(new { Id = settingsInstanceId, VersionName = settingsVersionName, InstanceDirectory = settingsDirectory ?? finalDirectory }));
     }
 
     private static GameInstance CreateInstance(string id, string name, string directory) => new()
     {
-        Id = id,
+
         Name = name,
         MinecraftVersion = "1.20.1",
         VersionName = name,

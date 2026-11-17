@@ -236,7 +236,7 @@ internal sealed class LoaderInstallerJavaRuntimeResolver : ILoaderInstallerJavaR
         JavaRuntimeCompatibilityRequirement requirement,
         bool provisioned)
     {
-        logger.LogDebug(
+        logger.LogInformation(
             "Resolved Java runtime for loader installer. VersionName={VersionName} MinecraftVersion={MinecraftVersion} Loader={Loader} LoaderVersion={LoaderVersion} UsedStoredInstance={UsedStoredInstance} JavaRequirement={JavaRequirement} Provisioned={Provisioned} JavaPath={JavaPath} JavaVersion={JavaVersion} JavaArchitecture={JavaArchitecture} JavaSource={JavaSource}",
             request.VersionName,
             request.MinecraftVersion,
@@ -280,7 +280,6 @@ internal sealed class LoaderInstallerJavaRuntimeResolver : ILoaderInstallerJavaR
 
         return new GameInstance
         {
-            Id = storedInstance.Id,
             Name = storedInstance.Name,
             MinecraftVersion = string.IsNullOrWhiteSpace(storedInstance.MinecraftVersion)
                 ? request.MinecraftVersion

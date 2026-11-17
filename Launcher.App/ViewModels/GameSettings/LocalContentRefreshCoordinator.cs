@@ -85,6 +85,12 @@ internal sealed class LocalContentRefreshCoordinator<TContent> : IDisposable
         if ((SelectedInstance is not null && IsSameInstancePath(SelectedInstance, instance))
             || SelectedInstance is null && instance is null)
         {
+            if (!ReferenceEquals(SelectedInstance, instance))
+            {
+                Interlocked.Increment(ref refreshGeneration);
+                Interlocked.Increment(ref invalidationRevision);
+                CancelRefresh();
+            }
             SelectedInstance = instance;
             watcher.SetInstance(instance);
             return;
@@ -252,7 +258,7 @@ internal sealed class LocalContentRefreshCoordinator<TContent> : IDisposable
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Failed to refresh local instance content. InstanceId={InstanceId} DirectoryKind={DirectoryKind}", instance.Id, directoryKind);
+            logger.LogError(exception, "Failed to refresh local instance content. InstanceDirectory={InstanceDirectory} DirectoryKind={DirectoryKind}", instance.InstanceDirectory, directoryKind);
             throw;
         }
         finally
@@ -297,7 +303,7 @@ internal sealed class LocalContentRefreshCoordinator<TContent> : IDisposable
     private static bool IsSameInstancePath(GameInstance left, GameInstance? right)
     {
         return right is not null
-            && string.Equals(left.Id, right.Id, StringComparison.Ordinal)
+            && string.Equals(left.InstanceDirectory, right.InstanceDirectory, StringComparison.Ordinal)
             && string.Equals(left.InstanceDirectory, right.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 

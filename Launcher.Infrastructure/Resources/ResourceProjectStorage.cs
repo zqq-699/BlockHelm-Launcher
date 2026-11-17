@@ -24,6 +24,7 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.Minecraft;
 using Launcher.Infrastructure.Modpacks;
+using Launcher.Infrastructure.FileSystem;
 using Microsoft.Extensions.Logging;
 
 namespace Launcher.Infrastructure.Resources;
@@ -59,10 +60,11 @@ internal sealed class ResourceProjectStorage
         IProgress<LauncherProgress>? progress,
         CancellationToken cancellationToken)
     {
+        using var instanceScope = InstanceContentOwnership.Open(instance, instance.InstanceDirectory);
         if (string.IsNullOrWhiteSpace(instance.InstanceDirectory))
-            throw new InvalidOperationException("The target instance directory is empty.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("The target instance directory is empty."), "DownloadValidation", ("Reason", "The target instance directory is empty."));
         if (version.Kind is ResourceProjectKind.World)
-            return await InstallWorldAsync(version, instance, progress, cancellationToken).ConfigureAwait(false);
+            return await InstallWorldAsync(version, instance, progress, cancellationToken, instanceScope).ConfigureAwait(false);
 
         var installDirectory = ResolveInstallDirectory(instance, version.Kind);
         MinecraftPathGuard.EnsureSafeDirectory(
@@ -75,7 +77,8 @@ internal sealed class ResourceProjectStorage
                 target,
                 installDirectory,
                 progress,
-                cancellationToken)
+                cancellationToken,
+                instanceScope)
             .ConfigureAwait(false);
     }
 
@@ -91,8 +94,9 @@ internal sealed class ResourceProjectStorage
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        using var instanceLease = AcquireInstanceLease(instance);
         if (string.IsNullOrWhiteSpace(instance.InstanceDirectory))
-            throw new InvalidOperationException("The target instance directory is empty.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("The target instance directory is empty."), "DownloadValidation", ("Reason", "The target instance directory is empty."));
 
         var directoryName = kind switch
         {
@@ -116,9 +120,9 @@ internal sealed class ResourceProjectStorage
         if (!existed)
         {
             logger.LogInformation(
-                "Resource project instance content directory created. Kind={Kind} InstanceId={InstanceId}",
+                "Resource project instance content directory created. Kind={Kind} InstanceDirectory={InstanceDirectory}",
                 kind,
-                instance.Id);
+                instance.InstanceDirectory);
         }
 
         return Task.FromResult(ensuredDirectory);
@@ -131,7 +135,7 @@ internal sealed class ResourceProjectStorage
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(targetDirectory))
-            throw new InvalidOperationException("The target download directory is empty.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("The target download directory is empty."), "DownloadValidation", ("Reason", "The target download directory is empty."));
         MinecraftPathGuard.EnsureSafeDirectory(
             targetDirectory,
             targetDirectory,
@@ -167,6 +171,7 @@ internal sealed class ResourceProjectStorage
         string destinationPath,
         CancellationToken cancellationToken)
     {
+        using var instanceLease = AcquireInstanceLease(instance);
         var (target, installDirectory) = ValidateInstallDestination(version, instance, destinationPath);
         return CaptureDestinationStateAsync(target, installDirectory, cancellationToken);
     }
@@ -182,7 +187,7 @@ internal sealed class ResourceProjectStorage
         return DownloadCoreAsync(version, target, parentDirectory, expectedState, progress, cancellationToken);
     }
 
-    public Task<string> InstallToDestinationAsync(
+    public async Task<string> InstallToDestinationAsync(
         ResourceProjectVersion version,
         GameInstance instance,
         string destinationPath,
@@ -190,8 +195,9 @@ internal sealed class ResourceProjectStorage
         IProgress<LauncherProgress>? progress,
         CancellationToken cancellationToken)
     {
+        using var instanceScope = InstanceContentOwnership.Open(instance, instance.InstanceDirectory);
         var (target, installDirectory) = ValidateInstallDestination(version, instance, destinationPath);
-        return DownloadCoreAsync(version, target, installDirectory, expectedState, progress, cancellationToken);
+        return await DownloadCoreAsync(version, target, installDirectory, expectedState, progress, cancellationToken, instanceScope).ConfigureAwait(false);
     }
 
     public Task<bool> DownloadExistsAsync(
@@ -228,8 +234,10 @@ internal sealed class ResourceProjectStorage
         string target,
         string targetDirectory,
         IProgress<LauncherProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope = null)
     {
+        instanceScope?.EnsureCurrent();
         if (File.Exists(target))
         {
             if (await ExistingFileMatchesAsync(version, target, cancellationToken).ConfigureAwait(false))
@@ -251,7 +259,8 @@ internal sealed class ResourceProjectStorage
                 targetDirectory,
                 expectedState,
                 progress,
-                cancellationToken)
+                cancellationToken,
+                instanceScope)
             .ConfigureAwait(false);
     }
 
@@ -261,8 +270,11 @@ internal sealed class ResourceProjectStorage
         string targetDirectory,
         ResourceProjectDestinationState expectedState,
         IProgress<LauncherProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope = null)
     {
+        instanceScope?.EnsureCurrent();
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "ResourceDownload");
         MinecraftPathGuard.EnsureSafeFileDestination(
             target,
             targetDirectory,
@@ -287,6 +299,7 @@ internal sealed class ResourceProjectStorage
             target,
             urls[0],
             expectation.FileSize);
+        using var diagnosticLogScope = logScope.RestoreContext();
         try
         {
             var resolution = await DownloadAndVerifyAsync(
@@ -298,7 +311,9 @@ internal sealed class ResourceProjectStorage
                 speedMeter,
                 logScope.BeginSource(CreateProgressReporter(version, progress)),
                 logScope.ReportTransferredBytes,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                instanceScope).ConfigureAwait(false);
+            instanceScope?.EnsureCurrent();
             MinecraftPathGuard.EnsureSafeFileDestination(
                 target,
                 targetDirectory,
@@ -312,7 +327,8 @@ internal sealed class ResourceProjectStorage
                     target,
                     targetDirectory,
                     expectedState,
-                    cancellationToken)
+                    cancellationToken,
+                    instanceScope)
                 .ConfigureAwait(false);
             logScope.Complete(resolution);
             return target;
@@ -346,7 +362,7 @@ internal sealed class ResourceProjectStorage
         }
         finally
         {
-            TryDeleteTemporaryFile(tempPath, targetDirectory, version.VersionId);
+            if (instanceScope?.IsCurrent is not false) TryDeleteTemporaryFile(tempPath, targetDirectory, version.VersionId);
         }
 
         logScope.Fail(lastException ?? new InvalidOperationException("Resource project download failed."), urls[0]);
@@ -475,10 +491,12 @@ internal sealed class ResourceProjectStorage
         string target,
         string managedRoot,
         ResourceProjectDestinationState expectedState,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope = null)
     {
         var currentState = await CaptureDestinationStateAsync(target, managedRoot, cancellationToken)
             .ConfigureAwait(false);
+        instanceScope?.EnsureCurrent();
         if (!DestinationStatesMatch(expectedState, currentState))
         {
             throw new ResourceProjectDestinationConflictException(
@@ -511,6 +529,7 @@ internal sealed class ResourceProjectStorage
             File.Replace(tempPath, target, backupPath, ignoreMetadataErrors: true);
             var replacedState = await CaptureDestinationStateAsync(backupPath, managedRoot, cancellationToken)
                 .ConfigureAwait(false);
+            instanceScope?.EnsureCurrent();
             if (!DestinationStatesMatch(expectedState, replacedState))
             {
                 File.Replace(backupPath, target, destinationBackupFileName: null, ignoreMetadataErrors: true);
@@ -521,7 +540,7 @@ internal sealed class ResourceProjectStorage
 
             committed = true;
         }
-        catch (Exception exception) when (!committed && File.Exists(backupPath))
+        catch (Exception exception) when (!committed && File.Exists(backupPath) && instanceScope?.IsCurrent is not false)
         {
             try
             {
@@ -537,7 +556,7 @@ internal sealed class ResourceProjectStorage
         }
         finally
         {
-            if (committed && File.Exists(backupPath))
+            if (committed && File.Exists(backupPath) && instanceScope?.IsCurrent is not false)
             {
                 try
                 {
@@ -621,11 +640,13 @@ internal sealed class ResourceProjectStorage
         SpeedMeter? speedMeter,
         Action<int, long, long?> reportAttemptProgress,
         Action<long> reportTransferredBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope? instanceScope = null)
     {
         var settings = settingsService is null
             ? null
             : await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
+        instanceScope?.EnsureCurrent();
         var executor = new MinecraftDownloadRequestExecutor(
             httpClient,
             logger,
@@ -674,12 +695,12 @@ internal sealed class ResourceProjectStorage
         catch (MinecraftDownloadRequestExecutor.DownloadSourceRequestException exception)
             when (exception.InnerException is DownloadHashMismatchException)
         {
-            throw CreateIntegrityException(version, ResourceProjectIntegrityFailureReason.HashMismatch, expectation.Hash?.Algorithm);
+            throw CreateIntegrityException(version, ResourceProjectIntegrityFailureReason.HashMismatch, expectation.Hash?.Algorithm, exception);
         }
         catch (MinecraftDownloadRequestExecutor.DownloadSourceRequestException exception)
             when (exception.InnerException is DownloadBodyInterruptedException && expectation.FileSize.HasValue)
         {
-            throw CreateIntegrityException(version, ResourceProjectIntegrityFailureReason.LengthMismatch, expectation.Hash?.Algorithm);
+            throw CreateIntegrityException(version, ResourceProjectIntegrityFailureReason.LengthMismatch, expectation.Hash?.Algorithm, exception);
         }
         catch (MinecraftDownloadRequestExecutor.DownloadSourceRequestException exception)
             when (exception.InnerException is DownloadLocalFileException)
@@ -707,7 +728,7 @@ internal sealed class ResourceProjectStorage
             await using var source = File.OpenRead(tempPath);
             var actual = await MD5.HashDataAsync(source, cancellationToken).ConfigureAwait(false);
             if (!CryptographicOperations.FixedTimeEquals(actual, expectation.Hash.Value))
-                throw CreateIntegrityException(version, ResourceProjectIntegrityFailureReason.HashMismatch, expectation.Hash.Algorithm);
+                throw SafeExceptionLog.Describe(CreateIntegrityException(version, ResourceProjectIntegrityFailureReason.HashMismatch, expectation.Hash.Algorithm), "ResourceHashMismatch", ("Artifact", tempPath), ("HashAlgorithm", "MD5"), ("ExpectedHash", Convert.ToHexString(expectation.Hash.Value)), ("ActualHash", Convert.ToHexString(actual)));
         }
 
         return resolution;
@@ -811,9 +832,9 @@ internal sealed class ResourceProjectStorage
     private static ResourceProjectIntegrityException CreateIntegrityException(
         ResourceProjectVersion version,
         ResourceProjectIntegrityFailureReason reason,
-        ResourceFileHashAlgorithm? algorithm = null)
+        ResourceFileHashAlgorithm? algorithm = null, Exception? innerException = null)
     {
-        return new ResourceProjectIntegrityException(version.VersionId, reason, algorithm);
+        return new ResourceProjectIntegrityException(version.VersionId, reason, algorithm, innerException);
     }
 
     private void TryDeleteTemporaryFile(string path, string managedRoot, string versionId)
@@ -841,7 +862,8 @@ internal sealed class ResourceProjectStorage
         ResourceProjectVersion version,
         GameInstance instance,
         IProgress<LauncherProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        InstanceContentOwnership.Scope instanceScope)
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"launcher-world-install-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
@@ -854,6 +876,7 @@ internal sealed class ResourceProjectStorage
                     progress,
                     cancellationToken)
                 .ConfigureAwait(false);
+            instanceScope.EnsureCurrent();
             var result = await localSaveService.ImportFromArchiveAsync(instance, archivePath, cancellationToken)
                 .ConfigureAwait(false);
             if (!result.IsSuccess || result.ImportedSave is null)
@@ -893,6 +916,13 @@ internal sealed class ResourceProjectStorage
             ResourceProjectKind.ResourcePack or ResourceProjectKind.DataPack or ResourceProjectKind.ShaderPack or ResourceProjectKind.World => ".zip",
             _ => ".jar"
         };
+    }
+
+    private static IDisposable AcquireInstanceLease(GameInstance instance)
+    {
+        if (string.IsNullOrWhiteSpace(instance.InstanceDirectory))
+            throw new InvalidOperationException("The target instance directory is empty.");
+        return Launcher.Infrastructure.Persistence.InstanceDirectoryOwnership.AcquireReadLease(instance);
     }
 
     private static string ResolveInstallDirectory(GameInstance instance, ResourceProjectKind kind)

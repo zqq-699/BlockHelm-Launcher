@@ -67,8 +67,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to load shader packs for section activation. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to load shader packs for section activation. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             HasLoadedShaderPacks = false;
             ClearDisplayedShaderPacks();
             hasPendingVisualRefresh = false;
@@ -116,8 +116,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
 
             logger.LogError(
                 exception,
-                "Failed to silently refresh cached shader packs. InstanceId={InstanceId}",
-                expectedInstance.Id);
+                "Failed to silently refresh cached shader packs. InstanceDirectory={InstanceDirectory}",
+                expectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_LoadLocalShaderPacksFailed);
         }
         finally
@@ -263,7 +263,7 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
         if (selectedInstance is null || instance is null)
             return selectedInstance is not null || instance is not null;
 
-        return !string.Equals(selectedInstance.Id, instance.Id, StringComparison.OrdinalIgnoreCase)
+        return !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(selectedInstance.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 

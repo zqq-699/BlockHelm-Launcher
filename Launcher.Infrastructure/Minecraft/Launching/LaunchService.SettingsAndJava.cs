@@ -47,8 +47,8 @@ private async Task ApplyGameLanguageAsync(
                 settings.LauncherLanguage,
                 cancellationToken);
             logger.LogInformation(
-                "Game language synchronized with launcher language. InstanceId={InstanceId} MinecraftVersion={MinecraftVersion} LauncherLanguage={LauncherLanguage} GameLanguage={GameLanguage}",
-                instance.Id,
+                "Game language synchronized with launcher language. InstanceDirectory={InstanceDirectory} MinecraftVersion={MinecraftVersion} LauncherLanguage={LauncherLanguage} GameLanguage={GameLanguage}",
+                instance.InstanceDirectory,
                 instance.MinecraftVersion,
                 LauncherLanguages.Normalize(settings.LauncherLanguage),
                 gameLanguage);
@@ -62,8 +62,8 @@ private async Task ApplyGameLanguageAsync(
             // 语言同步属于启动增强项，失败不应阻止游戏启动。
             logger.LogWarning(
                 exception,
-                "Failed to synchronize game language before launch. InstanceId={InstanceId} LauncherLanguage={LauncherLanguage}",
-                instance.Id,
+                "Failed to synchronize game language before launch. InstanceDirectory={InstanceDirectory} LauncherLanguage={LauncherLanguage}",
+                instance.InstanceDirectory,
                 LauncherLanguages.Normalize(settings.LauncherLanguage));
         }
     }
@@ -92,8 +92,8 @@ private async Task ApplyGameLanguageAsync(
             // 仅自动发现缺失时允许安装内置 Java 后重试；用户手动配置错误仍应直接反馈。
             logger.LogInformation(
                 exception,
-                "Automatic Java runtime selection failed. Preparing bundled Java runtime before retrying. InstanceId={InstanceId} InstanceName={InstanceName} Reason={Reason} RequiredJavaMajorVersion={RequiredJavaMajorVersion}",
-                instance.Id,
+                "Automatic Java runtime selection failed. Preparing bundled Java runtime before retrying. InstanceDirectory={InstanceDirectory} InstanceName={InstanceName} Reason={Reason} RequiredJavaMajorVersion={RequiredJavaMajorVersion}",
+                instance.InstanceDirectory,
                 instance.Name,
                 exception.Reason,
                 exception.RequiredMajorVersion);
@@ -105,8 +105,8 @@ private async Task ApplyGameLanguageAsync(
                 cancellationToken);
 
             logger.LogInformation(
-                "Retrying Java runtime selection after provisioning. InstanceId={InstanceId} InstanceName={InstanceName}",
-                instance.Id,
+                "Retrying Java runtime selection after provisioning. InstanceDirectory={InstanceDirectory} InstanceName={InstanceName}",
+                instance.InstanceDirectory,
                 instance.Name);
             return await javaRuntimeSelectionService.SelectForLaunchAsync(instance, settings, options, cancellationToken);
         }

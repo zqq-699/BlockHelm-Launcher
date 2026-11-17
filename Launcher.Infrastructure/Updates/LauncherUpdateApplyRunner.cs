@@ -716,6 +716,7 @@ internal sealed class LauncherUpdateProcess(Process process) : ILauncherUpdatePr
 internal sealed class LauncherUpdateApplyLogger
 {
     private readonly string logPath;
+    private readonly string operationId = Guid.TryParse(Environment.GetEnvironmentVariable("BLOCKHELM_UPDATE_OPERATION_ID"), out var id) ? id.ToString("N") : Guid.NewGuid().ToString("N");
 
     public LauncherUpdateApplyLogger(string logDirectory)
     {
@@ -728,12 +729,12 @@ internal sealed class LauncherUpdateApplyLogger
     public void Error(string message, Exception? exception = null) =>
         Write("ERR", exception is null
             ? message
-            : $"{message} ErrorType={exception.GetType().Name} HResult={exception.HResult}");
+            : $"{message} ErrorType={exception.GetType().Name} {Launcher.Application.Services.SafeExceptionLog.Format(exception)}");
 
     private void Write(string level, string message)
     {
         File.AppendAllText(
             logPath,
-            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] {Launcher.Application.Services.SensitiveLogText.Redact(message)}{Environment.NewLine}");
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff zzz} [{level}] OperationId={operationId} {Launcher.Application.Services.SensitiveLogText.Redact(message)}{Environment.NewLine}");
     }
 }

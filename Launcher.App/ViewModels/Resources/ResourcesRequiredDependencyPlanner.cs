@@ -69,11 +69,11 @@ internal sealed class ResourcesRequiredDependencyPlanner
         if (plan.MissingDependencies.Count == 0)
         {
             logger?.LogInformation(
-                "Resource project required dependencies are already installed. ProjectId={ProjectId} VersionId={VersionId} RequiredCount={RequiredCount} InstanceId={InstanceId}",
+                "Resource project required dependencies are already installed. ProjectId={ProjectId} VersionId={VersionId} RequiredCount={RequiredCount} InstanceDirectory={InstanceDirectory}",
                 projectId,
                 item.Version.VersionId,
                 dialogItems.Length,
-                instance.Id);
+                instance.InstanceDirectory);
             return RequiredDependencyInstallPlan.Continue;
         }
 
@@ -103,10 +103,10 @@ internal sealed class ResourcesRequiredDependencyPlanner
         if (taskProgress is not null)
             progress = DownloadSpeedTaskProgress.Carry(taskProgress, progress);
         logger?.LogInformation(
-            "Installing required resource dependencies. ProjectId={ProjectId} MissingCount={MissingCount} InstanceId={InstanceId}",
+            "Installing required resource dependencies. ProjectId={ProjectId} MissingCount={MissingCount} InstanceDirectory={InstanceDirectory}",
             projectId,
             missingDependencies.Count,
-            instance.Id);
+            instance.InstanceDirectory);
         return planningService.InstallRequiredDependenciesAsync(
             missingDependencies,
             instance,

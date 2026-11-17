@@ -17,6 +17,44 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 public sealed class LaunchServiceTests : TestTempDirectory
 {
     [Fact]
+    public async Task RestoreStagingCannotLaunchEvenWithAnExistingInstanceSnapshot()
+    {
+        var settings = CreateSettings();
+        var instance = CreateInstance(settings.MinecraftDirectory, ".launcher-restore-orphan");
+        Directory.CreateDirectory(instance.InstanceDirectory);
+        Launcher.Infrastructure.Persistence.InstanceDirectoryOwnership.Observe(instance);
+        var repair = new FakeRepairService();
+        var factory = new FakeLauncherFactory();
+        var service = CreateService(repair, factory);
+
+        var exception = await Assert.ThrowsAsync<LaunchFailedException>(() =>
+            service.LaunchAsync(instance, CreateAccount(), settings, null));
+
+        Assert.IsType<GameInstanceMutationConflictException>(exception.InnerException);
+        Assert.Null(repair.LastVersionName);
+        Assert.Null(factory.Launcher.LastVersionName);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StaleLaunchDoesNotCreateDiagnosticsInAnObsoleteOrReplacedDirectory(bool replace)
+    {
+        var settings = CreateSettings();
+        var instance = CreateInstance(settings.MinecraftDirectory, "A");
+        Directory.CreateDirectory(instance.InstanceDirectory);
+        Launcher.Infrastructure.Persistence.InstanceDirectoryOwnership.Observe(instance);
+        Directory.Move(instance.InstanceDirectory, instance.InstanceDirectory + "-moved");
+        if (replace) Directory.CreateDirectory(instance.InstanceDirectory);
+        var factory = new FakeLauncherFactory();
+        var service = CreateService(launcher: factory);
+        await Assert.ThrowsAsync<LaunchFailedException>(() => service.LaunchAsync(instance, CreateAccount(), settings, null));
+        Assert.Equal(replace, Directory.Exists(instance.InstanceDirectory));
+        if (replace) Assert.Empty(Directory.EnumerateFileSystemEntries(instance.InstanceDirectory));
+        Assert.Null(factory.Launcher.LastVersionName);
+    }
+
+    [Fact]
     public async Task LaunchRepairsBeforeBuildingProcess()
     {
         var repair = new FakeRepairService();
@@ -485,7 +523,7 @@ public sealed class LaunchServiceTests : TestTempDirectory
 
     private static GameInstance CreateInstance(string minecraftDirectory, string name) => new()
     {
-        Id = name,
+
         Name = name,
         MinecraftVersion = "1.20.1",
         VersionName = name,
@@ -729,7 +767,7 @@ public sealed class LaunchServiceTests : TestTempDirectory
                 CancellationToken cancellationToken) => throw new InvalidOperationException("The fake process did not exit during startup.");
             public Task CompleteCanceledStartupAsync(Process process) => Task.CompletedTask;
             public GameLaunchSession CreateGameLaunchSession(Process process, LaunchDiagnosticContext context) =>
-                new(context.InstanceId, context.InstanceName, Task.FromResult(LaunchExitResult.Success));
+                new(context.InstanceDirectory, context.InstanceName, Task.FromResult(LaunchExitResult.Success));
         }
     }
 

@@ -24,6 +24,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
+using Launcher.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -39,8 +40,9 @@ private async Task EnsureVersionJarAsync(
         ManagedVersionRepairDownloadBatch downloadBatch,
         CancellationToken cancellationToken)
     {
-        var jarPath = Path.Combine(versionDirectory, $"{versionName}.jar");
-        MinecraftPathGuard.EnsureSafeFileDestination(jarPath, versionDirectory, "Managed version client");
+        var jarPath = InstanceVersionFiles.ResolveJarPath(versionDirectory, versionName);
+        var jarDirectory = Path.GetDirectoryName(jarPath)!;
+        MinecraftPathGuard.EnsureSafeFileDestination(jarPath, Path.GetDirectoryName(versionDirectory)!, "Managed version client");
         var jarStatus = await MinecraftFileIntegrity.EvaluateAsync(
             jarPath,
             resolvedVersion.ClientJarSha1,
@@ -74,7 +76,7 @@ private async Task EnsureVersionJarAsync(
                     jarPath,
                     resolvedVersion.ClientJarSha1,
                     cancellationToken,
-                    managedRoot: versionDirectory).ConfigureAwait(false);
+                    managedRoot: jarDirectory, logger: logger).ConfigureAwait(false);
                 return;
             }
 
@@ -85,7 +87,7 @@ private async Task EnsureVersionJarAsync(
                     jarPath,
                     expectedSha1: null,
                     cancellationToken,
-                    managedRoot: versionDirectory).ConfigureAwait(false);
+                    managedRoot: jarDirectory, logger: logger).ConfigureAwait(false);
                 return;
             }
         }
@@ -98,10 +100,10 @@ private async Task EnsureVersionJarAsync(
                     jarPath,
                     ResourceCategory: "Mojang",
                     LibraryName: null,
-                    ArtifactPath: $"{versionName}.jar",
+                    ArtifactPath: Path.GetFileName(jarPath),
                     ExpectedSha1: resolvedVersion.ClientJarSha1,
                     ExpectedSize: resolvedVersion.ClientJarSize,
-                    ManagedRoot: versionDirectory),
+                    ManagedRoot: jarDirectory),
                 cancellationToken).ConfigureAwait(false);
             return;
         }

@@ -42,6 +42,18 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
     private readonly IExternalLinkService? externalLinkService;
     private readonly IResourceCatalogService? resourceCatalogService;
     private ResourceProjectReference? pendingProjectDetailsReference;
+    private long appliedInstanceCatalogRevision = -1;
+
+    public void ApplyInstanceCatalog(IReadOnlyList<GameInstance> instances, long revision)
+    {
+        if (appliedInstanceCatalogRevision == revision) return;
+        appliedInstanceCatalogRevision = revision;
+        foreach (var page in new[] { ModPage, ResourcePacksPage, DataPacksPage, ShaderPacksPage, WorldsPage, ModpacksPage })
+        {
+            if (page.Versions.RefreshInstanceCatalog(instances) && page.IsProjectVersionsStep)
+                page.CurrentStep = ResourcesModPageStep.ProjectDetails;
+        }
+    }
 
     public ResourcesPageViewModel(
         IResourceCatalogService? resourceCatalogService = null,
@@ -431,9 +443,9 @@ public sealed partial class ResourcesPageViewModel : ObservableObject
         // 从实例设置跳转时先切换到对应分区，再应用实例版本与 Loader 筛选，避免短暂展示不兼容结果。
         SelectSection(section, logSelection: false);
         logger?.LogDebug(
-            "Opening online resource section from instance. Kind={Kind}, InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}, Loader={Loader}",
+            "Opening online resource section from instance. Kind={Kind}, InstanceDirectory={InstanceDirectory}, MinecraftVersion={MinecraftVersion}, Loader={Loader}",
             kind,
-            instance.Id,
+            instance.InstanceDirectory,
             instance.MinecraftVersion,
             instance.Loader);
         await projectPage.ApplyInstanceFiltersAsync(instance);

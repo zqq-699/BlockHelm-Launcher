@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.App.Logging;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -130,6 +131,7 @@ internal static class MinecraftSkinPreviewModelBuilder
     {
         // OnLoad 立即读完并释放文件句柄，皮肤缓存随后可以被替换或删除。
         var bitmap = new BitmapImage();
+        ImageLoadDiagnostics.Observe(bitmap, source);
         bitmap.BeginInit();
         bitmap.CacheOption = BitmapCacheOption.OnLoad;
         bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;

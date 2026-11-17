@@ -83,7 +83,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         _ = loaderVersion;
         return InstallCoreAsync(
             minecraftVersion,
-            new MinecraftPath(gameDirectory),
+            new InstanceMinecraftPath(gameDirectory),
             gameDirectory,
             gameDirectory,
             isolatedVersionName,
@@ -312,7 +312,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         CmlLibJavaFileMode javaFileMode = CmlLibJavaFileMode.Exclude)
     {
         return CreateLauncher(
-            new MinecraftPath(gameDirectory),
+            new InstanceMinecraftPath(gameDirectory),
             progress,
             downloadSourcePreference,
             logger,
@@ -384,7 +384,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
             gameInstaller.ConfiguredMaxDownloader,
             globalDownloadSnapshot.CurrentTarget);
         var fileExtractors = parameters.FileExtractors
-            ?? throw new InvalidOperationException("CmlLib did not configure its default file extractors.");
+            ?? throw SafeExceptionLog.Describe(new InvalidOperationException("CmlLib did not configure its default file extractors."), "DownloadValidation", ("Reason", "CmlLib did not configure its default file extractors."));
         if (javaFileMode is CmlLibJavaFileMode.Only)
         {
             for (var index = fileExtractors.Count() - 1; index >= 0; index--)

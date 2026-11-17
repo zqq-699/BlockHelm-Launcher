@@ -132,7 +132,7 @@ internal sealed class LaunchCrashMonitor : ILaunchCrashMonitor
         {
             EnsureOutputCaptureStarted(process, context);
             var exitTask = MonitorProcessExitAsync(process, context);
-            return new GameLaunchSession(context.InstanceId, context.InstanceName, exitTask);
+            return new GameLaunchSession(context.InstanceDirectory, context.InstanceName, exitTask);
         }
 
         public async Task CompleteCanceledStartupAsync(Process process)

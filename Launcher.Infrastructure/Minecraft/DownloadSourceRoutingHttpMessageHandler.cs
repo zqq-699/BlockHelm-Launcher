@@ -73,7 +73,7 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
         var originalUrl = request.RequestUri?.AbsoluteUri
-            ?? throw new InvalidOperationException("Download request URL is missing.");
+            ?? throw SafeExceptionLog.Describe(new InvalidOperationException("Download request URL is missing."), "DownloadValidation", ("Reason", "Download request URL is missing."));
         if (!IsAllowedMetadataRequest(request.RequestUri!))
         {
             logger.LogError(
@@ -89,7 +89,7 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
             async (context, token) =>
             {
                 if (context.Response.Content.Headers.ContentLength is > MaximumMetadataBytes)
-                    throw new DownloadContentValidationException("CmlLib metadata response exceeded the permitted size.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("CmlLib metadata response exceeded the permitted size."), "DownloadContentValidationException", ("Reason", "CmlLib metadata response exceeded the permitted size."));
                 var bytes = await ReadBoundedMetadataAsync(context.Response.Content, token).ConfigureAwait(false);
                 ValidateBufferedMetadata(originalUrl, bytes);
                 return BufferedResponse.Capture(context.Response, bytes);
@@ -121,7 +121,7 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
             if (read == 0)
                 break;
             if (memory.Length + read > MaximumMetadataBytes)
-                throw new DownloadContentValidationException("CmlLib metadata response exceeded the permitted size.");
+                throw SafeExceptionLog.Describe(new DownloadContentValidationException("CmlLib metadata response exceeded the permitted size."), "DownloadContentValidationException", ("Reason", "CmlLib metadata response exceeded the permitted size."));
             await memory.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
         }
         return memory.ToArray();
@@ -149,16 +149,14 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
                 using var document = JsonDocument.Parse(bytes);
                 if (document.RootElement.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
                 {
-                    throw new DownloadContentValidationException(
-                        "CmlLib metadata JSON has an invalid root value.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("CmlLib metadata JSON has an invalid root value."), "DownloadContentValidationException", ("Reason", "CmlLib metadata JSON has an invalid root value."));
                 }
 
                 if (path.Contains("version_manifest", StringComparison.OrdinalIgnoreCase)
                     && (!document.RootElement.TryGetProperty("versions", out var versions)
                         || versions.ValueKind is not JsonValueKind.Array))
                 {
-                    throw new DownloadContentValidationException(
-                        "Minecraft version manifest is missing a versions array.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest is missing a versions array."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest is missing a versions array."));
                 }
             }
             catch (DownloadContentValidationException)
@@ -167,9 +165,8 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
             }
             catch (JsonException exception)
             {
-                throw new DownloadContentValidationException(
-                    "CmlLib metadata response is not valid JSON.",
-                    exception);
+                throw SafeExceptionLog.Describe(new DownloadContentValidationException("CmlLib metadata response is not valid JSON.",
+                    exception), "DownloadContentValidationException", ("Reason", "CmlLib metadata response is not valid JSON."));
             }
 
             return;
@@ -182,8 +179,7 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
                 var document = XDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes));
                 if (document.Root?.Name.LocalName.Equals("html", StringComparison.OrdinalIgnoreCase) is true)
                 {
-                    throw new DownloadContentValidationException(
-                        "CmlLib metadata endpoint returned an HTML document.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("CmlLib metadata endpoint returned an HTML document."), "DownloadContentValidationException", ("Reason", "CmlLib metadata endpoint returned an HTML document."));
                 }
             }
             catch (DownloadContentValidationException)
@@ -192,9 +188,8 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
             }
             catch (System.Xml.XmlException exception)
             {
-                throw new DownloadContentValidationException(
-                    "CmlLib metadata response is not valid XML.",
-                    exception);
+                throw SafeExceptionLog.Describe(new DownloadContentValidationException("CmlLib metadata response is not valid XML.",
+                    exception), "DownloadContentValidationException", ("Reason", "CmlLib metadata response is not valid XML."));
             }
         }
     }

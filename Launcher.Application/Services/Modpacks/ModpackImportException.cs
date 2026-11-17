@@ -21,7 +21,7 @@ using Launcher.Domain.Models;
 
 namespace Launcher.Application.Services;
 
-public sealed class ModpackImportException : Exception
+public sealed class ModpackImportException : Exception, ISafeDiagnosticException
 {
     public ModpackImportException(ModpackImportFailureReason failureReason)
     {
@@ -41,4 +41,9 @@ public sealed class ModpackImportException : Exception
     }
 
     public ModpackImportFailureReason FailureReason { get; }
+    public string DiagnosticCode => "ModpackImport";
+    public IReadOnlyDictionary<string, object?> DiagnosticFields => new Dictionary<string, object?>
+    {
+        ["ImportFailure"] = FailureReason.ToString()
+    };
 }

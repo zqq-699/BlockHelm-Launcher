@@ -76,6 +76,7 @@ internal sealed class GameInstanceCreationCoordinator
         string? fabricApiVersionId,
         string? quiltStandardLibraryVersionId)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "InstanceInstall");
         if (!providers.TryGetValue(loader, out var provider) || !provider.IsImplemented)
             throw new NotSupportedException($"{loader} is not implemented yet.");
 
@@ -112,9 +113,8 @@ internal sealed class GameInstanceCreationCoordinator
         await using var transaction = await transactionService.BeginAsync(
             settings.MinecraftDirectory,
             versionIdentity,
-            instance.Id,
             "game",
-            string.IsNullOrWhiteSpace(settings.DefaultInstanceId),
+            string.IsNullOrWhiteSpace(settings.DefaultInstanceDirectory),
             cardProgress,
             cancellationToken).ConfigureAwait(false);
         instance.VersionName = versionIdentity;
@@ -176,9 +176,9 @@ internal sealed class GameInstanceCreationCoordinator
                     {
                         currentMinecraftDirectory = latestSettings.MinecraftDirectory;
                         rootMatches = PathsEqual(latestSettings.MinecraftDirectory, settings.MinecraftDirectory);
-                        if (!rootMatches || !string.IsNullOrWhiteSpace(latestSettings.DefaultInstanceId))
+                        if (!rootMatches || !string.IsNullOrWhiteSpace(latestSettings.DefaultInstanceDirectory))
                             return;
-                        latestSettings.DefaultInstanceId = instance.Id;
+                        latestSettings.DefaultInstanceDirectory = instance.InstanceDirectory;
                         defaultInitialized = true;
                     },
                     CancellationToken.None)
@@ -187,20 +187,20 @@ internal sealed class GameInstanceCreationCoordinator
             {
                 logicalCommitCompleted = false;
                 logger.LogWarning(
-                    "Instance install committed after the Minecraft directory changed; leaving recovery marker for the original directory. InstanceId={InstanceId} InstallMinecraftDirectory={InstallMinecraftDirectory} CurrentMinecraftDirectory={CurrentMinecraftDirectory}",
-                    instance.Id,
+                    "Instance install committed after the Minecraft directory changed; leaving recovery marker for the original directory. InstanceDirectory={InstanceDirectory} InstallMinecraftDirectory={InstallMinecraftDirectory} CurrentMinecraftDirectory={CurrentMinecraftDirectory}",
+                    instance.InstanceDirectory,
                     settings.MinecraftDirectory,
                     currentMinecraftDirectory);
             }
             else if (defaultInitialized)
             {
-                logger.LogDebug("Default game instance initialized. InstanceId={InstanceId}", instance.Id);
+                logger.LogDebug("Default game instance initialized. InstanceDirectory={InstanceDirectory}", instance.InstanceDirectory);
             }
         }
         catch (Exception exception)
         {
             logicalCommitCompleted = false;
-            logger.LogError(exception, "Instance install committed but logical persistence needs reconciliation. InstanceId={InstanceId}", instance.Id);
+            logger.LogError(exception, "Instance install committed but logical persistence needs reconciliation. InstanceDirectory={InstanceDirectory}", instance.InstanceDirectory);
         }
         if (logicalCommitCompleted)
             await transaction.CompleteLogicalCommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -208,10 +208,9 @@ internal sealed class GameInstanceCreationCoordinator
         cardProgress?.ReportCommitCompleted();
 
         logger.LogDebug(
-            "Game instance created. InstanceId={InstanceId} VersionName={VersionName} InstanceDirectory={InstanceDirectory}",
-            instance.Id,
-            instance.VersionName,
-            instance.InstanceDirectory);
+            "Game instance created. InstanceDirectory={InstanceDirectory} VersionName={VersionName}",
+            instance.InstanceDirectory,
+            instance.VersionName);
         return instance;
     }
 
@@ -268,8 +267,8 @@ internal sealed class GameInstanceCreationCoordinator
                 throw new InvalidOperationException("Modrinth service is required to install Fabric API.");
 
             logger.LogDebug(
-                "Installing Fabric API for game instance. InstanceId={InstanceId} VersionId={VersionId}",
-                instance.Id,
+                "Installing Fabric API for game instance. InstanceDirectory={InstanceDirectory} VersionId={VersionId}",
+                instance.InstanceDirectory,
                 fabricApiVersionId);
             await modrinthService.InstallFabricApiAsync(instance, fabricApiVersionId, progress, cancellationToken)
                 .ConfigureAwait(false);
@@ -282,8 +281,8 @@ internal sealed class GameInstanceCreationCoordinator
             throw new InvalidOperationException("Modrinth service is required to install QFAPI/QSL.");
 
         logger.LogDebug(
-            "Installing Quilt standard library for game instance. InstanceId={InstanceId} VersionId={VersionId}",
-            instance.Id,
+            "Installing Quilt standard library for game instance. InstanceDirectory={InstanceDirectory} VersionId={VersionId}",
+            instance.InstanceDirectory,
             quiltStandardLibraryVersionId);
         await modrinthService.InstallQuiltStandardLibraryAsync(
                 instance,

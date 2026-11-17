@@ -24,6 +24,7 @@ using CommunityToolkit.Mvvm.Input;
 using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.Domain.Models;
+using Launcher.Application.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -78,6 +79,7 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
         EditDialog.InstanceRenameFinished += EditDialog_InstanceRenameFinished;
         Dialogs.InstanceDeleted += Dialogs_InstanceDeleted;
         Details.InstanceSettingsSaved += Details_InstanceSettingsSaved;
+        Details.InstancesReloadRequested += Details_InstancesReloadRequested;
         Details.DeleteInstanceRequested += Dialogs.OpenDeleteInstance;
         Details.DeleteModsRequested += Dialogs.OpenDeleteMods;
         Details.DeleteSavesRequested += Dialogs.OpenDeleteSaves;
@@ -235,10 +237,10 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
         {
             // 具体导入类型由当前详情分区决定，壳层只负责日志和清理全局浮层提示。
             logger.LogInformation(
-                "Handling game settings import drop. Section={SectionId} FileCount={FileCount} InstanceId={InstanceId}",
+                "Handling game settings import drop. Section={SectionId} FileCount={FileCount} InstanceDirectory={InstanceDirectory}",
                 Details.SelectedSection?.Id ?? "<none>",
                 paths.Count,
-                InstanceList.SelectedInstance?.Instance.Id ?? "<none>");
+                InstanceList.SelectedInstance?.Instance.InstanceDirectory ?? "<none>");
             await Details.HandleImportDropAsync(paths);
         }
         finally
@@ -460,20 +462,23 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
 
     private void EditDialog_InstanceUpdated(GameInstance instance)
     {
+        var previousDirectory = EditDialog.PreviousInstanceDirectory;
+        if (!string.IsNullOrWhiteSpace(previousDirectory) && !MinecraftDirectoryPath.Equals(previousDirectory, instance.InstanceDirectory))
+            InstanceList.Remove(previousDirectory);
         InstanceList.AddOrUpdate(instance);
-        var item = InstanceList.Find(instance.Id);
+        var item = InstanceList.Find(instance.InstanceDirectory);
         if (item is not null)
         {
             InstanceList.SelectInstance(item);
             CurrentStep = GameSettingsPageStep.Details;
         }
-        InstancesChanged?.Invoke(GameSettingsInstancesChangedEventArgs.Updated(instance));
+        InstancesChanged?.Invoke(GameSettingsInstancesChangedEventArgs.Updated(instance, previousDirectory));
     }
 
     private void Dialogs_InstanceDeleted(GameSettingsInstanceItem item)
     {
-        InstanceList.Remove(item.Instance.Id);
-        InstancesChanged?.Invoke(GameSettingsInstancesChangedEventArgs.Deleted(item.Instance.Id));
+        InstanceList.Remove(item.Instance.InstanceDirectory);
+        InstancesChanged?.Invoke(GameSettingsInstancesChangedEventArgs.Deleted(item.Instance.InstanceDirectory));
     }
 
     private void Details_InstanceSettingsSaved(GameInstance instance)
@@ -481,6 +486,9 @@ public sealed partial class GameSettingsPageViewModel : ObservableObject
         InstanceList.AddOrUpdate(instance);
         InstancesChanged?.Invoke(GameSettingsInstancesChangedEventArgs.Updated(instance));
     }
+
+    private void Details_InstancesReloadRequested() =>
+        InstancesChanged?.Invoke(GameSettingsInstancesChangedEventArgs.ReloadRequired());
 
     private void Details_OnlineResourceInstallRequested(GameInstance instance, ResourceProjectKind kind) =>
         OnlineResourceInstallRequested?.Invoke(instance, kind);

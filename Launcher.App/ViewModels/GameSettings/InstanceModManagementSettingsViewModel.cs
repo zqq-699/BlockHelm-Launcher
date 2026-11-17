@@ -36,6 +36,8 @@ namespace Launcher.App.ViewModels.GameSettings;
 /// </summary>
 public sealed partial class InstanceModManagementSettingsViewModel : GameSettingsDetailsSectionViewModelBase
 {
+    internal long ContentRevision => localModsViewModel.Revision;
+
     // LocalModsViewModel 提供真实 Mod 快照和文件操作；本类负责页面筛选、选择及对话框编排。
     private readonly LocalModsViewModel localModsViewModel;
     private readonly IStatusService statusService;
@@ -247,8 +249,15 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
             return true;
         }
 
+        var changed = !ReferenceEquals(selectedInstance, instance);
+        if (changed)
+        {
+            Interlocked.Increment(ref lifecycleGeneration);
+            loadTask = null;
+        }
         selectedInstance = instance;
-        return false;
+        localModsViewModel.RefreshSelectedInstanceReference(instance);
+        return changed;
     }
 
     public override void OnSectionDeactivated()
@@ -337,7 +346,7 @@ public sealed partial class InstanceModManagementSettingsViewModel : GameSetting
     {
         return isSectionActive
             && generation == Volatile.Read(ref lifecycleGeneration)
-            && string.Equals(expectedInstance.Id, selectedInstance?.Id, StringComparison.Ordinal)
+            && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.Ordinal)
             && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 }

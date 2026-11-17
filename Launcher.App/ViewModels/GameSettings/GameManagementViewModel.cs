@@ -155,15 +155,15 @@ public sealed partial class GameManagementViewModel : ObservableObject
         return InstancesViewModel.SelectLaunchInstanceAsync(instance);
     }
 
-    public Task ApplyUpdatedInstanceAsync(GameInstance instance)
+    public Task ApplyUpdatedInstanceAsync(GameInstance instance, string? previousInstanceDirectory = null)
     {
-        // 保存产生的新实例对象按 Id 增量合并，避免全量刷新打断当前页面选择。
-        return InstancesViewModel.ApplyUpdatedInstanceAsync(instance);
+        // 保存产生的新实例对象按目录增量合并，避免全量刷新打断当前页面选择。
+        return InstancesViewModel.ApplyUpdatedInstanceAsync(instance, previousInstanceDirectory);
     }
 
-    public Task<bool> RemoveInstanceAsync(string instanceId)
+    public Task<bool> RemoveInstanceAsync(string instanceDirectory)
     {
-        return InstancesViewModel.RemoveInstanceAsync(instanceId);
+        return InstancesViewModel.RemoveInstanceAsync(instanceDirectory);
     }
 
     [RelayCommand]

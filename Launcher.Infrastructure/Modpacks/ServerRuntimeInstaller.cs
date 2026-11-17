@@ -44,7 +44,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
             MinecraftHttpClientFactory.CreateTransportClient(),
             settingsService,
             javaRuntimeResolver,
-            new ForgeInstallerRunner(),
+            new ForgeInstallerRunner(logger),
             downloadSpeedLimitState,
             logger)
     {
@@ -61,7 +61,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.settingsService = settingsService;
         this.javaRuntimeResolver = javaRuntimeResolver;
-        this.forgeInstallerRunner = forgeInstallerRunner ?? new ForgeInstallerRunner();
+        this.forgeInstallerRunner = forgeInstallerRunner ?? new ForgeInstallerRunner(logger);
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ServerRuntimeInstaller>.Instance;
     }
@@ -72,6 +72,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         IProgress<LauncherProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "ServerInstall");
         ArgumentNullException.ThrowIfNull(modpack);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
         if (string.IsNullOrWhiteSpace(modpack.MinecraftVersion))
@@ -209,7 +210,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 await using var source = await context.Response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
                 var node = await JsonNode.ParseAsync(source, cancellationToken: token).ConfigureAwait(false);
                 return node as JsonObject
-                    ?? throw new DownloadContentValidationException("Server loader profile is not a JSON object.");
+                    ?? throw SafeExceptionLog.Describe(new DownloadContentValidationException("Server loader profile is not a JSON object."), "DownloadContentValidationException", ("Reason", "Server loader profile is not a JSON object."));
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -338,10 +339,10 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 httpClient,
                 downloadSpeedLimitState: downloadSpeedLimitState,
                 logger: logger);
-            var installerPlan = await artifactService.ReadPlanAsync(
+            var installerPlan = await DownloadDiagnostics.RunStageAsync(logger, "ServerInstallerPlan", () => artifactService.ReadPlanAsync(
                 installerPath,
                 ModpackInstallEnvironment.Server,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken)).ConfigureAwait(false);
             await artifactService.MaterializePrerequisitesAsync(
                 installerPath,
                 installerPlan,
@@ -353,7 +354,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
 
             progress?.Report(new LauncherProgress(InstallProgressStages.CheckingJava, string.Empty));
             var resolver = javaRuntimeResolver
-                ?? throw new InvalidOperationException("The loader installer Java runtime resolver is not configured.");
+                ?? throw SafeExceptionLog.Describe(new InvalidOperationException("The loader installer Java runtime resolver is not configured."), "DownloadValidation", ("Reason", "The loader installer Java runtime resolver is not configured."));
             var runtime = await resolver.ResolveAsync(
                 new LoaderInstallerJavaRuntimeRequest(
                     modpack.MinecraftVersion,
@@ -366,11 +367,11 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                     progress),
                 cancellationToken).ConfigureAwait(false);
             progress?.Report(new LauncherProgress(InstallProgressStages.RunningLoaderInstaller, string.Empty));
-            await forgeInstallerRunner.RunServerInstallerAsync(
+            await DownloadDiagnostics.RunStageAsync(logger, "ServerJavaInstaller", () => forgeInstallerRunner.RunServerInstallerAsync(
                 runtime.ExecutablePath,
                 installerPath,
                 targetDirectory,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken)).ConfigureAwait(false);
             await artifactService.MaterializeRuntimeLibrariesAsync(
                 installerPath,
                 installerPlan,
@@ -379,10 +380,10 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 speedLimit,
                 cancellationToken,
                 speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
-            await artifactService.ValidatePublishedArtifactsAsync(
+            await DownloadDiagnostics.RunStageAsync(logger, "ServerArtifactValidation", () => artifactService.ValidatePublishedArtifactsAsync(
                 targetDirectory,
                 installerPlan,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken)).ConfigureAwait(false);
             ValidateForgeLikeInstall(targetDirectory, modpack, artifact);
         }
         finally
@@ -436,7 +437,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         ArgumentNullException.ThrowIfNull(modpack);
         var minecraftVersion = modpack.MinecraftVersion.Trim();
         var loaderVersion = modpack.LoaderVersion?.Trim()
-            ?? throw new InvalidDataException("Loader version is missing.");
+            ?? throw SafeExceptionLog.Describe(new InvalidDataException("Loader version is missing."), "DownloadValidation", ("Reason", "Loader version is missing."));
         if (modpack.Loader is LoaderKind.Forge)
         {
             var coordinate = AddMinecraftVersionPrefix(minecraftVersion, loaderVersion);
@@ -488,7 +489,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         var launcherPath = candidates
             .Select(name => Path.Combine(targetDirectory, name))
             .FirstOrDefault(File.Exists)
-            ?? throw new InvalidDataException("The server loader installer did not produce the expected launcher JAR.");
+            ?? throw SafeExceptionLog.Describe(new InvalidDataException("The server loader installer did not produce the expected launcher JAR."), "DownloadValidation", ("Reason", "The server loader installer did not produce the expected launcher JAR."));
         ValidateJar(launcherPath);
     }
 

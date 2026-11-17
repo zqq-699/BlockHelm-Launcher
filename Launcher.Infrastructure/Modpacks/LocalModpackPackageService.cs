@@ -381,12 +381,12 @@ public sealed class LocalModpackPackageService : IModpackPackageService
             writer.WriteLine();
         }
         logger.LogInformation(
-            "Wrote modpack manual downloads file. InstanceId={InstanceId} ManualDownloadCount={ManualDownloadCount}",
-            instance.Id,
+            "Wrote modpack manual downloads file. InstanceDirectory={InstanceDirectory} ManualDownloadCount={ManualDownloadCount}",
+            instance.InstanceDirectory,
             manualDownloads.Count);
         logger.LogDebug(
-            "Modpack manual downloads file path resolved. InstanceId={InstanceId} InstanceDirectory={InstanceDirectory} FilePath={FilePath}",
-            instance.Id,
+            "Modpack manual downloads file path resolved. InstanceDirectory={InstanceDirectory} InstanceDirectory={InstanceDirectory} FilePath={FilePath}",
+            instance.InstanceDirectory,
             instance.InstanceDirectory,
             filePath);
         return filePath;

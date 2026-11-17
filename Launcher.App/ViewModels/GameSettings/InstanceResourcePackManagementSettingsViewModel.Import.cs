@@ -39,6 +39,7 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
     {
         if (selectedInstance is null)
             return;
+        var instance = selectedInstance;
 
         // 拖放和文件选择器复用同一校验规则，仅错误反馈载体不同。
         if (!TryValidateImportPaths(archivePaths, Strings.GameSettings_DropResourcePackArchivesOnlyMessage, out var validationMessage))
@@ -57,8 +58,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Starting local resource pack import batch. InstanceId={InstanceId} Source={Source} FileCount={FileCount}",
-            selectedInstance.Id,
+            "Starting local resource pack import batch. InstanceDirectory={InstanceDirectory} Source={Source} FileCount={FileCount}",
+            selectedInstance.InstanceDirectory,
             source,
             archivePaths.Count);
 
@@ -67,13 +68,16 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
             archivePaths,
             async archivePath =>
             {
+                if (!ReferenceEquals(instance, selectedInstance))
+                    return LocalResourcePackImportResult.Failure(LocalResourcePackImportFailureReason.UnexpectedError);
                 logger.LogDebug(
-                    "Importing local resource pack archive. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                    selectedInstance.Id,
+                    "Importing local resource pack archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                    selectedInstance.InstanceDirectory,
                     archivePath);
                 return await localResourcePacksViewModel.ImportResourcePackAsync(archivePath, reportStatus: false);
             },
             result => result.IsSuccess);
+        if (!ReferenceEquals(instance, selectedInstance)) return;
 
         if (batch.Failure is not null)
         {
@@ -89,8 +93,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
                     break;
                 case LocalResourcePackImportFailureReason.UnexpectedError:
                     logger.LogWarning(
-                        "Local resource pack import failed unexpectedly after service call. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                        selectedInstance.Id,
+                        "Local resource pack import failed unexpectedly after service call. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                        selectedInstance.InstanceDirectory,
                         batch.FailedPath);
                     statusService.Report(Strings.Status_LocalResourcePackImportFailed);
                     break;
@@ -106,8 +110,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
                 : string.Format(Strings.Status_LocalResourcePacksImportedFormat, batch.SuccessCount));
         }
         logger.LogInformation(
-            "Local resource pack import batch completed. InstanceId={InstanceId} RequestedCount={RequestedCount} ImportedCount={ImportedCount}",
-            selectedInstance.Id,
+            "Local resource pack import batch completed. InstanceDirectory={InstanceDirectory} RequestedCount={RequestedCount} ImportedCount={ImportedCount}",
+            selectedInstance.InstanceDirectory,
             archivePaths.Count,
             batch.SuccessCount);
     }

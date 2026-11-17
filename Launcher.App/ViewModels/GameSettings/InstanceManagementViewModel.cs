@@ -81,9 +81,9 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
             loadedInstances,
             markAsFullyLoaded: false);
         logger.LogDebug(
-            "Game management instances primed. Count={InstanceCount} SelectedInstanceId={SelectedInstanceId} CatalogRevision={CatalogRevision}",
+            "Game management instances primed. Count={InstanceCount} SelectedInstanceDirectory={SelectedInstanceDirectory} CatalogRevision={CatalogRevision}",
             Instances.Count,
-            SelectedInstance?.Id,
+            SelectedInstance?.InstanceDirectory,
             CatalogRevision);
     }
 
@@ -222,12 +222,12 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
             return;
         }
 
-        var defaultInstanceId = settings.DefaultInstanceId;
+        var defaultInstanceDirectory = settings.DefaultInstanceDirectory;
         await settingsService.UpdateAsync(
             latest =>
             {
                 if (PathsEqual(latest.MinecraftDirectory, minecraftDirectory))
-                    latest.DefaultInstanceId = defaultInstanceId;
+                    latest.DefaultInstanceDirectory = defaultInstanceDirectory;
             });
         ReportStatus(Strings.Status_SettingsSaved);
     }
@@ -256,7 +256,7 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
     {
         var previousSelected = SelectedInstance;
         var selected = Instances.FirstOrDefault(existing =>
-            string.Equals(existing.Id, instance.Id, StringComparison.OrdinalIgnoreCase));
+            string.Equals(existing.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase));
 
         if (selected is null)
             return false;
@@ -265,7 +265,7 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
 
         try
         {
-            var saved = await instanceService.SetDefaultInstanceAsync(selected.Id);
+            var saved = await instanceService.SetDefaultInstanceAsync(selected.InstanceDirectory);
             if (!saved)
             {
                 SelectedInstance = previousSelected;
@@ -277,20 +277,30 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
             SelectedInstance = previousSelected;
             logger.LogWarning(
                 exception,
-                "Default game instance selection failed. InstanceId={InstanceId}",
-                selected.Id);
+                "Default game instance selection failed. InstanceDirectory={InstanceDirectory}",
+                selected.InstanceDirectory);
             return false;
         }
 
-        settings.DefaultInstanceId = selected.Id;
+        settings.DefaultInstanceDirectory = selected.InstanceDirectory;
         return true;
     }
 
-    public async Task ApplyUpdatedInstanceAsync(GameInstance instance)
+    public async Task ApplyUpdatedInstanceAsync(GameInstance instance, string? previousInstanceDirectory = null)
     {
         await refreshInstancesGate.WaitAsync();
         try
         {
+            if (!string.IsNullOrWhiteSpace(previousInstanceDirectory)
+                && !MinecraftDirectoryPath.Equals(previousInstanceDirectory, instance.InstanceDirectory))
+            {
+                var oldIndex = FindInstanceIndex(previousInstanceDirectory);
+                if (oldIndex >= 0) Instances.RemoveAt(oldIndex);
+                if (MinecraftDirectoryPath.Equals(SelectedInstance?.InstanceDirectory, previousInstanceDirectory))
+                    SelectedInstance = instance;
+                if (MinecraftDirectoryPath.Equals(settings.DefaultInstanceDirectory, previousInstanceDirectory))
+                    settings.DefaultInstanceDirectory = instance.InstanceDirectory;
+            }
             ApplyUpdatedInstanceCore(instance);
         }
         finally
@@ -301,15 +311,14 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
 
     private void ApplyUpdatedInstanceCore(GameInstance instance)
     {
-        var index = FindInstanceIndex(instance.Id);
-        var wasSelected = string.Equals(SelectedInstance?.Id, instance.Id, StringComparison.OrdinalIgnoreCase);
+        var index = FindInstanceIndex(instance.InstanceDirectory);
+        var wasSelected = string.Equals(SelectedInstance?.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
 
         if (index >= 0)
         {
             var existing = Instances[index];
             if (!ReferenceEquals(existing, instance))
-                GameInstanceStateCopier.Copy(instance, existing);
-            instance = existing;
+                Instances[index] = instance;
         }
         else
             Instances.Add(instance);
@@ -320,10 +329,10 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
         hasLoadedInstances = true;
         UpdateCatalogSnapshotAndRevision();
         logger.LogDebug(
-            "Game management instance updated locally. InstanceId={InstanceId} Count={InstanceCount} SelectedInstanceId={SelectedInstanceId} CatalogRevision={CatalogRevision}",
-            instance.Id,
+            "Game management instance updated locally. InstanceDirectory={InstanceDirectory} Count={InstanceCount} SelectedInstanceDirectory={SelectedInstanceDirectory} CatalogRevision={CatalogRevision}",
+            instance.InstanceDirectory,
             Instances.Count,
-            SelectedInstance?.Id,
+            SelectedInstance?.InstanceDirectory,
             CatalogRevision);
     }
 
@@ -342,35 +351,33 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
         IReadOnlyList<GameInstance> loadedInstances,
         bool markAsFullyLoaded)
     {
-        var previousSelectedId = SelectedInstance?.Id;
-        var rootChanged = lastRefreshedMinecraftDirectory is null
-            || !PathsEqual(lastRefreshedMinecraftDirectory, requestedMinecraftDirectory);
+        var previousSelectedId = SelectedInstance?.InstanceDirectory;
         ReconcileInstances(loadedInstances);
         lastRefreshedMinecraftDirectory = requestedMinecraftDirectory;
-        SelectedInstance = ResolveSelectedInstance(settings.DefaultInstanceId, previousSelectedId);
-        if (!string.IsNullOrWhiteSpace(settings.DefaultInstanceId)
+        SelectedInstance = ResolveSelectedInstance(settings.DefaultInstanceDirectory, previousSelectedId);
+        if (!string.IsNullOrWhiteSpace(settings.DefaultInstanceDirectory)
             && Instances.All(instance => !string.Equals(
-                instance.Id,
-                settings.DefaultInstanceId,
+                instance.InstanceDirectory,
+                settings.DefaultInstanceDirectory,
                 StringComparison.OrdinalIgnoreCase)))
         {
-            settings.DefaultInstanceId = SelectedInstance?.Id ?? string.Empty;
+            settings.DefaultInstanceDirectory = SelectedInstance?.InstanceDirectory ?? string.Empty;
         }
         hasLoadedInstances = markAsFullyLoaded;
-        UpdateCatalogSnapshotAndRevision(rootChanged);
+        UpdateCatalogSnapshotAndRevision(forceChanged: true);
         logger.LogDebug(
-            "Game management instances refreshed. Count={InstanceCount} SelectedInstanceId={SelectedInstanceId} CatalogRevision={CatalogRevision}",
+            "Game management instances refreshed. Count={InstanceCount} SelectedInstanceDirectory={SelectedInstanceDirectory} CatalogRevision={CatalogRevision}",
             Instances.Count,
-            SelectedInstance?.Id,
+            SelectedInstance?.InstanceDirectory,
             CatalogRevision);
     }
 
-    public async Task<bool> RemoveInstanceAsync(string instanceId)
+    public async Task<bool> RemoveInstanceAsync(string instanceDirectory)
     {
         await refreshInstancesGate.WaitAsync();
         try
         {
-            return RemoveInstanceCore(instanceId);
+            return RemoveInstanceCore(instanceDirectory);
         }
         finally
         {
@@ -378,72 +385,61 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
         }
     }
 
-    private bool RemoveInstanceCore(string instanceId)
+    private bool RemoveInstanceCore(string instanceDirectory)
     {
-        var index = FindInstanceIndex(instanceId);
+        var index = FindInstanceIndex(instanceDirectory);
         if (index < 0)
             return false;
 
         var wasSelected = string.Equals(
-            SelectedInstance?.Id,
-            instanceId,
+            SelectedInstance?.InstanceDirectory,
+            instanceDirectory,
             StringComparison.OrdinalIgnoreCase);
         Instances.RemoveAt(index);
         if (wasSelected)
         {
-            SelectedInstance = ResolveSelectedInstance(settings.DefaultInstanceId, previousSelectedId: null);
-            settings.DefaultInstanceId = SelectedInstance?.Id ?? string.Empty;
+            SelectedInstance = ResolveSelectedInstance(settings.DefaultInstanceDirectory, previousSelectedId: null);
+            settings.DefaultInstanceDirectory = SelectedInstance?.InstanceDirectory ?? string.Empty;
         }
         UpdateCatalogSnapshotAndRevision();
         logger.LogDebug(
-            "Game management instance removed locally. InstanceId={InstanceId} Count={InstanceCount} SelectedInstanceId={SelectedInstanceId} CatalogRevision={CatalogRevision}",
-            instanceId,
+            "Game management instance removed locally. InstanceDirectory={InstanceDirectory} Count={InstanceCount} SelectedInstanceDirectory={SelectedInstanceDirectory} CatalogRevision={CatalogRevision}",
+            instanceDirectory,
             Instances.Count,
-            SelectedInstance?.Id,
+            SelectedInstance?.InstanceDirectory,
             CatalogRevision);
         return true;
     }
 
     private void ReconcileInstances(IReadOnlyList<GameInstance> loadedInstances)
     {
-        var existingById = Instances
-            .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
-            .GroupBy(instance => instance.Id, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var next = new List<GameInstance>(loadedInstances.Count);
-
-        foreach (var loadedInstance in loadedInstances)
-        {
-            if (!string.IsNullOrWhiteSpace(loadedInstance.Id)
-                && existingById.TryGetValue(loadedInstance.Id, out var existing))
-            {
-                if (!ReferenceEquals(existing, loadedInstance))
-                    GameInstanceStateCopier.Copy(loadedInstance, existing);
-                next.Add(existing);
-            }
-            else
-            {
-                next.Add(loadedInstance);
-            }
-        }
+        var next = loadedInstances;
 
         for (var index = 0; index < next.Count; index++)
         {
             var instance = next[index];
             if (index < Instances.Count && ReferenceEquals(Instances[index], instance))
                 continue;
+            if (index < Instances.Count && MinecraftDirectoryPath.Equals(Instances[index].InstanceDirectory, instance.InstanceDirectory))
+            {
+                Instances[index] = instance;
+                continue;
+            }
 
             var existingIndex = -1;
             for (var candidate = index + 1; candidate < Instances.Count; candidate++)
             {
-                if (!ReferenceEquals(Instances[candidate], instance))
+                if (!MinecraftDirectoryPath.Equals(Instances[candidate].InstanceDirectory, instance.InstanceDirectory))
                     continue;
                 existingIndex = candidate;
                 break;
             }
 
             if (existingIndex >= 0)
+            {
                 Instances.Move(existingIndex, index);
+                Instances[index] = instance;
+            }
             else
                 Instances.Insert(index, instance);
         }
@@ -466,7 +462,7 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
 
     partial void OnSelectedInstanceChanged(GameInstance? oldValue, GameInstance? newValue)
     {
-        if (string.Equals(oldValue?.Id, newValue?.Id, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(oldValue?.InstanceDirectory, newValue?.InstanceDirectory, StringComparison.OrdinalIgnoreCase))
             return;
 
         Interlocked.Increment(ref catalogRevision);
@@ -478,23 +474,23 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
             Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
             StringComparison.OrdinalIgnoreCase);
 
-    private GameInstance? ResolveSelectedInstance(string? defaultInstanceId, string? previousSelectedId)
+    private GameInstance? ResolveSelectedInstance(string? defaultInstanceDirectory, string? previousSelectedId)
     {
-        var selected = !string.IsNullOrWhiteSpace(defaultInstanceId)
-            ? Instances.FirstOrDefault(instance => string.Equals(instance.Id, defaultInstanceId, StringComparison.OrdinalIgnoreCase))
+        var selected = !string.IsNullOrWhiteSpace(defaultInstanceDirectory)
+            ? Instances.FirstOrDefault(instance => string.Equals(instance.InstanceDirectory, defaultInstanceDirectory, StringComparison.OrdinalIgnoreCase))
             : null;
         selected ??= !string.IsNullOrWhiteSpace(previousSelectedId)
-            ? Instances.FirstOrDefault(instance => string.Equals(instance.Id, previousSelectedId, StringComparison.OrdinalIgnoreCase))
+            ? Instances.FirstOrDefault(instance => string.Equals(instance.InstanceDirectory, previousSelectedId, StringComparison.OrdinalIgnoreCase))
             : null;
         selected ??= Instances.FirstOrDefault();
         return selected;
     }
 
-    private int FindInstanceIndex(string instanceId)
+    private int FindInstanceIndex(string instanceDirectory)
     {
         for (var index = 0; index < Instances.Count; index++)
         {
-            if (string.Equals(Instances[index].Id, instanceId, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(Instances[index].InstanceDirectory, instanceDirectory, StringComparison.OrdinalIgnoreCase))
                 return index;
         }
 

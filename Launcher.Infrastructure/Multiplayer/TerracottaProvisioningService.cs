@@ -75,7 +75,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
             {
                 MaxRedirects = 10,
                 ResponseHeadersTimeout = TimeSpan.FromSeconds(20)
-            });
+            }, logger: this.logger);
     }
 
     public TerracottaModule? TryGetAvailable() => FindBestAvailable(excludedVersion: null);
@@ -84,6 +84,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         IProgress<LauncherProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "Terracotta");
         await provisioningLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -168,7 +169,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         var selectedAsset = selected.Assets.FirstOrDefault(asset =>
             string.Equals(asset.Name, assetName, StringComparison.Ordinal));
         if (selectedAsset is null)
-            throw new InvalidDataException("The Terracotta release does not contain the required Windows package.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta release does not contain the required Windows package."), "ComponentValidation", ("Reason", "The Terracotta release does not contain the required Windows package."));
 
         var githubAsset = github is not null
             && string.Equals(github.Version, selected.Version, StringComparison.Ordinal)
@@ -177,7 +178,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
                 : null;
         var githubDigest = NormalizeSha256(githubAsset?.Digest);
         if (!string.IsNullOrWhiteSpace(githubAsset?.Digest) && githubDigest is null)
-            throw new InvalidDataException("The Terracotta publisher digest is malformed.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta publisher digest is malformed."), "ComponentValidation", ("Reason", "The Terracotta publisher digest is malformed."));
         var expectedSha256 = githubDigest ?? ResolveKnownDigest(selected.Version, architecture);
         var sources = new List<Uri>();
         AddOfficialSource(sources, selectedAsset.DownloadUri);
@@ -221,7 +222,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
             response.EnsureSuccessStatusCode();
             EnsureHttps(result.FinalUri, "Terracotta release metadata");
             if (response.Content.Headers.ContentLength is > MaximumMetadataBytes)
-                throw new InvalidDataException("The Terracotta release metadata is too large.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta release metadata is too large."), "ComponentValidation", ("Reason", "The Terracotta release metadata is too large."));
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var limited = new LengthLimitedReadStream(stream, MaximumMetadataBytes);
@@ -235,7 +236,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         }
         catch (Exception exception) when (IsRecoverableSourceFailure(exception))
         {
-            logger.LogDebug(exception,
+            logger.LogWarning(exception,
                 "Unable to read Terracotta release metadata. Source={Source}",
                 source);
             return null;
@@ -247,7 +248,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         if (root.ValueKind is not JsonValueKind.Object
             || !root.TryGetProperty("tag_name", out var tagElement))
         {
-            throw new InvalidDataException("The Terracotta release metadata is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta release metadata is invalid."), "ComponentValidation", ("Reason", "The Terracotta release metadata is invalid."));
         }
 
         var version = NormalizeVersion(tagElement.GetString());
@@ -256,13 +257,13 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
                 && root.TryGetProperty("draft", out var draft)
                 && draft.GetBoolean()))
         {
-            throw new InvalidDataException("The Terracotta latest release is not a stable published release.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta latest release is not a stable published release."), "ComponentValidation", ("Reason", "The Terracotta latest release is not a stable published release."));
         }
 
         if (!root.TryGetProperty("assets", out var assetsElement)
             || assetsElement.ValueKind is not JsonValueKind.Array)
         {
-            throw new InvalidDataException("The Terracotta release assets are missing.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta release assets are missing."), "ComponentValidation", ("Reason", "The Terracotta release assets are missing."));
         }
 
         var assets = new List<ReleaseAsset>();
@@ -322,7 +323,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
             PublishInstallation(stagingDirectory, installationDirectory, backupDirectory);
 
             var module = ValidateInstallation(installationDirectory)
-                ?? throw new InvalidDataException("The installed Terracotta module did not pass validation.");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException("The installed Terracotta module did not pass validation."), "ComponentValidation", ("Reason", "The installed Terracotta module did not pass validation."));
             progress?.Report(new LauncherProgress("terracotta-ready", "Terracotta module is ready", 100));
             logger.LogInformation(
                 "Terracotta module prepared. Version={Version} Architecture={Architecture} PublisherDigestVerified={PublisherDigestVerified}",
@@ -357,7 +358,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
                 if (release.ExpectedSha256 is not null
                     && !string.Equals(actual, release.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidDataException("The Terracotta archive SHA-256 checksum does not match.");
+                    throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive SHA-256 checksum does not match."), "ComponentValidation", ("Reason", "The Terracotta archive SHA-256 checksum does not match."), ("HashAlgorithm", "SHA256"), ("ExpectedHash", release.ExpectedSha256), ("ActualHash", actual));
                 }
                 await ValidatePackageStructureAsync(release, archivePath, cancellationToken).ConfigureAwait(false);
 
@@ -398,7 +399,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         response.EnsureSuccessStatusCode();
         EnsureHttps(result.FinalUri, "Terracotta download redirect");
         if (response.Content.Headers.ContentLength is <= 0 or > MaximumArchiveBytes)
-            throw new InvalidDataException("The Terracotta archive size is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive size is invalid."), "ComponentValidation", ("Reason", "The Terracotta archive size is invalid."));
 
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using var output = new FileStream(
@@ -417,7 +418,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
                 break;
             total += read;
             if (total > MaximumArchiveBytes)
-                throw new InvalidDataException("The Terracotta archive is too large.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive is too large."), "ComponentValidation", ("Reason", "The Terracotta archive is too large."));
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             var expected = response.Content.Headers.ContentLength;
             if (expected is > 0)
@@ -430,7 +431,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         }
 
         if (total == 0)
-            throw new InvalidDataException("The Terracotta archive is empty.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive is empty."), "ComponentValidation", ("Reason", "The Terracotta archive is empty."));
         await output.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -457,21 +458,21 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
             if (entry.EntryType is TarEntryType.Directory)
                 continue;
             if (entry.EntryType is not TarEntryType.RegularFile and not TarEntryType.V7RegularFile)
-                throw new InvalidDataException("The Terracotta archive contains an unsupported entry type.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains an unsupported entry type."), "ComponentValidation", ("Reason", "The Terracotta archive contains an unsupported entry type."));
 
             var normalized = entry.Name.Replace('\\', '/');
             if (normalized.Contains('/') || normalized is "." or "..")
-                throw new InvalidDataException("The Terracotta archive contains a nested or unsafe path.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains a nested or unsafe path."), "ComponentValidation", ("Reason", "The Terracotta archive contains a nested or unsafe path."));
 
             var destinationName = string.Equals(normalized, expectedExecutable, StringComparison.OrdinalIgnoreCase)
                 ? ExecutableFileName
                 : string.Equals(normalized, RuntimeFileName, StringComparison.OrdinalIgnoreCase)
                     ? RuntimeFileName
-                    : throw new InvalidDataException("The Terracotta archive contains an unexpected file.");
+                    : throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains an unexpected file."), "ComponentValidation", ("Reason", "The Terracotta archive contains an unexpected file."));
             if (entry.Length <= 0 || entry.Length > MaximumExtractedFileBytes || entry.DataStream is null)
-                throw new InvalidDataException("The Terracotta archive contains an invalid file.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains an invalid file."), "ComponentValidation", ("Reason", "The Terracotta archive contains an invalid file."));
             if (extracted.ContainsKey(destinationName))
-                throw new InvalidDataException("The Terracotta archive contains a duplicate file.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains a duplicate file."), "ComponentValidation", ("Reason", "The Terracotta archive contains a duplicate file."));
 
             var destination = Path.Combine(stagingDirectory, destinationName);
             MinecraftPathGuard.EnsureSafeFileDestination(destination, stagingDirectory, $"Terracotta {destinationName}");
@@ -498,7 +499,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         if (RequiredFileNames.Any(fileName => !extracted.ContainsKey(fileName))
             || extracted.Count != RequiredFileNames.Length)
         {
-            throw new InvalidDataException("The Terracotta archive is incomplete.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive is incomplete."), "ComponentValidation", ("Reason", "The Terracotta archive is incomplete."));
         }
 
         return extracted;
@@ -525,21 +526,21 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
             if (entry.EntryType is TarEntryType.Directory)
                 continue;
             if (entry.EntryType is not TarEntryType.RegularFile and not TarEntryType.V7RegularFile)
-                throw new InvalidDataException("The Terracotta archive contains an unsupported entry type.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains an unsupported entry type."), "ComponentValidation", ("Reason", "The Terracotta archive contains an unsupported entry type."));
             var normalized = entry.Name.Replace('\\', '/');
             if (normalized.Contains('/') || normalized is "." or "..")
-                throw new InvalidDataException("The Terracotta archive contains a nested or unsafe path.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains a nested or unsafe path."), "ComponentValidation", ("Reason", "The Terracotta archive contains a nested or unsafe path."));
             if (!string.Equals(normalized, expectedExecutable, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(normalized, RuntimeFileName, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException("The Terracotta archive contains an unexpected file.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains an unexpected file."), "ComponentValidation", ("Reason", "The Terracotta archive contains an unexpected file."));
             }
             if (!seen.Add(normalized)
                 || entry.Length <= 0
                 || entry.Length > MaximumExtractedFileBytes
                 || entry.DataStream is null)
             {
-                throw new InvalidDataException("The Terracotta archive contains an invalid or duplicate file.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive contains an invalid or duplicate file."), "ComponentValidation", ("Reason", "The Terracotta archive contains an invalid or duplicate file."));
             }
         }
 
@@ -547,7 +548,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
             || !seen.Contains(RuntimeFileName)
             || seen.Count != RequiredFileNames.Length)
         {
-            throw new InvalidDataException("The Terracotta archive is incomplete.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta archive is incomplete."), "ComponentValidation", ("Reason", "The Terracotta archive is incomplete."));
         }
     }
 
@@ -730,7 +731,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
             || version.Length > 64
             || version.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '.' and not '-'))
         {
-            throw new InvalidDataException("The Terracotta release version is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta release version is invalid."), "ComponentValidation", ("Reason", "The Terracotta release version is invalid."));
         }
 
         return version;
@@ -808,7 +809,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
                 break;
             total += read;
             if (total > maximumBytes)
-                throw new InvalidDataException("A Terracotta archive entry is too large.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("A Terracotta archive entry is too large."), "ComponentValidation", ("Reason", "A Terracotta archive entry is too large."));
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
         }
     }
@@ -831,7 +832,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            logger.LogDebug(exception, "Unable to remove a Terracotta temporary file.");
+            logger.LogWarning(exception, "Unable to remove a Terracotta temporary file. Artifact={Artifact} Stage=Cleanup", path);
         }
     }
 
@@ -846,7 +847,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            logger.LogDebug(exception, "Unable to remove a Terracotta temporary directory.");
+            logger.LogWarning(exception, "Unable to remove a Terracotta temporary directory. Directory={Directory} Stage=Cleanup", path);
         }
     }
 
@@ -913,7 +914,7 @@ internal sealed class TerracottaProvisioningService : ITerracottaProvisioningSer
         {
             totalRead += read;
             if (totalRead > maximumBytes)
-                throw new InvalidDataException("The Terracotta response is too large.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("The Terracotta response is too large."), "ComponentValidation", ("Reason", "The Terracotta response is too large."));
         }
 
         public override void Flush() => throw new NotSupportedException();

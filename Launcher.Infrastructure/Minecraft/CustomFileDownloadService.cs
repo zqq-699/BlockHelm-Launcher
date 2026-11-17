@@ -44,6 +44,7 @@ public sealed class CustomFileDownloadService : ICustomFileDownloadService, IDis
         IProgress<LauncherProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "CustomFile");
         if (!TryNormalizeHttpAddress(sourceUrl, out var normalizedSourceUrl))
         {
             throw new ArgumentException(
@@ -74,6 +75,7 @@ public sealed class CustomFileDownloadService : ICustomFileDownloadService, IDis
             fileName,
             normalizedDestination,
             normalizedSourceUrl);
+        using var diagnosticLogScope = logScope.RestoreContext();
 
         try
         {
@@ -101,6 +103,7 @@ public sealed class CustomFileDownloadService : ICustomFileDownloadService, IDis
         {
             logScope.Fail(exception, normalizedSourceUrl);
             logger.LogError(
+                exception,
                 "Custom file download failed. FileName={FileName} DestinationPath={DestinationPath} SourceUrl={SourceUrl} ErrorType={ErrorType}",
                 fileName,
                 normalizedDestination,

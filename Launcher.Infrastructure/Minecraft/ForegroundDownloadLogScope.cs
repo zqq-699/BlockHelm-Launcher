@@ -6,6 +6,7 @@
 
 using System.Diagnostics;
 using System.IO;
+using Launcher.Application.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -17,6 +18,8 @@ namespace Launcher.Infrastructure.Minecraft;
 /// </summary>
 internal sealed class ForegroundDownloadLogScope
 {
+    private readonly IReadOnlyDictionary<string, object?> context;
+    public IDisposable RestoreContext() => DownloadDiagnostics.Restore(logger, context);
     private readonly object progressLock = new();
     private readonly ILogger logger;
     private readonly string operation;
@@ -42,6 +45,10 @@ internal sealed class ForegroundDownloadLogScope
         int? total = null)
     {
         this.logger = logger ?? NullLogger.Instance;
+        using var operationScope = DownloadDiagnostics.BeginOperation(this.logger, operation);
+        var fields = new Dictionary<string, object?>(DownloadDiagnostics.Capture()) { ["FileId"] = Guid.NewGuid().ToString("N") };
+        context = fields;
+        using var fileScope = RestoreContext();
         this.operation = operation;
         this.fileName = string.IsNullOrWhiteSpace(fileName) ? Path.GetFileName(destinationPath) : fileName;
         this.destinationPath = Path.GetFullPath(destinationPath);
@@ -93,18 +100,16 @@ internal sealed class ForegroundDownloadLogScope
 
     public void Complete(ResolvedDownloadRequest resolution, bool? reused = null)
     {
+        using var diagnosticContext = RestoreContext();
         if (Interlocked.Exchange(ref terminalState, 1) != 0)
             return;
 
         stopwatch.Stop();
-        var attempts = AttemptCount;
+        var attempts = resolution.NetworkAttempts ?? AttemptCount;
         var bytes = TransferredBytes;
         var wasReused = reused ?? bytes == 0;
-        var fallbackUsed = Volatile.Read(ref sourceCount) > 1
-            || !string.Equals(
-                DownloadUriLogSanitizer.Sanitize(resolution.OriginalUrl),
-                DownloadUriLogSanitizer.Sanitize(resolution.ActualUrl),
-                StringComparison.OrdinalIgnoreCase);
+        var fallbackUsed = resolution.FallbackUsed ?? (Volatile.Read(ref sourceCount) > 1
+            || !string.Equals(resolution.OriginalUrl, resolution.ActualUrl, StringComparison.OrdinalIgnoreCase));
         logger.LogInformation(
             "Foreground file download completed. Operation={Operation} FileName={FileName} DestinationPath={DestinationPath} Status={Status} TransferredBytes={TransferredBytes} ExpectedBytes={ExpectedBytes} DurationMs={DurationMs} FinalSourceUrl={FinalSourceUrl} SourceKind={SourceKind} Attempts={Attempts} FallbackUsed={FallbackUsed} Position={Position} Total={Total}",
             operation,
@@ -124,6 +129,7 @@ internal sealed class ForegroundDownloadLogScope
 
     public void CompleteWithoutDownload(string status, string? finalSourceUrl = null)
     {
+        using var diagnosticContext = RestoreContext();
         if (Interlocked.Exchange(ref terminalState, 1) != 0)
             return;
 
@@ -146,12 +152,14 @@ internal sealed class ForegroundDownloadLogScope
 
     public void Fail(Exception exception, string? finalSourceUrl = null)
     {
+        using var diagnosticContext = RestoreContext();
         ArgumentNullException.ThrowIfNull(exception);
         if (Interlocked.Exchange(ref terminalState, 1) != 0)
             return;
 
         stopwatch.Stop();
         logger.LogWarning(
+            exception,
             "Foreground file download failed. Operation={Operation} FileName={FileName} DestinationPath={DestinationPath} TransferredBytes={TransferredBytes} ExpectedBytes={ExpectedBytes} DurationMs={DurationMs} FinalSourceUrl={FinalSourceUrl} Attempts={Attempts} FallbackUsed={FallbackUsed} FailureType={FailureType} Position={Position} Total={Total}",
             operation,
             fileName,
@@ -160,8 +168,8 @@ internal sealed class ForegroundDownloadLogScope
             expectedBytes,
             stopwatch.ElapsedMilliseconds,
             SanitizeOptionalUrl(finalSourceUrl),
-            AttemptCount,
-            Volatile.Read(ref sourceCount) > 1,
+            FindSourceFailure(exception)?.NetworkAttempts ?? AttemptCount,
+            FindSourceFailure(exception)?.FallbackUsed ?? (Volatile.Read(ref sourceCount) > 1),
             exception.GetType().Name,
             position,
             total);
@@ -175,12 +183,14 @@ internal sealed class ForegroundDownloadLogScope
 
     public void Defer(Exception exception, string status, string? finalSourceUrl = null)
     {
+        using var diagnosticContext = RestoreContext();
         ArgumentNullException.ThrowIfNull(exception);
         if (Interlocked.Exchange(ref terminalState, 1) != 0)
             return;
 
         stopwatch.Stop();
         logger.LogWarning(
+            exception,
             "Foreground file download deferred. Operation={Operation} FileName={FileName} DestinationPath={DestinationPath} Status={Status} TransferredBytes={TransferredBytes} ExpectedBytes={ExpectedBytes} DurationMs={DurationMs} FinalSourceUrl={FinalSourceUrl} Attempts={Attempts} FallbackUsed={FallbackUsed} FailureType={FailureType} Position={Position} Total={Total}",
             operation,
             fileName,
@@ -190,8 +200,8 @@ internal sealed class ForegroundDownloadLogScope
             expectedBytes,
             stopwatch.ElapsedMilliseconds,
             SanitizeOptionalUrl(finalSourceUrl),
-            AttemptCount,
-            Volatile.Read(ref sourceCount) > 1,
+            FindSourceFailure(exception)?.NetworkAttempts ?? AttemptCount,
+            FindSourceFailure(exception)?.FallbackUsed ?? (Volatile.Read(ref sourceCount) > 1),
             exception.GetType().Name,
             position,
             total);
@@ -201,6 +211,13 @@ internal sealed class ForegroundDownloadLogScope
             fileName,
             destinationPath,
             exception.GetType().Name);
+    }
+
+    private static MinecraftDownloadRequestExecutor.DownloadSourceRequestException? FindSourceFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+            if (current is MinecraftDownloadRequestExecutor.DownloadSourceRequestException sourceFailure) return sourceFailure;
+        return null;
     }
 
     private void RecordProgress(int source, int attempt, long currentBytes)

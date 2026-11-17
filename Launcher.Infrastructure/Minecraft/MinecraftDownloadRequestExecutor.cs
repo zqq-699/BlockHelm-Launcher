@@ -91,7 +91,8 @@ internal sealed class MinecraftDownloadRequestExecutor
             httpClient,
             this.retryOptions,
             AcquireAdmissionAsync,
-            TryAcquireOpportunisticAdmission);
+            TryAcquireOpportunisticAdmission,
+            this.logger);
     }
 
     public async Task<T> ExecuteAsync<T>(
@@ -99,7 +100,8 @@ internal sealed class MinecraftDownloadRequestExecutor
         DownloadSourcePreference preference,
         string? categoryHint,
         Func<DownloadAttemptContext, CancellationToken, Task<T>> operation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool logExhaustion = true)
     {
         var result = await ExecuteCoreAsync(
             originalUrl,
@@ -114,7 +116,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             speedMeter: null,
             executionMode: DownloadExecutionMode.PerSourceRetries,
             fileCandidates: null,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken, logExhaustion: logExhaustion).ConfigureAwait(false);
         return result.Value!;
     }
 
@@ -249,6 +251,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         }
         finally
         {
+            logger.LogInformation("Remaining download lookup requests canceled. CancellationOrigin={CancellationOrigin}", cancellationToken.IsCancellationRequested ? "CallerCancellation" : "SupersededRequest");
             pending.Cancel();
             foreach (var item in tasks)
                 _ = ObserveCompletionAsync(item.Task);
@@ -316,6 +319,8 @@ internal sealed class MinecraftDownloadRequestExecutor
 
             async Task<ResolvedDownloadRequest> DownloadUnverifiedAsync()
             {
+            using var diagnosticFile = DownloadDiagnostics.BeginFile(logger);
+            using var network = new DownloadNetworkObservation();
                 var result = await ExecuteCoreAsync(
                     originalUrl,
                     preference,
@@ -344,7 +349,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                     executionMode: DownloadExecutionMode.FileSourceRounds,
                     fileCandidates: fileCandidates,
                     cancellationToken: cancellationToken).ConfigureAwait(false);
-                return result.Value!;
+                return result.Value! with { NetworkAttempts = network.Sends, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
             }
         }
 
@@ -352,14 +357,16 @@ internal sealed class MinecraftDownloadRequestExecutor
 
         async Task<ResolvedDownloadRequest> DownloadFileCoreAsync()
         {
+            using var diagnosticFile = DownloadDiagnostics.BeginFile(logger);
+            using var network = new DownloadNetworkObservation();
             var integrity = DownloadIntegrityExpectation.Sha1(expectedSha1, expectedSize);
-            await using var session = await ResumableDownloadFileSession.AcquireAsync(
+            await using var session = await DownloadDiagnostics.RunStageAsync(logger, "DownloadSessionAcquire", () => ResumableDownloadFileSession.AcquireAsync(
                 destinationPath,
                 integrity,
                 cancellationToken,
-                options).ConfigureAwait(false);
+                options), quiet: true).ConfigureAwait(false);
             if (session.IsComplete)
-                return fileCandidates[0];
+                return fileCandidates[0] with { NetworkAttempts = 0, FallbackUsed = false };
 
             var segmented = await TryDownloadSegmentedAsync(
                 fileCandidates,
@@ -372,7 +379,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 reportTransferredBytes,
                 cancellationToken).ConfigureAwait(false);
             if (segmented.Resolution is not null)
-                return segmented.Resolution;
+                return segmented.Resolution with { NetworkAttempts = network.Sends, FallbackUsed = segmented.Resolution.ActualUrl != fileCandidates[0].ActualUrl };
 
             var sequentialProgress = OffsetAttemptProgress(reportAttemptProgress, segmented.AttemptCount);
 
@@ -400,7 +407,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 executionMode: DownloadExecutionMode.FileSourceRounds,
                 fileCandidates: fileCandidates,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-            return result.Value!;
+            return result.Value! with { NetworkAttempts = network.Sends, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
         }
     }
 
@@ -448,13 +455,15 @@ internal sealed class MinecraftDownloadRequestExecutor
 
         async Task<ResolvedDownloadRequest> DownloadCoreAsync()
         {
-            await using var session = await ResumableDownloadFileSession.AcquireAsync(
+            using var diagnosticFile = DownloadDiagnostics.BeginFile(logger);
+            using var network = new DownloadNetworkObservation();
+            await using var session = await DownloadDiagnostics.RunStageAsync(logger, "DownloadSessionAcquire", () => ResumableDownloadFileSession.AcquireAsync(
                 destinationPath,
                 integrity,
                 cancellationToken,
-                options).ConfigureAwait(false);
+                options), quiet: true).ConfigureAwait(false);
             if (session.IsComplete)
-                return fileCandidates[0];
+                return fileCandidates[0] with { NetworkAttempts = 0, FallbackUsed = false };
 
             var segmented = await TryDownloadSegmentedAsync(
                 fileCandidates,
@@ -467,7 +476,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 reportTransferredBytes,
                 cancellationToken).ConfigureAwait(false);
             if (segmented.Resolution is not null)
-                return segmented.Resolution;
+                return segmented.Resolution with { NetworkAttempts = network.Sends, FallbackUsed = segmented.Resolution.ActualUrl != fileCandidates[0].ActualUrl };
 
             var sequentialProgress = OffsetAttemptProgress(reportAttemptProgress, segmented.AttemptCount);
 
@@ -495,7 +504,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 executionMode: DownloadExecutionMode.FileSourceRounds,
                 fileCandidates: fileCandidates,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-            return result.Value!;
+            return result.Value! with { NetworkAttempts = network.Sends, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
         }
     }
 
@@ -566,7 +575,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 var failure = ClassifyException(exception);
                 failures.Add(failure);
                 session.ResetSegmentedDownload();
-                logger.LogDebug(
+                logger.LogWarning(
                     exception,
                     "Segmented source stopped. ResolvedSourceKind={ResolvedSourceKind} ActualUrl={ActualUrl} FailureReason={FailureReason} FailureDisposition={FailureDisposition} StatusCode={StatusCode} FinalHost={FinalHost}",
                     resolution.ResolvedSourceKind,
@@ -582,7 +591,7 @@ internal sealed class MinecraftDownloadRequestExecutor
 
         if (attemptCount > 0)
         {
-            logger.LogDebug(
+            logger.LogInformation(
                 "Segmented download exhausted all compatible candidates and will use the existing single-stream path. CandidateCount={CandidateCount} FailureReasons={FailureReasons} FinalFailureReason={FinalFailureReason} FinalStatusCode={FinalStatusCode} FinalHost={FinalHost}",
                 candidates.Count(IsSegmentableCandidate),
                 failures.Select(failure => failure.Reason).Distinct().Order().ToArray(),
@@ -690,7 +699,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         }
 
         var firstRange = probe.Range
-            ?? throw new InvalidOperationException("The segmented probe did not provide a validated range.");
+            ?? throw SafeExceptionLog.Describe(new InvalidOperationException("The segmented probe did not provide a validated range."), "DownloadValidation", ("Reason", "The segmented probe did not provide a validated range."));
         var totalLength = firstRange.TotalLength;
         var remainingStart = firstRange.End + 1;
         if (remainingStart >= totalLength)
@@ -785,7 +794,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         try
         {
             if (!adaptiveSession.TryTake(out var baselineSegment))
-                throw new InvalidOperationException("The adaptive segmented session did not contain baseline work.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("The adaptive segmented session did not contain baseline work."), "DownloadValidation", ("Reason", "The adaptive segmented session did not contain baseline work."));
             SpawnWorker(
                 additional: false,
                 baselineSegment!,
@@ -1062,7 +1071,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                             () =>
                             {
                                 if (!segment.TryGetAttemptRange(out var current))
-                                    throw new InvalidOperationException("The adaptive segmented range completed before its request was created.");
+                                    throw SafeExceptionLog.Describe(new InvalidOperationException("The adaptive segmented range completed before its request was created."), "DownloadValidation", ("Reason", "The adaptive segmented range completed before its request was created."));
                                 return new DownloadSegmentRange(
                                     current.Start,
                                     current.End,
@@ -1186,7 +1195,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                     failure.StatusCode);
                 var retry = failure.Disposition is DownloadFailureDisposition.RetryCurrentSource
                     && attempt < retryOptions.MaxAttemptsPerSource;
-                logger.LogDebug(
+                logger.LogWarning(
                     failure,
                     "Segmented range attempt failed. ResolvedSourceKind={ResolvedSourceKind} ChunkId={ChunkId} RangeStart={RangeStart} RangeEnd={RangeEnd} TotalLength={TotalLength} Attempt={Attempt} FailureReason={FailureReason} FailureDisposition={FailureDisposition} StatusCode={StatusCode} FinalHost={FinalHost} Action={Action}",
                     resolution.ResolvedSourceKind,
@@ -1206,7 +1215,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             }
         }
 
-        throw new InvalidOperationException("The segmented range retry loop exited unexpectedly.");
+        throw SafeExceptionLog.Describe(new InvalidOperationException("The segmented range retry loop exited unexpectedly."), "DownloadValidation", ("Reason", "The segmented range retry loop exited unexpectedly."));
     }
 
     private Task<T> ExecuteSegmentAttemptWithRetriesAsync<T>(
@@ -1440,10 +1449,11 @@ internal sealed class MinecraftDownloadRequestExecutor
         Action? onRecoverableFailure = null,
         bool logExhaustion = true)
     {
+        using var networkObservation = DownloadNetworkObservation.Current is null ? new DownloadNetworkObservation() : null;
         if (executionMode is DownloadExecutionMode.FileSourceRounds)
         {
             if (lookupMode || noResultStatus is not null)
-                throw new InvalidOperationException("File source rounds do not support lookup requests.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("File source rounds do not support lookup requests."), "DownloadValidation", ("Reason", "File source rounds do not support lookup requests."));
 
             return await ExecuteFileSourceRoundsAsync(
                 originalUrl,
@@ -1456,6 +1466,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 cancellationToken).ConfigureAwait(false);
         }
 
+        using var diagnosticRequest = DownloadDiagnostics.BeginRequest(logger);
         // 候选顺序已经包含用户偏好和镜像回退策略；每个源内部重试耗尽后才切换下一源。
         var candidates = singleCandidate is null
             ? MinecraftDownloadSourceResolver.EnumerateRequests(originalUrl, preference, categoryHint).ToList()
@@ -1468,6 +1479,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
         {
             var resolution = candidates[candidateIndex];
+            DownloadNetworkObservation.SelectCandidate(resolution.ActualUrl);
             lastResolution = resolution;
             var sourceReportedNoResult = false;
             var slowDisconnectCount = 0;
@@ -1562,7 +1574,10 @@ internal sealed class MinecraftDownloadRequestExecutor
                         failure.StatusCode);
                     // Abort 表示请求本身或本地写入不可通过换源修复；其余分类决定重试当前源还是直接换源。
                     if (failure.Disposition is DownloadFailureDisposition.Abort)
+                    {
+                        LogFailure(resolution, attempt, failure, retryCurrentSource: false);
                         throw failure;
+                    }
 
                     onRecoverableFailure?.Invoke();
                     failures.Add(failure);
@@ -1574,7 +1589,9 @@ internal sealed class MinecraftDownloadRequestExecutor
                     if (!retryCurrentSource)
                         break;
 
-                    await Task.Delay(GetRetryDelay(failure, attempt), cancellationToken).ConfigureAwait(false);
+                    var retryDelay = GetRetryDelay(failure, attempt);
+                    logger.LogInformation("Download retry scheduled. RetryDelay={RetryDelay} Attempt={Attempt}", retryDelay, attempt);
+                    await Task.Delay(retryDelay, cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -1604,6 +1621,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         SpeedMeter? speedMeter,
         CancellationToken cancellationToken)
     {
+        using var diagnosticRequest = DownloadDiagnostics.BeginRequest(logger);
         var activeCandidateIndexes = Enumerable.Range(0, candidates.Count).ToList();
         var failures = new List<Exception>();
         var sourceFailures = new List<SourceFailure>();
@@ -1620,6 +1638,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 var candidateIndex = activeCandidateIndexes[position];
                 var resolution = candidates[candidateIndex];
+                DownloadNetworkObservation.SelectCandidate(resolution.ActualUrl);
                 lastResolution = resolution;
 
                 if (round == 1
@@ -1681,7 +1700,10 @@ internal sealed class MinecraftDownloadRequestExecutor
                         failure.Reason,
                         failure.StatusCode);
                     if (failure.Disposition is DownloadFailureDisposition.Abort)
+                    {
+                        LogFailure(resolution, round, failure, retryCurrentSource: false);
                         throw failure;
+                    }
 
                     failures.Add(failure);
                     sourceFailures.Add(new SourceFailure(resolution.ResolvedSourceKind, failure.Reason, failure.StatusCode));
@@ -1711,7 +1733,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 .Select(failure => GetRetryDelay(failure, round))
                 .DefaultIfEmpty(TimeSpan.Zero)
                 .Max();
-            logger.LogDebug(
+            logger.LogInformation(
                 "File download source round exhausted. OriginalUrl={OriginalUrl} CompletedRound={CompletedRound} MaxRounds={MaxRounds} RetryCandidateCount={RetryCandidateCount} RetryDelay={RetryDelay}",
                 DownloadUriLogSanitizer.Sanitize(originalUrl),
                 round,
@@ -1770,6 +1792,12 @@ internal sealed class MinecraftDownloadRequestExecutor
         bool opportunisticAdmission = false,
         DownloadHostConcurrencyController.DownloadAdmissionLease? preacquiredAdmission = null)
     {
+        DownloadNetworkObservation.SelectCandidate(resolution.ActualUrl);
+        using var attemptScope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["Attempt"] = attempt, ["SourceKind"] = resolution.ResolvedSourceKind,
+            ["ResourceCategory"] = resolution.ResourceCategory
+        });
         // 租约覆盖响应处理，而不只是发送请求，防止大量响应体同时占用网络与磁盘。
         await using var reservedAdmission = preacquiredAdmission;
         await using var transportResult = await transport.SendAsync(
@@ -1809,6 +1837,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         }
 
         var telemetry = new DownloadAttemptTelemetry();
+        using var heartbeat = new Timer(_ => logger.LogInformation("Download body still running. Host={Host} Attempt={Attempt} DownloadedBytes={DownloadedBytes} BodyDuration={BodyDuration}", transportResult.FinalHost, attempt, telemetry.BodyBytes, telemetry.BodyDuration), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
         try
         {
         telemetry.StartBody();
@@ -1862,7 +1891,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         catch (DownloadAttemptException exception)
         {
             var slowFailure = exception as DownloadBodyTooSlowException;
-            logger.LogDebug(
+            logger.LogWarning(
                 exception,
                 "Download transport failed after response headers. FinalHost={FinalHost} Attempt={Attempt} FailureReason={FailureReason} ResponseHeadersDuration={ResponseHeadersDuration} ResponseBodyDuration={ResponseBodyDuration} DownloadedBytes={DownloadedBytes} AverageBytesPerSecond={AverageBytesPerSecond} SlowReadDuration={SlowReadDuration} SlowReadBytes={SlowReadBytes} SlowReadBytesPerSecond={SlowReadBytesPerSecond} GlobalActive={GlobalActive} GlobalWaiting={GlobalWaiting} GlobalTarget={GlobalTarget} HostOrigin={HostOrigin} HostActive={HostActive} HostWaiting={HostWaiting} HostTarget={HostTarget}",
                 transportResult.FinalHost,
@@ -1899,12 +1928,16 @@ internal sealed class MinecraftDownloadRequestExecutor
         catch (JsonException exception)
         {
             throw new DownloadContentValidationException("The response body is not valid JSON.", exception)
+                .WithDetail("ExpectedFormat", "JSON").WithDetail("ActualContentType", response.Content.Headers.ContentType?.MediaType)
+                .WithDetail("DownloadedBytes", telemetry.BodyBytes)
                 .WithFinalHost(transportResult.FinalHost)
                 .WithFinalOrigin(transportResult.AdmissionOrigin);
         }
         catch (XmlException exception)
         {
             throw new DownloadContentValidationException("The response body is not valid XML.", exception)
+                .WithDetail("ExpectedFormat", "XML").WithDetail("ActualContentType", response.Content.Headers.ContentType?.MediaType)
+                .WithDetail("DownloadedBytes", telemetry.BodyBytes)
                 .WithFinalHost(transportResult.FinalHost)
                 .WithFinalOrigin(transportResult.AdmissionOrigin);
         }
@@ -2166,8 +2199,13 @@ internal sealed class MinecraftDownloadRequestExecutor
         bool retryInLaterRound = false,
         int remainingCandidateCount = 0)
     {
+        failure.WithDetail("NetworkAttempts", DownloadNetworkObservation.Current?.Sends);
+        var concurrency = GetGlobalConcurrencySnapshot();
+        failure.WithDetail("GlobalActive", concurrency.ActiveCount).WithDetail("GlobalWaiting", concurrency.WaitingCount)
+            .WithDetail("GlobalTarget", concurrency.CurrentTarget);
         var slowFailure = failure as DownloadBodyTooSlowException;
-        logger.LogDebug(
+        logger.LogWarning(
+            failure,
             "Download resource attempt failed. RequestedSourcePreference={RequestedSourcePreference} ResourceCategory={ResourceCategory} OriginalUrl={OriginalUrl} ActualUrl={ActualUrl} ResolvedSourceKind={ResolvedSourceKind} FinalHost={FinalHost} Attempt={Attempt} SourceRound={SourceRound} FailureReason={FailureReason} FailureDisposition={FailureDisposition} StatusCode={StatusCode} RetryCurrentSource={RetryCurrentSource} RetryInLaterRound={RetryInLaterRound} RemainingCandidateCount={RemainingCandidateCount} SlowReadDuration={SlowReadDuration} SlowReadBytes={SlowReadBytes} SlowReadBytesPerSecond={SlowReadBytesPerSecond}",
             resolution.RequestedSourcePreference,
             resolution.ResourceCategory,
@@ -2194,7 +2232,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         FileSourceRounds
     }
 
-    internal sealed class DownloadSourceRequestException : Exception
+    internal sealed class DownloadSourceRequestException : Exception, ISafeDiagnosticException
     {
         public DownloadSourceRequestException(
             ResolvedDownloadRequest resolution,
@@ -2206,6 +2244,16 @@ internal sealed class MinecraftDownloadRequestExecutor
             Failures = failures ?? [innerException];
         }
 
+        public string DiagnosticCode => "DownloadSourcesExhausted";
+        public IReadOnlyDictionary<string, object?> DiagnosticFields => new Dictionary<string, object?>
+        {
+            ["SourceKind"] = Resolution.ResolvedSourceKind,
+            ["NetworkAttempts"] = NetworkAttempts,
+            ["FallbackUsed"] = FallbackUsed,
+            ["AttemptFailures"] = Failures.Select(exception => SafeExceptionLog.Format(exception, includeStack: false)).ToArray()
+        };
+        public int NetworkAttempts { get; } = DownloadNetworkObservation.Current?.Sends ?? 0;
+        public bool FallbackUsed { get; } = DownloadNetworkObservation.Current?.CandidateCount > 1;
         public ResolvedDownloadRequest Resolution { get; }
         public IReadOnlyList<Exception> Failures { get; }
     }

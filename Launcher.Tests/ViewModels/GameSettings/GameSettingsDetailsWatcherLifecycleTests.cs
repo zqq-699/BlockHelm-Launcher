@@ -5,6 +5,7 @@
  */
 
 using System.Reflection;
+using System.Text.Json;
 using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.App.ViewModels.Download;
@@ -12,11 +13,251 @@ using Launcher.App.ViewModels.GameSettings;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Tests.Fakes;
+using Launcher.Infrastructure.Persistence;
 
 namespace Launcher.Tests.ViewModels.GameSettings;
 
 public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
 {
+    [Fact]
+    public async Task SuccessfulRestorePublishesTheNewInstanceSnapshot()
+    {
+        var original = CreateInstanceItem(Path.Combine(TempRoot, "instance"));
+        original.Instance.BackupDirectory = Path.Combine(TempRoot, "backups");
+        var refreshed = CreateInstanceItem(original.Instance.InstanceDirectory).Instance;
+        refreshed.BackupDirectory = original.Instance.BackupDirectory;
+        var instanceService = new FakeGameInstanceService();
+        instanceService.CreatedInstances.Add(refreshed);
+        var backups = new RecordingBackupService();
+        using var details = CreateDetails(new RecordingDirectoryMonitor(), instanceService: instanceService, backupService: backups);
+        GameInstance? published = null;
+        details.InstanceSettingsSaved += instance => published = instance;
+        details.SetSelectedInstance(original);
+        await details.Backup.OnSectionActivatedAsync();
+        var backup = Assert.Single(details.Backup.VisibleBackups);
+
+        details.Backup.RequestRestoreBackupCommand.Execute(backup);
+        await details.Backup.ConfirmRestoreBackupCommand.ExecuteAsync(null);
+
+        Assert.True(backups.Restored);
+        Assert.Same(refreshed, published);
+    }
+
+    [Fact]
+    public async Task ReplacedDirectorySnapshotRearmsTheContentWatcher()
+    {
+        var monitor = new RecordingDirectoryMonitor { RebindOnNewSnapshot = true };
+        using var details = CreateDetails(monitor);
+        var item = CreateInstanceItem(Path.Combine(TempRoot, "same"));
+        details.SetSelectedInstance(item);
+        details.SetPageActive(true);
+        details.SetSelectedSection(CreateSection("saves"));
+        await details.SaveManagement.OnSectionActivatedAsync();
+        Assert.Equal(1, monitor.WatchStartCount);
+
+        item.Update(CreateInstanceItem(item.Instance.InstanceDirectory).Instance, "release");
+        details.SetSelectedInstance(item);
+        await details.SaveManagement.OnSectionActivatedAsync();
+
+        Assert.Equal(2, monitor.WatchStartCount);
+        Assert.False(monitor.StartedBeforePreviousWatchWasDisposed);
+        details.SetPageActive(false);
+    }
+
+    [Theory]
+    [InlineData("description")]
+    [InlineData("launch")]
+    [InlineData("java")]
+    public async Task UnchangedRefreshPreservesEditorAndPendingSave(string area)
+    {
+        var (service, instance) = await CreateEditableInstanceAsync();
+        using var details = CreateDetails(new RecordingDirectoryMonitor(), instanceService: service);
+        var item = new GameSettingsInstanceItem(instance, "release");
+        details.SetSelectedInstance(item);
+        var saved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        details.InstanceSettingsSaved += _ => saved.TrySetResult();
+        void AssertEditor()
+        {
+            if (area == "description") Assert.Equal("draft", details.General.DescriptionText);
+            else if (area == "launch") Assert.Equal("--draft", details.Launch.LaunchGameArguments);
+            else Assert.Equal(LaunchSettingsMode.UseGlobal, details.Java.SelectedInstanceJavaSettingsModeOption!.Mode);
+        }
+        if (area == "description") details.General.DescriptionText = "draft";
+        else if (area == "launch") details.Launch.LaunchGameArguments = "--draft";
+        else details.Java.SelectedInstanceJavaSettingsModeOption = details.Java.LaunchSettingsModeOptions[0];
+
+        // Even rebinding the exact same item must not refill an editor with unsaved disk values.
+        details.SetSelectedInstance(item);
+        AssertEditor();
+        if (area == "description")
+            await File.WriteAllTextAsync(Path.Combine(instance.InstanceDirectory, "Pack.json"),
+                """{"id":"Pack","type":"release","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient","libraries":[{"name":"net.fabricmc:fabric-loader:0.16.9"}]}""");
+        var refreshed = Assert.Single(await service.GetInstancesAsync());
+        Assert.NotSame(instance, refreshed);
+        item.Update(refreshed, "release");
+        details.SetSelectedInstance(item);
+        AssertEditor();
+        if (area == "description")
+        {
+            Assert.Equal(LoaderKind.Fabric, instance.Loader);
+            Assert.Equal("0.16.9", instance.LoaderVersion);
+        }
+        await saved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var persisted = JsonSerializer.Deserialize<GameInstance>(await File.ReadAllTextAsync(
+            InstanceDirectoryOwnership.SettingsPath(instance.InstanceDirectory)))!;
+        if (area == "description") Assert.Equal("draft", persisted.Description);
+        else if (area == "launch") Assert.Equal("--draft", persisted.GameArguments);
+        else Assert.Equal(LaunchSettingsMode.UseGlobal, persisted.JavaSettingsMode);
+    }
+
+    [Fact]
+    public async Task ReadResultFromBeforeALocalSaveDoesNotCancelNewerDraft()
+    {
+        var (service, instance) = await CreateEditableInstanceAsync();
+        using var details = CreateDetails(new RecordingDirectoryMonitor(), instanceService: service);
+        var item = new GameSettingsInstanceItem(instance, "release");
+        details.SetSelectedInstance(item);
+        var olderRead = Assert.Single(await service.GetInstancesAsync());
+        var firstSaved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondSaved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var count = 0;
+        details.InstanceSettingsSaved += _ =>
+        {
+            if (Interlocked.Increment(ref count) == 1) firstSaved.TrySetResult();
+            else secondSaved.TrySetResult();
+        };
+        details.Launch.LaunchGameArguments = "--saved";
+        await firstSaved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        details.General.DescriptionText = "newer draft";
+
+        item.Update(olderRead, "release");
+        details.SetSelectedInstance(item);
+
+        Assert.Equal("newer draft", details.General.DescriptionText);
+        Assert.Equal("--saved", details.Launch.LaunchGameArguments);
+        await secondSaved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var persisted = JsonSerializer.Deserialize<GameInstance>(await File.ReadAllTextAsync(
+            InstanceDirectoryOwnership.SettingsPath(instance.InstanceDirectory)))!;
+        Assert.Equal("newer draft", persisted.Description);
+        Assert.Equal("--saved", persisted.GameArguments);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChangedSettingsOrReplacedDirectoryStillRejectsOldEditorSnapshot(bool replaceDirectory)
+    {
+        var (service, instance) = await CreateEditableInstanceAsync();
+        using var details = CreateDetails(new RecordingDirectoryMonitor(), instanceService: service);
+        var item = new GameSettingsInstanceItem(instance, "release");
+        details.SetSelectedInstance(item);
+        details.General.DescriptionText = "draft";
+        var directory = instance.InstanceDirectory;
+        var metadataPath = InstanceDirectoryOwnership.SettingsPath(directory);
+        if (replaceDirectory)
+        {
+            Directory.Move(directory, directory + "-moved");
+            Directory.CreateDirectory(Path.GetDirectoryName(metadataPath)!);
+            File.Copy(InstanceDirectoryOwnership.SettingsPath(directory + "-moved"), metadataPath);
+            File.Copy(Path.Combine(directory + "-moved", "Pack.json"), Path.Combine(directory, "Pack.json"));
+        }
+        else
+        {
+            var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(metadataPath))!.AsObject();
+            json["Description"] = "external";
+            await File.WriteAllTextAsync(metadataPath, json.ToJsonString());
+        }
+        var refreshed = Assert.Single((await service.GetInstancesAsync()).Where(candidate => candidate.InstanceDirectory == directory));
+        Assert.NotSame(instance, refreshed);
+        item.Update(refreshed, "release");
+        details.SetSelectedInstance(item);
+
+        Assert.Equal(replaceDirectory ? "stored" : "external", details.General.DescriptionText);
+        await Assert.ThrowsAsync<GameInstanceMutationConflictException>(() => service.SaveInstanceAsync(instance));
+        Assert.Equal(replaceDirectory ? "stored" : "external", JsonSerializer.Deserialize<GameInstance>(await File.ReadAllTextAsync(metadataPath))!.Description);
+    }
+
+    private async Task<(GameInstanceService Service, GameInstance Instance)> CreateEditableInstanceAsync()
+    {
+        var settings = new LauncherSettings { MinecraftDirectory = Path.Combine(TempRoot, "game") };
+        var directory = Path.Combine(settings.MinecraftDirectory, "versions", "Pack");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "Pack.json"), """{"id":"Pack","type":"release","mainClass":"example.Main","libraries":[]}""");
+        var settingsService = new TestSettingsService(settings);
+        var service = new GameInstanceService(settingsService, new JsonGameInstanceRepository(settingsService), []);
+        var instance = Assert.Single(await service.GetInstancesAsync());
+        instance.Description = "stored";
+        instance.LaunchSettingsMode = LaunchSettingsMode.PerInstance;
+        instance.JavaSettingsMode = LaunchSettingsMode.PerInstance;
+        await service.SaveInstanceAsync(instance);
+        return (service, instance);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BackupDirectorySaveAndDelayedDescriptionShareCurrentSnapshot(bool descriptionFirst)
+    {
+        var (service, instance) = await CreateEditableInstanceAsync();
+        var refreshed = Assert.Single(await service.GetInstancesAsync());
+        using var persistence = new InstanceSettingsPersistenceCoordinator(service, Stub<IStatusService>(),
+            ImmediateUiDispatcher.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        persistence.SetInstance(instance);
+        var descriptionSaved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        persistence.InstanceSaved += saved =>
+        {
+            if (saved.Description == "draft") descriptionSaved.TrySetResult();
+        };
+        persistence.Schedule("description", instance, target =>
+        {
+            var old = target.Description;
+            target.Description = "draft";
+            return () => target.Description = old;
+        }, () => { }, descriptionFirst ? TimeSpan.Zero : TimeSpan.FromMilliseconds(100));
+
+        if (descriptionFirst)
+            await descriptionSaved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var backupDirectory = Path.Combine(TempRoot, "backups");
+        Assert.True(await persistence.SaveAsync(refreshed, target =>
+        {
+            var old = target.BackupDirectory;
+            target.BackupDirectory = backupDirectory;
+            return () => target.BackupDirectory = old;
+        }));
+        await descriptionSaved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var stored = JsonSerializer.Deserialize<GameInstance>(
+            await File.ReadAllTextAsync(InstanceDirectoryOwnership.SettingsPath(instance.InstanceDirectory)))!;
+        Assert.Equal("draft", stored.Description);
+        Assert.Equal(backupDirectory, stored.BackupDirectory);
+    }
+
+    [Fact]
+    public async Task StaleEditorMutationCannotMergeIntoExternallyChangedSettings()
+    {
+        var (service, instance) = await CreateEditableInstanceAsync();
+        var path = InstanceDirectoryOwnership.SettingsPath(instance.InstanceDirectory);
+        var original = JsonSerializer.Deserialize<GameInstance>(await File.ReadAllTextAsync(path))!;
+        original.Description = "external";
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(original));
+        var current = Assert.Single(await service.GetInstancesAsync());
+        using var persistence = new InstanceSettingsPersistenceCoordinator(service, Stub<IStatusService>(),
+            ImmediateUiDispatcher.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        persistence.SetInstance(current);
+        var applied = false;
+
+        persistence.Schedule("description", instance, target =>
+        {
+            applied = true;
+            target.Description = "stale";
+            return () => { };
+        }, () => { });
+
+        Assert.False(applied);
+        Assert.Equal("external", current.Description);
+        Assert.Equal("external", JsonSerializer.Deserialize<GameInstance>(await File.ReadAllTextAsync(path))!.Description);
+    }
+
     [Fact]
     public void JavaSectionUsesFullViewportAndRestoresScrollableHostWhenLeaving()
     {
@@ -251,6 +492,25 @@ public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
     }
 
     [Fact]
+    public async Task SameDirectorySnapshotRebindDoesNotPublishOldInventory()
+    {
+        var service = new BlockingInstanceSwitchSaveService();
+        using var details = CreateDetails(new RecordingDirectoryMonitor(), saveService: service);
+        var item = CreateInstanceItem(Path.Combine(TempRoot, "same"));
+        details.SetSelectedInstance(item);
+        details.SetPageActive(true);
+        details.SetSelectedSection(CreateSection("saves"));
+        await service.FirstCallStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        item.Update(CreateInstanceItem(item.Instance.InstanceDirectory).Instance, "release");
+        details.SetSelectedInstance(item);
+        await service.SecondCallCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        service.ReleaseFirstCall.TrySetResult();
+        await service.FirstCallCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("Second", Assert.Single(details.SaveManagement.Saves).Title);
+        details.SetPageActive(false);
+    }
+
+    [Fact]
     public async Task FailedSilentRefreshKeepsCachedContent()
     {
         var monitor = new RecordingDirectoryMonitor();
@@ -307,13 +567,42 @@ public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
         details.SetPageActive(false);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ContentDeleteConfirmationCannotResolvePathsAgainstARefreshedInstance(bool replaceInstance)
+    {
+        var path = Path.Combine(TempRoot, "game", "saves", "world");
+        var saves = new RecordingSaveService { Items = [CreateSave("World", path)] };
+        using var details = CreateDetails(new RecordingDirectoryMonitor(), saveService: saves);
+        var instancePath = Path.Combine(TempRoot, "game");
+        var item = CreateInstanceItem(instancePath);
+        details.SetSelectedInstance(item);
+        details.SetSelectedSection(CreateSection("saves"));
+        await details.SaveManagement.OnSectionActivatedAsync();
+        var dialogs = new GameSettingsDialogsViewModel(Stub<IGameInstanceService>(), Stub<IStatusService>(), details);
+        dialogs.OpenDeleteSaves(new SaveDeleteRequest([path], ["World"]));
+        if (replaceInstance)
+            details.SetSelectedInstance(CreateInstanceItem(instancePath));
+        else
+        {
+            saves.Items = [CreateSave("Replacement", path)];
+            details.SaveManagement.OnSelectedInstanceChanged(item.Instance);
+        }
+        await details.SaveManagement.OnSectionActivatedAsync();
+        await dialogs.ConfirmDeleteContentDialogCommand.ExecuteAsync(null);
+        Assert.Equal(0, saves.DeleteCallCount);
+        Assert.Single(details.SaveManagement.Saves);
+    }
+
     private static GameSettingsDetailsViewModel CreateDetails(
         RecordingDirectoryMonitor monitor,
         ILocalSaveService? saveService = null,
         IGameInstanceService? instanceService = null,
         IModService? modService = null,
         ILocalResourcePackService? resourcePackService = null,
-        ILocalShaderPackService? shaderPackService = null)
+        ILocalShaderPackService? shaderPackService = null,
+        IInstanceBackupService? backupService = null)
     {
         var statusService = Stub<IStatusService>();
         var resolvedModService = modService ?? Stub<IModService>();
@@ -336,7 +625,7 @@ public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
             Stub<IInstanceFolderService>(),
             Stub<ISystemMemoryService>(),
             launchSettingsModService,
-            Stub<IInstanceBackupService>(),
+            backupService ?? Stub<IInstanceBackupService>(),
             new DownloadTasksPageViewModel(),
             localMods,
             localSaves,
@@ -352,7 +641,7 @@ public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
     private static GameSettingsInstanceItem CreateInstanceItem(string? instanceDirectory = null) => new(
         new GameInstance
         {
-            Id = "instance",
+
             Name = "Instance",
             VersionName = "1.21",
             MinecraftVersion = "1.21",
@@ -449,8 +738,25 @@ public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
         }
     }
 
+    private sealed class RecordingBackupService : IInstanceBackupService
+    {
+        private readonly InstanceBackupRecord backup = new() { Name = "Backup", FileName = "backup.zip", FullPath = "backup.zip" };
+        public bool Restored { get; private set; }
+        public Task<string> EnsureBackupDirectoryAsync(string directory, CancellationToken cancellationToken = default) => Task.FromResult(directory);
+        public Task<int> CountBackupEntriesAsync(string directory, CancellationToken cancellationToken = default) => Task.FromResult(1);
+        public Task<IReadOnlyList<InstanceBackupRecord>> GetBackupsAsync(string directory, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<InstanceBackupRecord>>([backup]);
+        public Task<InstanceBackupRecord> CreateBackupAsync(GameInstance instance, string directory, string name, CancellationToken cancellationToken = default) => Task.FromResult(backup);
+        public Task DeleteBackupAsync(string directory, string path, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RestoreBackupAsync(GameInstance instance, string directory, string path, CancellationToken cancellationToken = default) { Restored = true; return Task.CompletedTask; }
+        public Task RecoverPendingRestoresAsync(string minecraftDirectory, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
     private sealed class RecordingDirectoryMonitor : IInstanceDirectoryMonitor
     {
+        public bool RebindOnNewSnapshot { get; init; }
+        public bool IsSameWatchTarget(GameInstance previous, GameInstance current) =>
+            string.Equals(previous.InstanceDirectory, current.InstanceDirectory, StringComparison.OrdinalIgnoreCase)
+            && (!RebindOnNewSnapshot || ReferenceEquals(previous, current));
         private readonly List<RecordingWatch> activeWatches = [];
 
         public IReadOnlyList<InstanceDirectoryKind> ActiveKinds => activeWatches
@@ -518,8 +824,12 @@ public sealed class GameSettingsDetailsWatcherLifecycleTests : TestTempDirectory
             string archivePath,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task DeleteAsync(LocalSave save, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public int DeleteCallCount { get; private set; }
+        public Task DeleteAsync(LocalSave save, CancellationToken cancellationToken = default)
+        {
+            DeleteCallCount++;
+            return Task.CompletedTask;
+        }
 
         public Task DeleteAsync(IEnumerable<LocalSave> saves, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

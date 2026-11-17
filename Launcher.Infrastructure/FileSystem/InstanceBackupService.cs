@@ -38,12 +38,13 @@ public sealed partial class InstanceBackupService : IInstanceBackupService
     private const string ManifestFileName = "launcher-backups.json";
     private const string DirectoryLockFileName = ".launcher-backups.lock";
     private static readonly TimeSpan DirectoryLockRetryDelay = TimeSpan.FromMilliseconds(100);
-    private const string RestoreDirectoryPrefix = ".launcher-restore-";
+    private const string RestoreDirectoryPrefix = InstanceDirectoryClassifier.RestoreDirectoryPrefix;
     private const string RestoreMarkerFileName = ".launcher-restore-transaction.json";
     private const string RestoreConflictMarkerFileName = ".launcher-restore-conflict.json";
     private const string RestoreOwnerFileName = ".launcher-restore-owner.json";
     private const string RestoreStatePrepared = "prepared";
     private const string RestoreStateCommitted = "committed";
+    private const string RestoreStateExtracting = "extracting";
     private const int MaxRestoreArchiveEntries = 1_000_000;
     private const long RestoreFreeSpaceReserveBytes = 256L * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -116,6 +117,7 @@ public sealed partial class InstanceBackupService : IInstanceBackupService
                                 normalizedDirectory,
                                 cancellationToken)
                             .ConfigureAwait(false);
+                        CleanupInterruptedBackupFiles(normalizedDirectory);
                         var manifestPath = GetManifestPath(normalizedDirectory);
                         var records = await ReadManifestAsync(manifestPath, cancellationToken).ConfigureAwait(false);
                         filteredRecords = NormalizeAndFilterRecords(normalizedDirectory, records);
@@ -169,12 +171,13 @@ public sealed partial class InstanceBackupService : IInstanceBackupService
 
                 var normalizedBackupDirectory = Path.GetFullPath(backupDirectory);
                 var normalizedInstanceDirectory = Path.GetFullPath(instance.InstanceDirectory);
+                var expectedOwnerProof = InstanceDirectoryOwnership.EnsureCurrent(instance);
                 var minecraftDirectory = GetMinecraftDirectory(normalizedInstanceDirectory);
 
-                logger.LogInformation("Creating instance backup. InstanceId={InstanceId}", instance.Id);
+                logger.LogInformation("Creating instance backup. OwnerProof={OwnerProof}", instance.InstanceDirectory);
                 logger.LogDebug(
-                    "Instance backup paths resolved. InstanceId={InstanceId} InstanceDirectory={InstanceDirectory} BackupDirectory={BackupDirectory}",
-                    instance.Id,
+                    "Instance backup paths resolved. OwnerProof={OwnerProof} InstanceDirectory={InstanceDirectory} BackupDirectory={BackupDirectory}",
+                    instance.InstanceDirectory,
                     normalizedInstanceDirectory,
                     normalizedBackupDirectory);
 
@@ -195,6 +198,8 @@ public sealed partial class InstanceBackupService : IInstanceBackupService
                 Directory.CreateDirectory(normalizedBackupDirectory);
                 var sanitizedBackupName = NormalizeBackupName(backupName);
                 var tempPath = Path.Combine(normalizedBackupDirectory, $".launcher-backup.{Guid.NewGuid():N}.tmp");
+                using var activeBackup = new FileStream(tempPath + ".lock", FileMode.CreateNew,
+                    FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
                 string? finalPath = null;
                 var shouldRollbackFinalPath = false;
 
@@ -207,14 +212,14 @@ public sealed partial class InstanceBackupService : IInstanceBackupService
                     {
                         await EnsureCurrentInstanceIdentityAsync(
                                 normalizedInstanceDirectory,
-                                instance.Id,
+                                expectedOwnerProof,
                                 cancellationToken)
                             .ConfigureAwait(false);
                         EnsureNoReparsePoints(normalizedInstanceDirectory);
                         CreateInstanceZip(normalizedInstanceDirectory, instance.Name, tempPath, cancellationToken);
                         await EnsureCurrentInstanceIdentityAsync(
                                 normalizedInstanceDirectory,
-                                instance.Id,
+                                expectedOwnerProof,
                                 cancellationToken)
                             .ConfigureAwait(false);
                     }
@@ -249,10 +254,10 @@ public sealed partial class InstanceBackupService : IInstanceBackupService
                         await WriteManifestAsync(manifestPath, records, cancellationToken).ConfigureAwait(false);
                         shouldRollbackFinalPath = false;
 
-                        logger.LogInformation("Instance backup created. InstanceId={InstanceId}", instance.Id);
+                        logger.LogInformation("Instance backup created. OwnerProof={OwnerProof}", instance.InstanceDirectory);
                         logger.LogDebug(
-                            "Instance backup file created. InstanceId={InstanceId} BackupFile={BackupFile}",
-                            instance.Id,
+                            "Instance backup file created. OwnerProof={OwnerProof} BackupFile={BackupFile}",
+                            instance.InstanceDirectory,
                             finalPath);
                         return record;
                     }
@@ -269,13 +274,16 @@ public sealed partial class InstanceBackupService : IInstanceBackupService
                 }
                 catch (Exception exception) when (exception is not InstanceBackupException)
                 {
-                    TryDeleteFileIfExists(tempPath);
                     logger.LogError(
                         exception,
-                        "Failed to create instance backup. InstanceId={InstanceId} BackupDirectory={BackupDirectory}",
-                        instance.Id,
+                        "Failed to create instance backup. OwnerProof={OwnerProof} BackupDirectory={BackupDirectory}",
+                        instance.InstanceDirectory,
                         normalizedBackupDirectory);
                     throw;
+                }
+                finally
+                {
+                    TryDeleteFileIfExists(tempPath);
                 }
             },
             cancellationToken);

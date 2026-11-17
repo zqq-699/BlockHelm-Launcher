@@ -22,13 +22,15 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Launcher.Domain.Models;
+using Launcher.Infrastructure.Minecraft;
+using Microsoft.Extensions.Logging;
 
 namespace Launcher.Infrastructure.Resources;
 
 /// <summary>
 /// 访问 Modrinth 搜索、版本和依赖接口，并映射到启动器统一资源模型。
 /// </summary>
-internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceProviderClient
+internal sealed class ModrinthResourceClient(HttpClient httpClient, ILogger? logger = null) : IResourceProviderClient
 {
     private const string BaseUrl = "https://api.modrinth.com/v2";
     private static readonly HashSet<string> KnownLoaders = new(StringComparer.OrdinalIgnoreCase)
@@ -47,7 +49,7 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
         if (!Supports(reference.Kind) || string.IsNullOrWhiteSpace(reference.ProjectId))
             return null;
 
-        var project = await httpClient.GetFromJsonAsync<ModrinthProject>(
+        var project = await DownloadHttpDiagnostics.GetFromJsonAsync<ModrinthProject>(httpClient, logger,
             $"{BaseUrl}/project/{Uri.EscapeDataString(reference.ProjectId)}",
             cancellationToken).ConfigureAwait(false);
         return project is null ? null : MapProject(project, reference.Kind);
@@ -76,7 +78,7 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
             facets.Add([$"categories:{MapCategory(category)}"]);
 
         var url = $"{BaseUrl}/search?limit={pageSize}&offset={offset}&index=downloads&query={Uri.EscapeDataString(request.Query ?? string.Empty)}&facets={Uri.EscapeDataString(JsonSerializer.Serialize(facets))}";
-        var response = await httpClient.GetFromJsonAsync<ModrinthSearchResponse>(url, cancellationToken).ConfigureAwait(false);
+        var response = await DownloadHttpDiagnostics.GetFromJsonAsync<ModrinthSearchResponse>(httpClient, logger, url, cancellationToken).ConfigureAwait(false);
         var projects = response?.Hits.Select(hit => new ResourceProject
         {
             Source = Source,
@@ -128,7 +130,7 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
             url += $"?{string.Join("&", query)}";
         }
 
-        var versions = await httpClient.GetFromJsonAsync<List<ModrinthVersion>>(url, cancellationToken).ConfigureAwait(false) ?? [];
+        var versions = await DownloadHttpDiagnostics.GetFromJsonAsync<List<ModrinthVersion>>(httpClient, logger, url, cancellationToken).ConfigureAwait(false) ?? [];
         if (request.Kind is ResourceProjectKind.DataPack)
         {
             // Modrinth exposes data packs as a synthetic project type while the underlying project may also
@@ -161,7 +163,7 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
         if (string.IsNullOrWhiteSpace(projectId) || request.Kind is not ResourceProjectKind.Mod)
             return new ResourceProjectDependenciesResult();
 
-        var versions = await httpClient.GetFromJsonAsync<List<ModrinthVersion>>(
+        var versions = await DownloadHttpDiagnostics.GetFromJsonAsync<List<ModrinthVersion>>(httpClient, logger,
             $"{BaseUrl}/project/{Uri.EscapeDataString(projectId)}/version",
             cancellationToken).ConfigureAwait(false) ?? [];
         var currentIds = CreateCurrentIds(request.ProjectId, request.Slug, projectId);
@@ -183,7 +185,7 @@ internal sealed class ModrinthResourceClient(HttpClient httpClient) : IResourceP
         if (ids.Count == 0)
             return new Dictionary<string, ResourceProject>(StringComparer.OrdinalIgnoreCase);
         var parameter = Uri.EscapeDataString(JsonSerializer.Serialize(ids));
-        var projects = await httpClient.GetFromJsonAsync<List<ModrinthProject>>(
+        var projects = await DownloadHttpDiagnostics.GetFromJsonAsync<List<ModrinthProject>>(httpClient, logger,
             $"{BaseUrl}/projects?ids={parameter}", cancellationToken).ConfigureAwait(false) ?? [];
         return projects
             .Where(project => !string.IsNullOrWhiteSpace(project.Id)

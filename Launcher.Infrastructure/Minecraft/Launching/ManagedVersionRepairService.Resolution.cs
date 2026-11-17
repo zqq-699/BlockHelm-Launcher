@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.Infrastructure.Persistence;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -111,21 +112,31 @@ internal async Task<ResolvedVersionMetadata> FinalizePreparedVersionAsync(
             throw new InstanceRepairException($"Version inheritance cycle detected at {versionName}.");
 
         var versionJson = await ReadVersionJsonAsync(versionDirectory, versionName, cancellationToken);
-        var currentJsonPath = Path.Combine(versionDirectory, $"{versionName}.json");
-        var currentJarPath = Path.Combine(versionDirectory, $"{versionName}.jar");
+        var currentJsonPath = (InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) ?? Path.Combine(versionDirectory, $"{versionName}.json"));
         var currentJarUrl = VanillaVersionMetadataClient.GetClientJarUrl(versionJson);
+        var jarReference = GetStringProperty(versionJson, "jar");
+        ResolvedVersionMetadata? referencedClient = null;
+        if (!string.IsNullOrWhiteSpace(jarReference)
+            && !string.Equals(jarReference, GetStringProperty(versionJson, "id"), StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(jarReference, versionName, StringComparison.OrdinalIgnoreCase))
+        {
+            referencedClient = await ResolveParentVersionAsync(minecraftDirectory, jarReference,
+                downloadSourcePreference, cancellationToken, downloadSpeedLimitMbPerSecond,
+                allowRemoteParentResolution, new HashSet<string>(visitedVersionNames, PathComparer)).ConfigureAwait(false);
+        }
         var inheritsFrom = GetStringProperty(versionJson, "inheritsFrom");
         if (string.IsNullOrWhiteSpace(inheritsFrom))
         {
+            var currentJarPath = InstanceVersionFiles.ResolveJarPath(versionDirectory, versionName);
             return new ResolvedVersionMetadata(
                 versionName,
                 versionJson,
                 File.Exists(currentJarPath) ? currentJarPath : null,
-                currentJarUrl,
+                referencedClient?.ClientJarUrl ?? currentJarUrl,
                 WasModified: false,
-                LocalMetadataPaths: [currentJsonPath],
-                ClientJarSha1: VanillaVersionMetadataClient.GetClientJarSha1(versionJson),
-                ClientJarSize: VanillaVersionMetadataClient.GetClientJarSize(versionJson));
+                LocalMetadataPaths: [currentJsonPath, .. (referencedClient?.LocalMetadataPaths ?? [])],
+                ClientJarSha1: referencedClient?.ClientJarSha1 ?? VanillaVersionMetadataClient.GetClientJarSha1(versionJson),
+                ClientJarSize: referencedClient?.ClientJarSize ?? VanillaVersionMetadataClient.GetClientJarSize(versionJson));
         }
 
         var parent = await ResolveParentVersionAsync(
@@ -141,12 +152,12 @@ internal async Task<ResolvedVersionMetadata> FinalizePreparedVersionAsync(
         return new ResolvedVersionMetadata(
             versionName,
             mergedVersion,
-            parent.LocalJarPath,
-            VanillaVersionMetadataClient.GetClientJarUrl(mergedVersion) ?? parent.ClientJarUrl ?? currentJarUrl,
+            referencedClient?.LocalJarPath ?? parent.LocalJarPath,
+            referencedClient?.ClientJarUrl ?? VanillaVersionMetadataClient.GetClientJarUrl(mergedVersion) ?? parent.ClientJarUrl ?? currentJarUrl,
             WasModified: true,
-            LocalMetadataPaths: [currentJsonPath, .. parent.LocalMetadataPaths],
-            ClientJarSha1: VanillaVersionMetadataClient.GetClientJarSha1(mergedVersion) ?? parent.ClientJarSha1,
-            ClientJarSize: VanillaVersionMetadataClient.GetClientJarSize(mergedVersion) ?? parent.ClientJarSize);
+            LocalMetadataPaths: [currentJsonPath, .. parent.LocalMetadataPaths, .. (referencedClient?.LocalMetadataPaths ?? [])],
+            ClientJarSha1: referencedClient?.ClientJarSha1 ?? VanillaVersionMetadataClient.GetClientJarSha1(mergedVersion) ?? parent.ClientJarSha1,
+            ClientJarSize: referencedClient?.ClientJarSize ?? VanillaVersionMetadataClient.GetClientJarSize(mergedVersion) ?? parent.ClientJarSize);
     }
 
     /// <summary>
@@ -181,6 +192,7 @@ internal async Task<ResolvedVersionMetadata> FinalizePreparedVersionAsync(
         }
         var parentDirectory = Path.GetDirectoryName(parentJsonPath)
             ?? throw new InstanceRepairException($"Inherited version metadata directory is invalid for {parentVersionName}.");
+        parentJsonPath = InstanceVersionFiles.TryResolveVersionJsonPath(parentDirectory, parentVersionName) ?? parentJsonPath;
         if (Directory.Exists(parentDirectory)
             && File.Exists(parentJsonPath))
         {

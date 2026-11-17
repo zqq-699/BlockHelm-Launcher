@@ -39,6 +39,7 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
     {
         if (selectedInstance is null)
             return;
+        var instance = selectedInstance;
 
         // 拖放和文件选择器复用同一校验规则，仅错误反馈载体不同。
         if (!TryValidateImportPaths(archivePaths, Strings.GameSettings_DropShaderPackArchivesOnlyMessage, out var validationMessage))
@@ -57,8 +58,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Starting local shader pack import batch. InstanceId={InstanceId} Source={Source} FileCount={FileCount}",
-            selectedInstance.Id,
+            "Starting local shader pack import batch. InstanceDirectory={InstanceDirectory} Source={Source} FileCount={FileCount}",
+            selectedInstance.InstanceDirectory,
             source,
             archivePaths.Count);
 
@@ -67,13 +68,16 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
             archivePaths,
             async archivePath =>
             {
+                if (!ReferenceEquals(instance, selectedInstance))
+                    return LocalShaderPackImportResult.Failure(LocalShaderPackImportFailureReason.UnexpectedError);
                 logger.LogDebug(
-                    "Importing local shader pack archive. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                    selectedInstance.Id,
+                    "Importing local shader pack archive. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                    selectedInstance.InstanceDirectory,
                     archivePath);
                 return await localShaderPacksViewModel.ImportShaderPackAsync(archivePath, reportStatus: false);
             },
             result => result.IsSuccess);
+        if (!ReferenceEquals(instance, selectedInstance)) return;
 
         if (batch.Failure is not null)
         {
@@ -89,8 +93,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
                     break;
                 case LocalShaderPackImportFailureReason.UnexpectedError:
                     logger.LogWarning(
-                        "Local shader pack import failed unexpectedly after service call. InstanceId={InstanceId} ArchivePath={ArchivePath}",
-                        selectedInstance.Id,
+                        "Local shader pack import failed unexpectedly after service call. InstanceDirectory={InstanceDirectory} ArchivePath={ArchivePath}",
+                        selectedInstance.InstanceDirectory,
                         batch.FailedPath);
                     statusService.Report(Strings.Status_LocalShaderPackImportFailed);
                     break;
@@ -106,8 +110,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
                 : string.Format(Strings.Status_LocalShaderPacksImportedFormat, batch.SuccessCount));
         }
         logger.LogInformation(
-            "Local shader pack import batch completed. InstanceId={InstanceId} RequestedCount={RequestedCount} ImportedCount={ImportedCount}",
-            selectedInstance.Id,
+            "Local shader pack import batch completed. InstanceDirectory={InstanceDirectory} RequestedCount={RequestedCount} ImportedCount={ImportedCount}",
+            selectedInstance.InstanceDirectory,
             archivePaths.Count,
             batch.SuccessCount);
     }

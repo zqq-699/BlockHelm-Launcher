@@ -145,8 +145,8 @@ internal sealed class LaunchSettingsResolver
         {
             logger.LogWarning(
                 exception,
-                "Failed to count enabled mods for automatic memory allocation. InstanceId={InstanceId}",
-                instance.Id);
+                "Failed to count enabled mods for automatic memory allocation. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
             return 0;
         }
     }

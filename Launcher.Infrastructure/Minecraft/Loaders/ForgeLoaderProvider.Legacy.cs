@@ -84,16 +84,16 @@ public sealed partial class ForgeLoaderProvider
         {
             using var archive = ZipFile.OpenRead(installerJarPath);
             var profileEntry = archive.GetEntry("install_profile.json")
-                ?? throw new InvalidDataException("Legacy Forge installer is missing install_profile.json.");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException("Legacy Forge installer is missing install_profile.json."), "DownloadValidation", ("Reason", "Legacy Forge installer is missing install_profile.json."));
 
             await using var profileStream = profileEntry.Open();
             var profileNode = await JsonNode.ParseAsync(profileStream, cancellationToken: cancellationToken)
-                ?? throw new InvalidDataException("Legacy Forge install_profile.json is empty.");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException("Legacy Forge install_profile.json is empty."), "DownloadValidation", ("Reason", "Legacy Forge install_profile.json is empty."));
             var profileObject = profileNode.AsObject();
             var installObject = profileObject["install"] as JsonObject
-                ?? throw new InvalidDataException("Legacy Forge install_profile.json is missing install.");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException("Legacy Forge install_profile.json is missing install."), "DownloadValidation", ("Reason", "Legacy Forge install_profile.json is missing install."));
             var versionInfo = profileObject["versionInfo"] as JsonObject
-                ?? throw new InvalidDataException("Legacy Forge install_profile.json is missing versionInfo.");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException("Legacy Forge install_profile.json is missing versionInfo."), "DownloadValidation", ("Reason", "Legacy Forge install_profile.json is missing versionInfo."));
 
             var sourceVersionName = GetRequiredString(versionInfo, "id", "versionInfo.id");
             var installMinecraftVersion = GetStringProperty(installObject, "minecraft");
@@ -219,7 +219,7 @@ public sealed partial class ForgeLoaderProvider
         return node[name]?.GetValue<string>() ?? string.Empty;
     }
 
-    private static VersionJsonMetadata? TryReadVersionMetadata(string versionDirectory, string versionName)
+    private static VersionJsonMetadata? TryReadVersionMetadata(string versionDirectory, string versionName, ILogger? diagnosticLogger = null)
     {
         var versionJsonPath = Path.Combine(versionDirectory, $"{versionName}.json");
         if (!File.Exists(versionJsonPath))
@@ -236,16 +236,19 @@ public sealed partial class ForgeLoaderProvider
                 GetStringProperty(root, "jar"),
                 ReadLibraryNames(root));
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
+            diagnosticLogger?.LogWarning(exception, "Installer version metadata could not be read. VersionName={VersionName} Stage=InstalledVersionIdentification", versionName);
             return null;
         }
-        catch (IOException)
+        catch (IOException exception)
         {
+            diagnosticLogger?.LogWarning(exception, "Installer version metadata could not be read. VersionName={VersionName} Stage=InstalledVersionIdentification", versionName);
             return null;
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException exception)
         {
+            diagnosticLogger?.LogWarning(exception, "Installer version metadata could not be read. VersionName={VersionName} Stage=InstalledVersionIdentification", versionName);
             return null;
         }
     }

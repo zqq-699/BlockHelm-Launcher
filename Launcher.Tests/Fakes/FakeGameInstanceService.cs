@@ -50,7 +50,7 @@ internal sealed class FakeGameInstanceService : IGameInstanceService
     public bool LastInstallFabricApi { get; private set; } = true;
     public string? LastFabricApiVersionId { get; private set; }
     public string? LastQuiltStandardLibraryVersionId { get; private set; }
-    public string? LastDefaultInstanceId { get; private set; }
+    public string? LastDefaultInstanceDirectory { get; private set; }
     public string? LastDeletedInstanceId { get; private set; }
     public string? LastRenamedInstanceId { get; private set; }
     public string? LastRenamedName { get; private set; }
@@ -172,7 +172,7 @@ internal sealed class FakeGameInstanceService : IGameInstanceService
             SaveCallCount++;
             LastSavedInstance = instance;
 
-            var index = CreatedInstances.FindIndex(existing => existing.Id == instance.Id);
+            var index = CreatedInstances.FindIndex(existing => existing.InstanceDirectory == instance.InstanceDirectory);
             if (index >= 0)
                 CreatedInstances[index] = instance;
             else
@@ -197,7 +197,7 @@ internal sealed class FakeGameInstanceService : IGameInstanceService
             if (RenameException is not null)
                 throw RenameException;
 
-            var index = CreatedInstances.FindIndex(existing => existing.Id == instanceId);
+            var index = CreatedInstances.FindIndex(existing => existing.InstanceDirectory == instanceId);
             var instance = CreatedInstances[index];
             var updated = ReturnNewInstanceOnRename ? CloneGameInstance(instance) : instance;
             updated.Name = string.IsNullOrWhiteSpace(newName) ? updated.Name : newName.Trim();
@@ -213,8 +213,8 @@ internal sealed class FakeGameInstanceService : IGameInstanceService
     {
         lock (syncRoot)
         {
-            LastDefaultInstanceId = instanceId;
-            return Task.FromResult(CreatedInstances.Any(instance => instance.Id == instanceId));
+            LastDefaultInstanceDirectory = instanceId;
+            return Task.FromResult(CreatedInstances.Any(instance => instance.InstanceDirectory == instanceId));
         }
     }
 
@@ -228,7 +228,7 @@ internal sealed class FakeGameInstanceService : IGameInstanceService
             DeleteCallCount++;
             handler = DeleteHandler;
             if (handler is null)
-                return CreatedInstances.RemoveAll(instance => instance.Id == instanceId) > 0;
+                return CreatedInstances.RemoveAll(instance => instance.InstanceDirectory == instanceId) > 0;
         }
 
         var deleted = await handler(instanceId, cancellationToken);
@@ -236,14 +236,13 @@ internal sealed class FakeGameInstanceService : IGameInstanceService
             return false;
 
         lock (syncRoot)
-            return CreatedInstances.RemoveAll(instance => instance.Id == instanceId) > 0;
+            return CreatedInstances.RemoveAll(instance => instance.InstanceDirectory == instanceId) > 0;
     }
 
     private static GameInstance CloneGameInstance(GameInstance instance)
     {
         return new GameInstance
         {
-            Id = instance.Id,
             Name = instance.Name,
             MinecraftVersion = instance.MinecraftVersion,
             Loader = instance.Loader,

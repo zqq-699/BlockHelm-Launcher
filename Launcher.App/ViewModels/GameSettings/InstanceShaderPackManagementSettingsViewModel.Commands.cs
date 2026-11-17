@@ -39,8 +39,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
             return;
 
         logger.LogInformation(
-            "Online shader pack install requested from instance shader pack management. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}",
-            selectedInstance.Id,
+            "Online shader pack install requested from instance shader pack management. InstanceDirectory={InstanceDirectory}, MinecraftVersion={MinecraftVersion}",
+            selectedInstance.InstanceDirectory,
             selectedInstance.MinecraftVersion);
         OnlineShaderPackInstallRequested?.Invoke(selectedInstance);
     }
@@ -53,25 +53,24 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
     }
 
 [RelayCommand]
-    private void OpenShaderPackFolder()
+    private async Task OpenShaderPackFolder()
     {
         if (selectedInstance is null)
             return;
 
         try
         {
-            var shaderPacksDirectory = instanceFolderService.EnsureDirectoryExists(
-                Path.Combine(selectedInstance.InstanceDirectory, "shaderpacks"));
+            var shaderPacksDirectory = await instanceFolderService.EnsureInstanceContentDirectoryAsync(selectedInstance, ResourceProjectKind.ShaderPack);
             logger.LogDebug(
-                "Opening shader pack folder. InstanceId={InstanceId} ShaderPacksDirectory={ShaderPacksDirectory}",
-                selectedInstance.Id,
+                "Opening shader pack folder. InstanceDirectory={InstanceDirectory} ShaderPacksDirectory={ShaderPacksDirectory}",
+                selectedInstance.InstanceDirectory,
                 shaderPacksDirectory);
 
             if (!instanceFolderService.TryOpen(shaderPacksDirectory))
             {
                 logger.LogWarning(
-                    "Failed to open shader pack folder. InstanceId={InstanceId} ShaderPacksDirectory={ShaderPacksDirectory}",
-                    selectedInstance.Id,
+                    "Failed to open shader pack folder. InstanceDirectory={InstanceDirectory} ShaderPacksDirectory={ShaderPacksDirectory}",
+                    selectedInstance.InstanceDirectory,
                     shaderPacksDirectory);
                 statusService.Report(Strings.Status_OpenLocalShaderPackFolderFailed);
             }
@@ -80,8 +79,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to prepare shader pack folder for opening. InstanceId={InstanceId}",
-                selectedInstance.Id);
+                "Failed to prepare shader pack folder for opening. InstanceDirectory={InstanceDirectory}",
+                selectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_OpenLocalShaderPackFolderFailed);
         }
     }
@@ -163,8 +162,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
             if (!instanceFolderService.TryRevealFile(shaderPack.FullPath))
             {
                 logger.LogWarning(
-                    "Failed to reveal local shader pack file. InstanceId={InstanceId} Path={Path}",
-                    selectedInstance?.Id ?? "<none>",
+                    "Failed to reveal local shader pack file. InstanceDirectory={InstanceDirectory} Path={Path}",
+                    selectedInstance?.InstanceDirectory ?? "<none>",
                     shaderPack.FullPath);
                 statusService.Report(Strings.Status_OpenLocalShaderPackLocationFailed);
             }
@@ -173,8 +172,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to reveal local shader pack file. InstanceId={InstanceId} Path={Path}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to reveal local shader pack file. InstanceDirectory={InstanceDirectory} Path={Path}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 shaderPack.FullPath);
             statusService.Report(Strings.Status_OpenLocalShaderPackLocationFailed);
         }
@@ -232,8 +231,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Deleting selected shader packs. InstanceId={InstanceId} Count={Count}",
-            selectedInstance?.Id ?? "<none>",
+            "Deleting selected shader packs. InstanceDirectory={InstanceDirectory} Count={Count}",
+            selectedInstance?.InstanceDirectory ?? "<none>",
             shaderPacksToDelete.Count);
         try
         {
@@ -250,8 +249,8 @@ public sealed partial class InstanceShaderPackManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to delete selected shader packs. InstanceId={InstanceId}",
-                selectedInstance?.Id ?? "<none>");
+                "Failed to delete selected shader packs. InstanceDirectory={InstanceDirectory}",
+                selectedInstance?.InstanceDirectory ?? "<none>");
             statusService.Report(Strings.Status_SelectedShaderPacksDeleteFailed);
         }
     }

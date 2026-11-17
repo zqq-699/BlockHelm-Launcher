@@ -130,7 +130,7 @@ internal interface IFinalVersionInstaller
     }
 }
 
-internal sealed class FinalVersionInstaller : IFinalVersionInstaller
+internal sealed class FinalVersionInstaller(ILogger? logger = null) : IFinalVersionInstaller
 {
     public Task InstallAsync(
         string gameDirectory,
@@ -224,6 +224,7 @@ internal sealed class FinalVersionInstaller : IFinalVersionInstaller
             path,
             progress,
             downloadSourcePreference,
+            logger: logger,
             downloadSpeedLimitMbPerSecond: downloadSpeedLimitMbPerSecond,
             operationContext: operationContext,
             sharedSpeedMeter: speedMeter);
@@ -237,15 +238,17 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
     internal const string InstallClientUnrecognizedOptionMessage = "'installClient' is not a recognized option";
     private static readonly TimeSpan ProcessTerminationTimeout = TimeSpan.FromSeconds(5);
     private readonly Func<ProcessStartInfo, Process?> startProcess;
+    private readonly ILogger? logger;
 
-    public ForgeInstallerRunner()
-        : this(Process.Start)
+    public ForgeInstallerRunner(ILogger? logger = null)
+        : this(Process.Start, logger)
     {
     }
 
-    internal ForgeInstallerRunner(Func<ProcessStartInfo, Process?> startProcess)
+    internal ForgeInstallerRunner(Func<ProcessStartInfo, Process?> startProcess, ILogger? logger = null)
     {
         this.startProcess = startProcess ?? throw new ArgumentNullException(nameof(startProcess));
+        this.logger = logger;
     }
 
     public Task RunInstallerAsync(
@@ -289,6 +292,9 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
                 nameof(javaExecutablePath));
         }
 
+        using var operation = DownloadDiagnostics.BeginOperation(logger, "LoaderInstallerProcess");
+        var stopwatch = Stopwatch.StartNew();
+        logger?.LogInformation("Loader installer process starting. JavaPath={JavaPath} InstallerFile={InstallerFile} WorkingDirectory={WorkingDirectory} InstallMode={InstallMode}", javaExecutablePath, Path.GetFileName(installerJarPath), minecraftDirectory, installArgument);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -307,10 +313,17 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
             startInfo.ArgumentList.Add(minecraftDirectory);
 
             using var process = startProcess(startInfo)
-                ?? throw new InvalidOperationException("Forge installer could not be started.");
+                ?? throw SafeExceptionLog.Describe(new InvalidOperationException("Forge installer could not be started."), "DownloadValidation", ("Reason", "Forge installer could not be started."));
 
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            var errorTask = process.StandardError.ReadToEndAsync();
+            // The JVM echoes these inherited values before main(). Treat them as secrets;
+            // inspect only these known entries, never enumerate or log the environment.
+            var inheritedOptions = new[] { "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS" }
+                .Select(name => startInfo.Environment.TryGetValue(name, out var value) ? value : null)
+                .Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!).ToArray();
+            var capture = new InstallerProcessOutput(logger, process.Id, inheritedOptions);
+            var outputTask = capture.PumpAsync(process.StandardOutput, "stdout");
+            var errorTask = capture.PumpAsync(process.StandardError, "stderr");
+            using var heartbeat = new Timer(_ => logger?.LogInformation("Loader installer process still running. ProcessId={ProcessId} DurationMs={DurationMs} LastOutputAgeMs={LastOutputAgeMs}", process.Id, stopwatch.ElapsedMilliseconds, capture.SinceLastOutput.TotalMilliseconds), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
 
             try
             {
@@ -318,27 +331,33 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                await TerminateProcessTreeAsync(process, outputTask, errorTask).ConfigureAwait(false);
+                try { await TerminateProcessTreeAsync(process, outputTask, errorTask).ConfigureAwait(false); }
+                catch (Exception cleanupException)
+                {
+                    logger?.LogError(cleanupException, "Canceled installer process cleanup failed. ProcessId={ProcessId} PrimaryFailure=Cancellation", process.Id);
+                    throw new OperationCanceledException("The installer was canceled; process cleanup also failed.", cleanupException, cancellationToken);
+                }
+                logger?.LogInformation("Loader installer process canceled and terminated. ProcessId={ProcessId} DurationMs={DurationMs} StdoutTail={StdoutTail} StderrTail={StderrTail}", process.Id, stopwatch.ElapsedMilliseconds, await outputTask, await errorTask);
                 throw;
             }
 
             var output = await outputTask;
             var error = await errorTask;
+            logger?.LogInformation("Loader installer process exited. ProcessId={ProcessId} ExitCode={ExitCode} DurationMs={DurationMs}", process.Id, process.ExitCode, stopwatch.ElapsedMilliseconds);
             if (process.ExitCode == 0)
                 return;
-
-            var details = string.IsNullOrWhiteSpace(error) ? output : error;
-            throw new InvalidOperationException(
-                string.IsNullOrWhiteSpace(details)
-                    ? $"Forge installer exited with code {process.ExitCode}."
-                    : $"Forge installer exited with code {process.ExitCode}: {details.Trim()}");
+            var failure = new InstallerProcessException(process.ExitCode, capture.UnsupportedInstallClient, output, error);
+            logger?.LogError(failure, "Loader installer process failed. ProcessId={ProcessId} ExitCode={ExitCode}", process.Id, process.ExitCode);
+            throw failure;
         }
         catch (Win32Exception exception)
         {
+            logger?.LogError(exception, "Loader installer process could not start. JavaPath={JavaPath} Stage=JavaProcessStart", javaExecutablePath);
             throw new InvalidOperationException("No usable Java runtime was found for Forge installation.", exception);
         }
         catch (FileNotFoundException exception)
         {
+            logger?.LogError(exception, "Loader installer executable was not found. JavaPath={JavaPath} Stage=JavaProcessStart", javaExecutablePath);
             throw new InvalidOperationException("No usable Java runtime was found for Forge installation.", exception);
         }
     }

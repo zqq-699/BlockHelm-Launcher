@@ -35,6 +35,8 @@ namespace Launcher.App.ViewModels.GameSettings;
 /// </summary>
 public sealed partial class InstanceSaveManagementSettingsViewModel : GameSettingsDetailsSectionViewModelBase
 {
+    internal long ContentRevision => localSavesViewModel.Revision;
+
     // 本地数据由 LocalSavesViewModel 负责；本类只维护页面投影、交互选择和 UI 服务协调。
     private readonly LocalSavesViewModel localSavesViewModel;
     private readonly IStatusService statusService;
@@ -199,9 +201,16 @@ public sealed partial class InstanceSaveManagementSettingsViewModel : GameSettin
             return true;
         }
 
+        var changed = !ReferenceEquals(selectedInstance, instance);
+        if (changed)
+        {
+            Interlocked.Increment(ref lifecycleGeneration);
+            loadTask = null;
+        }
         selectedInstance = instance;
+        localSavesViewModel.SetSelectedInstance(instance);
         ImportLocalSaveCommand.NotifyCanExecuteChanged();
-        return false;
+        return changed;
     }
 
     public override void OnSectionDeactivated()
@@ -289,7 +298,7 @@ public sealed partial class InstanceSaveManagementSettingsViewModel : GameSettin
     {
         return isSectionActive
             && generation == Volatile.Read(ref lifecycleGeneration)
-            && string.Equals(expectedInstance.Id, selectedInstance?.Id, StringComparison.Ordinal)
+            && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.Ordinal)
             && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 }

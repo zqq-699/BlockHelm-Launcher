@@ -39,8 +39,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
             return;
 
         logger.LogInformation(
-            "Online resource pack install requested from instance resource pack management. InstanceId={InstanceId}, MinecraftVersion={MinecraftVersion}",
-            selectedInstance.Id,
+            "Online resource pack install requested from instance resource pack management. InstanceDirectory={InstanceDirectory}, MinecraftVersion={MinecraftVersion}",
+            selectedInstance.InstanceDirectory,
             selectedInstance.MinecraftVersion);
         OnlineResourcePackInstallRequested?.Invoke(selectedInstance);
     }
@@ -53,25 +53,24 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
     }
 
 [RelayCommand]
-    private void OpenResourcePackFolder()
+    private async Task OpenResourcePackFolder()
     {
         if (selectedInstance is null)
             return;
 
         try
         {
-            var resourcePacksDirectory = instanceFolderService.EnsureDirectoryExists(
-                Path.Combine(selectedInstance.InstanceDirectory, "resourcepacks"));
+            var resourcePacksDirectory = await instanceFolderService.EnsureInstanceContentDirectoryAsync(selectedInstance, ResourceProjectKind.ResourcePack);
             logger.LogDebug(
-                "Opening resource pack folder. InstanceId={InstanceId} ResourcePacksDirectory={ResourcePacksDirectory}",
-                selectedInstance.Id,
+                "Opening resource pack folder. InstanceDirectory={InstanceDirectory} ResourcePacksDirectory={ResourcePacksDirectory}",
+                selectedInstance.InstanceDirectory,
                 resourcePacksDirectory);
 
             if (!instanceFolderService.TryOpen(resourcePacksDirectory))
             {
                 logger.LogWarning(
-                    "Failed to open resource pack folder. InstanceId={InstanceId} ResourcePacksDirectory={ResourcePacksDirectory}",
-                    selectedInstance.Id,
+                    "Failed to open resource pack folder. InstanceDirectory={InstanceDirectory} ResourcePacksDirectory={ResourcePacksDirectory}",
+                    selectedInstance.InstanceDirectory,
                     resourcePacksDirectory);
                 statusService.Report(Strings.Status_OpenLocalResourcePackFolderFailed);
             }
@@ -80,8 +79,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to prepare resource pack folder for opening. InstanceId={InstanceId}",
-                selectedInstance.Id);
+                "Failed to prepare resource pack folder for opening. InstanceDirectory={InstanceDirectory}",
+                selectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_OpenLocalResourcePackFolderFailed);
         }
     }
@@ -163,8 +162,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
             if (!instanceFolderService.TryRevealFile(resourcePack.FullPath))
             {
                 logger.LogWarning(
-                    "Failed to reveal local resource pack file. InstanceId={InstanceId} Path={Path}",
-                    selectedInstance?.Id ?? "<none>",
+                    "Failed to reveal local resource pack file. InstanceDirectory={InstanceDirectory} Path={Path}",
+                    selectedInstance?.InstanceDirectory ?? "<none>",
                     resourcePack.FullPath);
                 statusService.Report(Strings.Status_OpenLocalResourcePackLocationFailed);
             }
@@ -173,8 +172,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to reveal local resource pack file. InstanceId={InstanceId} Path={Path}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to reveal local resource pack file. InstanceDirectory={InstanceDirectory} Path={Path}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 resourcePack.FullPath);
             statusService.Report(Strings.Status_OpenLocalResourcePackLocationFailed);
         }
@@ -232,8 +231,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Deleting selected resource packs. InstanceId={InstanceId} Count={Count}",
-            selectedInstance?.Id ?? "<none>",
+            "Deleting selected resource packs. InstanceDirectory={InstanceDirectory} Count={Count}",
+            selectedInstance?.InstanceDirectory ?? "<none>",
             resourcePacksToDelete.Count);
         try
         {
@@ -250,8 +249,8 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to delete selected resource packs. InstanceId={InstanceId}",
-                selectedInstance?.Id ?? "<none>");
+                "Failed to delete selected resource packs. InstanceDirectory={InstanceDirectory}",
+                selectedInstance?.InstanceDirectory ?? "<none>");
             statusService.Report(Strings.Status_SelectedResourcePacksDeleteFailed);
         }
     }

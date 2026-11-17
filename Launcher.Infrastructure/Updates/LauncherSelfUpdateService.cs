@@ -57,6 +57,7 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
         LauncherUpdateInfo update,
         CancellationToken cancellationToken = default)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "LauncherUpdate");
         if (!update.CanAutoInstall)
             return LauncherSelfUpdateStartResult.Failed("The update asset metadata is incomplete.");
         if (string.IsNullOrWhiteSpace(currentExecutablePath))
@@ -76,6 +77,8 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            if (DownloadDiagnostics.Capture().TryGetValue("OperationId", out var operationId) && operationId is string id)
+                startInfo.Environment["BLOCKHELM_UPDATE_OPERATION_ID"] = id;
             startInfo.ArgumentList.Add("--apply-update");
             startInfo.ArgumentList.Add("--pid");
             startInfo.ArgumentList.Add(currentProcessId.ToString());
@@ -107,7 +110,7 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
         {
             if (downloadPath is not null)
                 cacheCleaner.CleanupCachedUpdater(downloadPath);
-            logger?.LogWarning("Launcher self update verification or startup failed. ErrorType={ErrorType} HResult={HResult}", exception.GetType().Name, exception.HResult);
+            logger?.LogWarning(exception, "Launcher self update verification or startup failed. ErrorType={ErrorType} HResult={HResult}", exception.GetType().Name, exception.HResult);
             return LauncherSelfUpdateStartResult.Failed("The launcher update could not be verified or started.");
         }
     }
@@ -121,7 +124,7 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
         foreach (var source in downloadUrls.OrderBy(url => url.Priority))
         {
             if (!TryValidateDownloadUrl(source.Url, update.DownloadFileName, out var uri, out var fileName))
-                throw new UpdateSecurityException("The update contains an invalid download URL.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update contains an invalid download URL."), "ComponentValidation", ("Reason", "The update contains an invalid download URL."));
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -134,6 +137,7 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
                 lastUnavailableException = new UpdateSourceUnavailableException(
                     "The update executable source timed out.", exception);
                 logger?.LogWarning(
+                    exception,
                     "Launcher update executable source timed out. Source={Source} Host={Host} ErrorType={ErrorType}",
                     source.Name, uri.Host, exception.GetType().Name);
             }
@@ -141,6 +145,7 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
             {
                 lastUnavailableException = exception;
                 logger?.LogWarning(
+                    exception,
                     "Launcher update executable source unavailable. Source={Source} Host={Host} ErrorType={ErrorType}",
                     source.Name, uri.Host, exception.GetType().Name);
             }
@@ -163,9 +168,9 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
         try
         {
             using var response = await OfficialUpdateHttp.SendAsync(
-                httpClient, uri, OfficialUpdateUriKind.Executable, cancellationToken).ConfigureAwait(false);
+                httpClient, uri, OfficialUpdateUriKind.Executable, cancellationToken, logger).ConfigureAwait(false);
             if (response.Content.Headers.ContentLength is { } contentLength && contentLength != update.SizeBytes)
-                throw new UpdateSecurityException("The update executable Content-Length does not match the manifest.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update executable Content-Length does not match the manifest."), "UpdateContentLengthMismatch", ("ExpectedSize", update.SizeBytes), ("ActualSize", contentLength));
 
             await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             await using var output = new FileStream(
@@ -174,6 +179,7 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buffer = new byte[81920];
             long totalBytes = 0;
+            using var heartbeat = new Timer(_ => logger?.LogInformation("Launcher update download still running. Source={Source} DownloadedBytes={DownloadedBytes} ExpectedBytes={ExpectedBytes}", sourceName, Interlocked.Read(ref totalBytes), update.SizeBytes), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
             while (true)
             {
                 int read;
@@ -188,16 +194,16 @@ public sealed class LauncherSelfUpdateService : ILauncherSelfUpdateService
                 if (read == 0) break;
                 totalBytes += read;
             if (totalBytes > update.SizeBytes)
-                    throw new UpdateSecurityException("The update executable exceeded the declared size.");
+                    throw SafeExceptionLog.Describe(new UpdateSecurityException("The update executable exceeded the declared size."), "ComponentValidation", ("Reason", "The update executable exceeded the declared size."));
                 hash.AppendData(buffer, 0, read);
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             }
             await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             if (totalBytes != update.SizeBytes)
-                throw new UpdateSecurityException("The update executable size does not match the manifest.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update executable size does not match the manifest."), "UpdateSizeMismatch", ("ExpectedSize", update.SizeBytes), ("ActualSize", totalBytes));
             var actualHash = Convert.ToHexString(hash.GetHashAndReset());
             if (!string.Equals(actualHash, update.Sha256, StringComparison.OrdinalIgnoreCase))
-                throw new UpdateSecurityException("The update executable SHA-256 does not match the manifest.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update executable SHA-256 does not match the manifest."), "UpdateHashMismatch", ("ExpectedHash", update.Sha256), ("ActualHash", actualHash), ("HashAlgorithm", "SHA256"));
 
             await output.DisposeAsync().ConfigureAwait(false);
             File.Move(temporaryPath, downloadPath, overwrite: true);

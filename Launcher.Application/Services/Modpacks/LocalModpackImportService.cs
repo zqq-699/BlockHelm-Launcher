@@ -106,8 +106,10 @@ public sealed class LocalModpackImportService : ILocalModpackImportService
         IProgress<LauncherProgress>? progress,
         CancellationToken cancellationToken = default,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        Func<StagedModpackInstance, Task>? prepareInstanceAsync = null)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "ModpackImport");
         // 会话记录每个阶段已经取得的资源，使成功与任意失败点都能按实际进度执行对应清理。
         var importStopwatch = Stopwatch.StartNew();
         var importProgress = progress is null ? null : new OverallModpackImportProgress(progress);
@@ -122,15 +124,15 @@ public sealed class LocalModpackImportService : ILocalModpackImportService
                     downloadSpeedLimitMbPerSecond,
                     cancellationToken)
                 .ConfigureAwait(false);
-            await FinalizeImportAsync(session, manualDownloads, cancellationToken).ConfigureAwait(false);
+            await FinalizeImportAsync(session, manualDownloads, prepareInstanceAsync, cancellationToken).ConfigureAwait(false);
 
             var preparedModpack = session.PreparedModpack!;
             var importedInstance = session.ImportedInstance!;
             await cleanupCoordinator.CleanupSuccessfulImportAsync(preparedModpack).ConfigureAwait(false);
 
             logger.LogInformation(
-                "Modpack import completed. InstanceId={InstanceId} InstanceName={InstanceName} ManualDownloadCount={ManualDownloadCount} DurationMs={DurationMs}",
-                importedInstance.Id,
+                "Modpack import completed. InstanceDirectory={InstanceDirectory} InstanceName={InstanceName} ManualDownloadCount={ManualDownloadCount} DurationMs={DurationMs}",
+                importedInstance.InstanceDirectory,
                 importedInstance.Name,
                 preparedModpack.ManualDownloads.Count,
                 importStopwatch.ElapsedMilliseconds);
@@ -248,29 +250,28 @@ public sealed class LocalModpackImportService : ILocalModpackImportService
             preparedModpack.Files.Count,
             preparedModpack.Loader);
 
+        var failureTracker = new ParallelDownloadFailureTracker(logger, cancellationToken, () => SafeCancel(importCancellation));
         var downloadModsTask = CompleteParallelBranchAsync(
-            DownloadModpackFilesWithTimingAsync(
+            failureTracker.RunAsync("PackFiles", () => DownloadModpackFilesWithTimingAsync(
                 preparedModpack,
                 stagedInstance,
                 packFileProgress,
                 importCancellationToken,
                 downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond),
+                downloadSpeedLimitMbPerSecond)),
             importProgress,
             ModpackImportProgressBranch.PackFiles);
-        _ = CancelImportOnBranchFailureAsync(downloadModsTask, importCancellation);
 
         var loaderInstallTask = CompleteParallelBranchAsync(
-            InstallLoaderIntoStagingAsync(
+            failureTracker.RunAsync("LoaderInstall", () => InstallLoaderIntoStagingAsync(
                 preparedModpack,
                 stagedInstance,
                 loaderProgress,
                 importCancellationToken,
                 downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond),
+                downloadSpeedLimitMbPerSecond)),
             importProgress,
             ModpackImportProgressBranch.LoaderInstall);
-        _ = CancelImportOnBranchFailureAsync(loaderInstallTask, importCancellation);
 
         await AwaitImportBranchesAsync(importCancellation, loaderInstallTask, downloadModsTask)
             .ConfigureAwait(false);
@@ -317,6 +318,7 @@ public sealed class LocalModpackImportService : ILocalModpackImportService
     private async Task FinalizeImportAsync(
         ModpackImportSession session,
         IReadOnlyList<ManualModpackDownload> manualDownloads,
+        Func<StagedModpackInstance, Task>? prepareInstanceAsync,
         CancellationToken cancellationToken)
     {
         var preparedModpack = session.PreparedModpack!;
@@ -348,6 +350,8 @@ public sealed class LocalModpackImportService : ILocalModpackImportService
                 manualDownloads,
                 cancellationToken)
             .ConfigureAwait(false);
+        if (prepareInstanceAsync is not null)
+            await prepareInstanceAsync(stagedInstance).ConfigureAwait(false);
         logger.LogInformation(
             "Modpack instance commit started. InstanceName={InstanceName} VersionName={VersionName} ManualDownloadCount={ManualDownloadCount}",
             stagedInstance.ResolvedInstanceName,
@@ -357,8 +361,8 @@ public sealed class LocalModpackImportService : ILocalModpackImportService
             .FinalizeAsync(stagedInstance, session.FinalVersionName!, cancellationToken)
             .ConfigureAwait(false);
         logger.LogInformation(
-            "Modpack instance commit completed. InstanceId={InstanceId} InstanceName={InstanceName} DurationMs={DurationMs}",
-            session.ImportedInstance.Id,
+            "Modpack instance commit completed. InstanceDirectory={InstanceDirectory} InstanceName={InstanceName} DurationMs={DurationMs}",
+            session.ImportedInstance.InstanceDirectory,
             session.ImportedInstance.Name,
             finalizeStopwatch.ElapsedMilliseconds);
     }

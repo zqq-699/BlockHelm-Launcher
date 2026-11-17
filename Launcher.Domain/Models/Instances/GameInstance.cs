@@ -21,7 +21,6 @@ namespace Launcher.Domain.Models;
 
 public sealed class GameInstance
 {
-    public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = string.Empty;
     public string MinecraftVersion { get; set; } = string.Empty;
     public LoaderKind Loader { get; set; } = LoaderKind.Vanilla;

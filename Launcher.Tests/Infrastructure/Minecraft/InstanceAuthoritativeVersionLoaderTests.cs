@@ -18,6 +18,25 @@ public sealed class InstanceAuthoritativeVersionLoaderTests : TestTempDirectory
 {
     private const string FabricMainClass = "net.fabricmc.loader.impl.launch.knot.KnotClient";
 
+    [Fact]
+    public async Task RestoreStagingIsNotAvailableAsALocalLaunchVersion()
+    {
+        var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");
+        const string stagingName = ".launcher-restore-orphan";
+        var staged = Path.Combine(minecraftDirectory, "versions", stagingName, "restored");
+        Directory.CreateDirectory(staged);
+        await File.WriteAllTextAsync(Path.Combine(staged, "Pack.json"),
+            """{"id":"Pack","mainClass":"example.Main","libraries":[]}""");
+        var path = new MinecraftPath(minecraftDirectory);
+        var loader = new InstanceAuthoritativeVersionLoader(path, (_, _) =>
+            throw new InvalidOperationException("Unexpected remote metadata request."));
+        var versions = await loader.GetVersionMetadatasAsync();
+
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            versions.GetAndSaveVersionAsync(stagingName, path, CancellationToken.None));
+    }
+
+
     [Theory]
     [InlineData("net.fabricmc.loader.impl.launch.knot.KnotClient", "net.fabricmc:fabric-loader:0.19.3")]
     [InlineData("cpw.mods.bootstraplauncher.BootstrapLauncher", "net.neoforged:neoforge:1.0.0")]

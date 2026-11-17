@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.App.Logging;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -562,6 +563,7 @@ public sealed class CapeCarousel3DControl : Grid
         {
             // BitmapImage 自行异步下载；忽略 WPF 全局图片缓存可避免账户切换后使用陈旧纹理。
             var bitmap = new BitmapImage();
+            ImageLoadDiagnostics.Observe(bitmap, source);
             bitmap.BeginInit();
             bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
             var sourceUri = new Uri(source, UriKind.RelativeOrAbsolute);
@@ -581,8 +583,9 @@ public sealed class CapeCarousel3DControl : Grid
                 StoreLoadedCapeTexture(source, bitmap);
             }
         }
-        catch
+        catch (Exception exception)
         {
+            ImageLoadDiagnostics.Failed(source, exception);
             capeTextureRequests.Remove(source);
         }
     }

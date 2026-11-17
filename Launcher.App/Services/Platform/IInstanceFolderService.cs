@@ -25,6 +25,10 @@ public interface IInstanceFolderService
 
     string EnsureDirectoryExists(string folderPath);
 
+    Task<string> EnsureInstanceContentDirectoryAsync(Launcher.Domain.Models.GameInstance instance,
+        Launcher.Domain.Models.ResourceProjectKind kind)
+        => throw new NotSupportedException("Instance content directory creation is unavailable.");
+
     bool TryOpen(string folderPath);
 
     bool TryOpenFile(string filePath);

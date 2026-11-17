@@ -75,14 +75,12 @@ public sealed class GameVersionService : IGameVersionService
                 if (manifestNode is not JsonObject manifestObject
                     || manifestObject["versions"] is not JsonArray versionEntries)
                 {
-                    throw new DownloadContentValidationException(
-                        "Minecraft version manifest is missing a versions array.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest is missing a versions array."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest is missing a versions array."));
                 }
 
                 if (versionEntries.Count == 0 || versionEntries.Any(entry => !IsValidVersionEntry(entry)))
                 {
-                    throw new DownloadContentValidationException(
-                        "Minecraft version manifest contains an invalid version entry.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest contains an invalid version entry."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest contains an invalid version entry."));
                 }
 
                 try
@@ -103,7 +101,7 @@ public sealed class GameVersionService : IGameVersionService
                 }
                 catch (Exception exception) when (exception is FormatException or InvalidOperationException)
                 {
-                    throw new DownloadContentValidationException("Minecraft version manifest contains invalid version metadata.", exception);
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest contains invalid version metadata.", exception), "DownloadContentValidationException", ("Reason", "Minecraft version manifest contains invalid version metadata."));
                 }
             },
             _ => false,

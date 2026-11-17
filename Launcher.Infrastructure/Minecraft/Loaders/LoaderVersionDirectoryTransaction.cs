@@ -21,6 +21,8 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Microsoft.Extensions.Logging;
+
 namespace Launcher.Infrastructure.Minecraft;
 
 /// <summary>
@@ -109,14 +111,24 @@ internal static class LoaderVersionDirectoryTransaction
     public static void CleanupCreatedVersionDirectories(
         string gameDirectory,
         HashSet<string> existingVersionNames,
-        string? preserveVersionName)
+        string? preserveVersionName, ILogger? logger = null)
     {
         var versionsDirectory = Path.Combine(gameDirectory, "versions");
         if (!Directory.Exists(versionsDirectory))
             return;
 
         // 安装前已存在的版本以及明确保留的最终版本永远不会被清理。
-        foreach (var directory in Directory.GetDirectories(versionsDirectory))
+        string[] directories;
+        try
+        {
+            directories = Directory.GetDirectories(versionsDirectory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger?.LogWarning(exception, "Loader workspace cleanup enumeration failed. Directory={Directory} Stage=Cleanup", versionsDirectory);
+            return;
+        }
+        foreach (var directory in directories)
         {
             var versionName = Path.GetFileName(directory);
             if (string.IsNullOrWhiteSpace(versionName)
@@ -126,22 +138,24 @@ internal static class LoaderVersionDirectoryTransaction
                 continue;
             }
 
-            TryDeleteDirectory(directory);
+            TryDeleteDirectory(directory, logger);
         }
     }
 
-    public static void TryDeleteDirectory(string directory)
+    public static void TryDeleteDirectory(string directory, ILogger? logger = null)
     {
         try
         {
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
         }
-        catch (IOException)
+        catch (IOException exception)
         {
+            logger?.LogWarning(exception, "Loader workspace cleanup failed. Directory={Directory} Stage=Cleanup", directory);
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException exception)
         {
+            logger?.LogWarning(exception, "Loader workspace cleanup denied. Directory={Directory} Stage=Cleanup", directory);
         }
     }
 }

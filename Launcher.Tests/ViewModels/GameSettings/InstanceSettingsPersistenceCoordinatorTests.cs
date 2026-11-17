@@ -29,6 +29,55 @@ namespace Launcher.Tests.ViewModels.GameSettings;
 public sealed class InstanceSettingsPersistenceCoordinatorTests
 {
     [Fact]
+    public async Task ChangedSnapshotReportsInterruptedEditsAndRejectsStaleEditorRequests()
+    {
+        var instance = CreateInstance("stored");
+        var service = new FakeGameInstanceService();
+        var status = new RecordingStatusService();
+        using var coordinator = CreateCoordinator(service, status);
+        coordinator.SetInstance(instance);
+        coordinator.Schedule("description", instance, target => ApplyDescription(target, "draft"),
+            () => { }, TimeSpan.FromMinutes(1));
+
+        coordinator.SetInstance(new GameInstance { InstanceDirectory = instance.InstanceDirectory, Description = "external" });
+
+        Assert.True(status.Message.Task.IsCompletedSuccessfully);
+        Assert.Equal(Strings.Status_InstanceSettingsSaveFailed, await status.Message.Task);
+        Assert.False(coordinator.HasPendingSave("description"));
+        coordinator.Schedule("description", instance, target => ApplyDescription(target, "stale"), () => { });
+        Assert.Equal(0, service.SaveCallCount);
+        Assert.Equal("stored", instance.Description);
+    }
+
+    [Fact]
+    public async Task QueuedSaveNotificationDoesNotRebindAnObsoleteSnapshotAfterRefresh()
+    {
+        var instance = CreateInstance("old");
+        var dispatcher = new QueuedUiDispatcher();
+        using var coordinator = new InstanceSettingsPersistenceCoordinator(new FakeGameInstanceService(),
+            new RecordingStatusService(), dispatcher, NullLogger.Instance);
+        var notified = false;
+        coordinator.InstanceSaved += _ => notified = true;
+        coordinator.SetInstance(instance);
+        coordinator.Schedule("description", instance, target => ApplyDescription(target, "saved"), () => { });
+        var notification = await dispatcher.Posted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        coordinator.SetInstance(new GameInstance { InstanceDirectory = instance.InstanceDirectory, Description = "external" });
+        notification();
+        Assert.False(notified);
+    }
+
+    private sealed class QueuedUiDispatcher : IUiDispatcher
+    {
+        public TaskCompletionSource<Action> Posted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool HasAccess => true;
+        public void Post(Action action) => Posted.TrySetResult(action);
+        public void PostAfterTransition(Action action) => Post(action);
+        public Task PostAfterTransitionAsync(Action action) { Post(action); return Task.CompletedTask; }
+        public void Invoke(Action action) => action();
+        public Task InvokeAsync(Func<Task> action) => action();
+    }
+
+    [Fact]
     public async Task RapidChangesInSameAreaPersistOnlyLatestMutation()
     {
         var instance = CreateInstance("first");
@@ -110,7 +159,7 @@ public sealed class InstanceSettingsPersistenceCoordinatorTests
     {
         return new GameInstance
         {
-            Id = Guid.NewGuid().ToString("N"),
+
             Description = description,
             InstanceDirectory = Path.Combine(Path.GetTempPath(), "launcher-tests", Guid.NewGuid().ToString("N"))
         };

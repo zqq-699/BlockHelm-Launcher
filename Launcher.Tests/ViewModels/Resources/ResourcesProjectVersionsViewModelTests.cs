@@ -26,6 +26,24 @@ namespace Launcher.Tests.ViewModels.Resources;
 public sealed class ResourcesProjectVersionsViewModelTests
 {
     [Fact]
+    public void CatalogRefreshRebindsSelectedResourceTargetAndRemovesRenamedDirectory()
+    {
+        using var page = new ResourcesPageViewModel().ModPage;
+        var viewModel = page.Versions;
+        PrepareProject(viewModel);
+        var original = new GameInstance { InstanceDirectory = @"C:\game\versions\A", Name = "A", MinecraftVersion = "1.20.1", Loader = LoaderKind.Fabric };
+        viewModel.RefreshInstanceCatalog([original]);
+        viewModel.SelectedTarget = Assert.Single(viewModel.InstallTargets, target => target.Instance is not null);
+        var refreshed = new GameInstance { InstanceDirectory = original.InstanceDirectory, Name = "A", MinecraftVersion = "1.20.1", Loader = LoaderKind.Fabric, Description = "external" };
+        Assert.False(viewModel.RefreshInstanceCatalog([refreshed]));
+        Assert.Same(refreshed, viewModel.SelectedTarget!.Instance);
+        var renamed = new GameInstance { InstanceDirectory = @"C:\game\versions\B", Name = "B", Loader = LoaderKind.Fabric };
+        Assert.True(viewModel.RefreshInstanceCatalog([renamed]));
+        Assert.Null(viewModel.SelectedTarget);
+        Assert.Same(renamed, Assert.Single(viewModel.InstallTargets, target => target.Instance is not null).Instance);
+    }
+
+    [Fact]
     public async Task MultipleCompatibilityGroupsStartCollapsedAndCanBeExpanded()
     {
         var service = new SequencedResourceCatalogService(
@@ -342,7 +360,7 @@ public sealed class ResourcesProjectVersionsViewModelTests
         PrepareProject(viewModel);
         viewModel.SelectedTarget = ResourcesModInstallTargetItemViewModel.FromInstance(new GameInstance
         {
-            Id = "fabric-instance",
+
             MinecraftVersion = "1.21.3",
             Loader = LoaderKind.Fabric
         });

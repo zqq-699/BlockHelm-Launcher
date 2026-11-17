@@ -31,12 +31,15 @@ internal static class PendingInstanceRenameDirectory
 
 internal sealed record PendingInstanceRenameMarker
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
     public string TransactionId { get; init; } = string.Empty;
-    public string InstanceId { get; init; } = string.Empty;
+    public string OwnerProof { get; init; } = string.Empty;
     public string OldName { get; init; } = string.Empty;
     public string NewName { get; init; } = string.Empty;
     public string? NewIconSource { get; init; }
+    public string? OriginalJsonRelativePath { get; init; }
+    public string? OriginalJsonId { get; init; }
+    public string? OriginalJarReference { get; init; }
     public DateTimeOffset UpdatedAtUtc { get; init; }
 }
 
@@ -74,7 +77,7 @@ internal static class PendingInstanceRenameMarkerFile
         try
         {
             using var stream = OpenRead(markerPath, useAsync: false);
-            var marker = JsonSerializer.Deserialize<PendingInstanceRenameMarker>(stream, JsonOptions);
+            var marker = InstanceDirectoryOwnership.ReadLegacyMarker<PendingInstanceRenameMarker>(new StreamReader(stream).ReadToEnd(), JsonOptions);
             Validate(directory, marker);
             return new(PendingInstanceRenameMarkerStatus.Valid, marker);
         }
@@ -107,11 +110,8 @@ internal static class PendingInstanceRenameMarkerFile
         try
         {
             await using var stream = OpenRead(markerPath, useAsync: true);
-            var marker = await JsonSerializer.DeserializeAsync<PendingInstanceRenameMarker>(
-                    stream,
-                    JsonOptions,
-                    cancellationToken)
-                .ConfigureAwait(false);
+            var text = await new StreamReader(stream).ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            var marker = InstanceDirectoryOwnership.ReadLegacyMarker<PendingInstanceRenameMarker>(text, JsonOptions);
             Validate(directory, marker);
             return new(PendingInstanceRenameMarkerStatus.Valid, marker);
         }
@@ -166,10 +166,10 @@ internal static class PendingInstanceRenameMarkerFile
     private static void Validate(string directory, PendingInstanceRenameMarker? marker)
     {
         if (marker is null
-            || marker.SchemaVersion != 1
+            || marker.SchemaVersion is not (1 or 2)
             || string.IsNullOrWhiteSpace(marker.TransactionId)
             || marker.TransactionId.Length < 8
-            || string.IsNullOrWhiteSpace(marker.InstanceId)
+            || string.IsNullOrWhiteSpace(marker.OwnerProof)
             || !VersionDirectoryName.IsSafeDirectoryName(marker.OldName)
             || !VersionDirectoryName.IsSafeDirectoryName(marker.NewName))
         {
@@ -178,6 +178,14 @@ internal static class PendingInstanceRenameMarkerFile
 
         var directoryName = Path.GetFileName(
             directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (marker.OriginalJsonRelativePath is { } originalJson)
+        {
+            var resolved = Path.GetFullPath(Path.Combine(directory, originalJson));
+            var prefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)) + Path.DirectorySeparatorChar;
+            if (Path.IsPathRooted(originalJson) || !resolved.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(Path.GetExtension(resolved), ".json", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Pending rename artifact path is outside its instance.");
+        }
         if (PendingInstanceRenameDirectory.IsPending(directory))
         {
             var expectedName = $"{PendingInstanceRenameDirectory.Prefix}{marker.OldName}-{marker.TransactionId[..8].ToLowerInvariant()}";

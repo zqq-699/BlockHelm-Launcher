@@ -25,6 +25,7 @@ using System.Text.RegularExpressions;
 using CmlLib.Core.ProcessBuilder;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
+using Launcher.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -604,7 +605,7 @@ internal sealed class RequiredGameFileManifestBuilder
                 "Resolved version metadata chain",
                 ManagedRoot: Path.GetDirectoryName(metadataPath)));
         }
-        AddClientJar(files, versionDirectory, request.VersionName, versionJson);
+        AddClientJar(files, versionDirectory, request.VersionName, versionResolution);
         AddLibraries(files, request.MinecraftDirectory, versionJson);
         if (includeAssets)
             await AddAssetsAsync(files, request.MinecraftDirectory, versionJson, cancellationToken).ConfigureAwait(false);
@@ -713,19 +714,19 @@ internal sealed class RequiredGameFileManifestBuilder
             ?? throw new InvalidDataException($"Version metadata is empty: {path}");
     }
 
-    private static void AddClientJar(IDictionary<string, RequiredGameFile> files, string versionDirectory, string versionName, JsonObject versionJson)
+    private static void AddClientJar(IDictionary<string, RequiredGameFile> files, string versionDirectory, string versionName, ManagedVersionRepairService.ResolvedVersionMetadata versionResolution)
     {
-        var client = versionJson["downloads"]?["client"] as JsonObject;
+        var jarPath = InstanceVersionFiles.ResolveJarPath(versionDirectory, versionName);
         Add(files, new RequiredGameFile(
-            Path.Combine(versionDirectory, $"{versionName}.jar"),
+            jarPath,
             "ClientJar",
-            GetString(client?["url"]),
-            GetString(client?["sha1"]),
-            GetLong(client?["size"]),
+            versionResolution.ClientJarUrl,
+            versionResolution.ClientJarSha1,
+            versionResolution.ClientJarSize,
             true,
-            string.IsNullOrWhiteSpace(GetString(client?["url"])) ? "Unavailable" : "DirectDownload",
+            string.IsNullOrWhiteSpace(versionResolution.ClientJarUrl) ? "Unavailable" : "DirectDownload",
             "Final version client jar",
-            ManagedRoot: versionDirectory));
+            ManagedRoot: Path.GetDirectoryName(jarPath)));
     }
 
     private static void AddLibraries(IDictionary<string, RequiredGameFile> files, string minecraftDirectory, JsonObject versionJson)
@@ -770,7 +771,7 @@ internal sealed class RequiredGameFileManifestBuilder
         // "1.18"), so this is a file-name safety check rather than an
         // extension check.
         if (string.IsNullOrWhiteSpace(id) || Path.GetFileName(id) != id || id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            throw new InvalidDataException("Asset index id is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Asset index id is invalid."), "DownloadValidation", ("Reason", "Asset index id is invalid."));
         var indexesRoot = Path.Combine(minecraftDirectory, "assets", "indexes");
         var indexPath = MinecraftPathGuard.EnsureWithin(Path.Combine(indexesRoot, $"{id}.json"), indexesRoot, "Asset index");
         MinecraftPathGuard.EnsureSafeFileDestination(indexPath, indexesRoot, "Asset index");
@@ -819,7 +820,7 @@ internal sealed class RequiredGameFileManifestBuilder
             return;
         var id = GetString(logging["id"]);
         if (string.IsNullOrWhiteSpace(id) || Path.GetFileName(id) != id || id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            throw new InvalidDataException("Logging configuration id is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Logging configuration id is invalid."), "DownloadValidation", ("Reason", "Logging configuration id is invalid."));
         var root = Path.Combine(minecraftDirectory, "assets", "log_configs");
         Add(files, new RequiredGameFile(
             MinecraftPathGuard.EnsureWithin(Path.Combine(root, id), root, "Logging configuration"),

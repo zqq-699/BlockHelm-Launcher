@@ -24,6 +24,8 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.FileSystem;
 
+using Microsoft.Extensions.Logging;
+
 namespace Launcher.Infrastructure.Accounts;
 
 public sealed class AccountSkinLibraryService : IAccountSkinLibraryService
@@ -36,11 +38,11 @@ public sealed class AccountSkinLibraryService : IAccountSkinLibraryService
 
     public AccountSkinLibraryService(
         LauncherPathProvider? pathProvider = null,
-        IUserFileDeletionService? userFileDeletionService = null)
+        IUserFileDeletionService? userFileDeletionService = null, ILogger<AccountSkinLibraryService>? logger = null)
         : this(
             HttpClient,
             pathProvider ?? new LauncherPathProvider(),
-            userFileDeletionService ?? new UserFileDeletionService())
+            userFileDeletionService ?? new UserFileDeletionService(), logger)
     {
     }
 
@@ -54,14 +56,14 @@ public sealed class AccountSkinLibraryService : IAccountSkinLibraryService
     internal AccountSkinLibraryService(
         HttpClient httpClient,
         LauncherPathProvider pathProvider,
-        IUserFileDeletionService userFileDeletionService)
+        IUserFileDeletionService userFileDeletionService, ILogger? logger = null)
     {
         LauncherHttpUserAgent.Apply(httpClient);
         skinCacheService = new AccountSkinCacheService(
             httpClient,
             Path.Combine(pathProvider.DefaultAccountDataDirectory, "microsoft", "skins"),
-            userFileDeletionService);
-        avatarService = new AccountAvatarService(httpClient, pathProvider);
+            userFileDeletionService, logger);
+        avatarService = new AccountAvatarService(httpClient, pathProvider, logger);
     }
 
     public IReadOnlyList<LauncherSkinRecord> GetAvailableSkins(LauncherAccount account)

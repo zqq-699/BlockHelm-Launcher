@@ -73,8 +73,7 @@ public sealed class FabricLoaderProvider : ILoaderProvider, ISeparatedInstallPat
                 using var json = await JsonDocument.ParseAsync(stream, cancellationToken: token);
                 if (json.RootElement.ValueKind is not JsonValueKind.Array)
                 {
-                    throw new DownloadContentValidationException(
-                        "Fabric loader metadata is not a JSON array.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Fabric loader metadata is not a JSON array."), "DownloadContentValidationException", ("Reason", "Fabric loader metadata is not a JSON array."));
                 }
 
                 var entries = json.RootElement.EnumerateArray().ToList();
@@ -88,8 +87,7 @@ public sealed class FabricLoaderProvider : ILoaderProvider, ISeparatedInstallPat
                     .ToList();
                 if (versions.Count == 0)
                 {
-                    throw new DownloadContentValidationException(
-                        "Fabric loader metadata contains no valid loader entries.");
+                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Fabric loader metadata contains no valid loader entries."), "DownloadContentValidationException", ("Reason", "Fabric loader metadata contains no valid loader entries."));
                 }
 
                 return (IReadOnlyList<LoaderVersionInfo>)versions;

@@ -111,7 +111,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         destinationPath,
                         stableSourceSha1,
                         cancellationToken,
-                        destinationRoot).ConfigureAwait(false);
+                        destinationRoot, logger).ConfigureAwait(false);
                     if (result.Disposition == SharedFilePublishDisposition.Replaced)
                     {
                         logger.LogDebug(
@@ -127,13 +127,12 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         && trustedFileExpectations.TryGetValue(relativePath, out trustedExpectation);
                     var sourceSha1 = AtomicSharedFilePublisher.ComputeSha1(confinedSourcePath);
                     if (!string.Equals(sourceSha1, seededSha1, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException($"Loader installer modified a seeded prerequisite: {relativePath}");
+                        throw SafeExceptionLog.Describe(new InvalidDataException($"Loader installer modified a seeded prerequisite: {relativePath}"), "SeededPrerequisiteChanged", ("Artifact", relativePath), ("ExpectedHash", seededSha1), ("ActualHash", sourceSha1));
 
                     if (hasTrustedExpectation
                         && !string.Equals(sourceSha1, trustedExpectation!.Sha1, StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new InvalidDataException(
-                            $"Loader installer seeded prerequisite did not match the trusted installation plan: {relativePath}");
+                        throw SafeExceptionLog.Describe(new InvalidDataException($"Loader installer seeded prerequisite did not match the trusted installation plan: {relativePath}"), "SeededPrerequisiteHashMismatch", ("Artifact", relativePath), ("ExpectedHash", trustedExpectation!.Sha1), ("ActualHash", sourceSha1));
                     }
 
                     await AtomicSharedFilePublisher.PublishCopyAsync(
@@ -141,7 +140,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         destinationPath,
                         trustedExpectation?.Sha1 ?? seededSha1,
                         cancellationToken,
-                        destinationRoot).ConfigureAwait(false);
+                        destinationRoot, logger).ConfigureAwait(false);
                     MarkVerified(destinationPath, trustedExpectation, operationContext);
                     continue;
                 }
@@ -153,7 +152,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         destinationPath,
                         plannedExpectation.Sha1,
                         cancellationToken,
-                        destinationRoot).ConfigureAwait(false);
+                        destinationRoot, logger).ConfigureAwait(false);
                     MarkVerified(destinationPath, plannedExpectation, operationContext);
                     continue;
                 }
@@ -162,8 +161,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                 {
                     if (expectation.Size is > 0 && new FileInfo(confinedSourcePath).Length != expectation.Size.Value)
                     {
-                        throw new InvalidDataException(
-                            $"Loader installer shared file size did not match version metadata: {relativePath}");
+                        throw SafeExceptionLog.Describe(new InvalidDataException($"Loader installer shared file size did not match version metadata: {relativePath}"), "SharedFileSizeMismatch", ("Artifact", relativePath), ("ExpectedBytes", expectation.Size), ("ActualBytes", new FileInfo(confinedSourcePath).Length));
                     }
 
                     var result = await AtomicSharedFilePublisher.PublishVerifiedReplacementAsync(
@@ -171,7 +169,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         destinationPath,
                         expectation.Sha1,
                         cancellationToken,
-                        destinationRoot).ConfigureAwait(false);
+                        destinationRoot, logger).ConfigureAwait(false);
                     if (result.Disposition == SharedFilePublishDisposition.Replaced)
                     {
                         logger.LogDebug(
@@ -188,7 +186,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         destinationPath,
                         expectedSha1: null,
                         cancellationToken: cancellationToken,
-                        managedRoot: destinationRoot).ConfigureAwait(false);
+                        managedRoot: destinationRoot, logger: logger).ConfigureAwait(false);
                 }
             }
         }
@@ -437,12 +435,12 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
     private static IEnumerable<string> EnumerateOrdinaryFiles(string directory)
     {
         if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidDataException($"Loader installer output root is a reparse point: {directory}");
+            throw SafeExceptionLog.Describe(new InvalidDataException($"Loader installer output root is a reparse point: {directory}"), "UnsafeReparsePoint", ("Artifact", directory));
         foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
         {
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException($"Loader installer output contains a reparse point: {entry}");
+                throw SafeExceptionLog.Describe(new InvalidDataException($"Loader installer output contains a reparse point: {entry}"), "UnsafeReparsePoint", ("Artifact", entry));
             if ((attributes & FileAttributes.Directory) != 0)
             {
                 foreach (var file in EnumerateOrdinaryFiles(entry))
@@ -464,7 +462,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         if (Directory.Exists(current)
             && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
         {
-            throw new InvalidDataException($"Shared destination root is a reparse point: {current}");
+            throw SafeExceptionLog.Describe(new InvalidDataException($"Shared destination root is a reparse point: {current}"), "UnsafeReparsePoint", ("Artifact", current));
         }
         var relative = Path.GetRelativePath(root, target);
         foreach (var segment in relative.Split(
@@ -475,7 +473,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
             if (!Directory.Exists(current) && !File.Exists(current))
                 continue;
             if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException($"Shared destination contains a reparse point: {current}");
+                throw SafeExceptionLog.Describe(new InvalidDataException($"Shared destination contains a reparse point: {current}"), "UnsafeReparsePoint", ("Artifact", current));
         }
     }
 
@@ -491,7 +489,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
     {
         var sourceVersionDirectory = Path.Combine(sourceGameDirectory, "versions", minecraftVersion);
         if (httpClient is null)
-            throw new InvalidOperationException("Official version metadata is required to seed a loader installer workspace.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("Official version metadata is required to seed a loader installer workspace."), "DownloadValidation", ("Reason", "Official version metadata is required to seed a loader installer workspace."));
 
         logger.LogDebug(
             "Loader installer official base metadata preparation started. LoaderCategory={LoaderCategory} MinecraftVersion={MinecraftVersion}",
@@ -570,7 +568,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         // resolved directly against the shared Minecraft directory.
     }
 
-    private static async Task SeedInstallerLibrariesAsync(
+    private async Task SeedInstallerLibrariesAsync(
         string sourceGameDirectory,
         string destinationGameDirectory,
         string installerJarPath,
@@ -622,7 +620,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         }
     }
 
-    private static async Task SeedLibrariesFromJsonAsync(
+    private async Task SeedLibrariesFromJsonAsync(
         JsonNode root,
         string sourceGameDirectory,
         string destinationGameDirectory,
@@ -707,7 +705,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         }
     }
 
-    private static async Task SeedFileAsync(
+    private async Task SeedFileAsync(
         string sourcePath,
         string destinationPath,
         string? expectedSha1,
@@ -729,7 +727,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                 destinationPath,
                 expectedSha1,
                 cancellationToken,
-                destinationGameDirectory).ConfigureAwait(false);
+                destinationGameDirectory, logger).ConfigureAwait(false);
         }
         catch (InvalidDataException) when (!string.IsNullOrWhiteSpace(expectedSha1))
         {

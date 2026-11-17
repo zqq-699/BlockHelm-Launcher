@@ -47,6 +47,15 @@ internal sealed partial class VersionRenameTransaction
             }
 
             var marker = markerResult.Marker!;
+            if (marker.SchemaVersion == 1)
+            {
+                using var preparationLease = WindowsDirectoryHandleMover.AcquireReadLease(directory);
+                if (InstanceDirectoryOwnership.Matches(directory, marker.OwnerProof))
+                {
+                    marker = marker with { SchemaVersion = 2, OwnerProof = InstanceDirectoryOwnership.Capture(directory) };
+                    await WriteOwnedMarkerAsync(directory, marker, cancellationToken).ConfigureAwait(false);
+                }
+            }
 
             try
             {
@@ -57,7 +66,7 @@ internal sealed partial class VersionRenameTransaction
                 }
 
                 var directoryName = Path.GetFileName(directory);
-                if (string.Equals(directoryName, marker.NewName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(directoryName, marker.NewName, StringComparison.Ordinal))
                 {
                     await CompleteCommittedRenameAsync(directory, marker, CancellationToken.None).ConfigureAwait(false);
                     continue;
@@ -67,7 +76,7 @@ internal sealed partial class VersionRenameTransaction
                     throw new InvalidDataException("Pending rename marker does not match its directory.");
 
                 var destinationDirectory = GetDestinationDirectory(directory, marker.NewName);
-                if (IsPathOccupied(destinationDirectory))
+                if (!MinecraftDirectoryPath.Equals(directory, destinationDirectory) && IsPathOccupied(destinationDirectory))
                 {
                     await RollbackRenameAsync(directory, marker, CancellationToken.None).ConfigureAwait(false);
                     continue;
@@ -94,9 +103,8 @@ internal sealed partial class VersionRenameTransaction
     {
         if (!Directory.Exists(sourceDirectory))
             throw new DirectoryNotFoundException($"Version directory not found: {sourceDirectory}");
-        if (!File.Exists(Path.Combine(sourceDirectory, $"{oldVersionName}.json")))
-            throw new FileNotFoundException("Version JSON not found.", Path.Combine(sourceDirectory, $"{oldVersionName}.json"));
-        if (IsPathOccupied(destinationDirectory))
+        _ = InstanceVersionFiles.GetJsonPath(sourceDirectory, oldVersionName);
+        if (!MinecraftDirectoryPath.Equals(sourceDirectory, destinationDirectory) && IsPathOccupied(destinationDirectory))
             throw new InstanceInstallNameConflictException(Path.GetFileName(destinationDirectory));
         if (PendingInstanceInstallDirectory.IsLogicalNameReserved(
                 Path.GetDirectoryName(destinationDirectory)!,
@@ -109,14 +117,14 @@ internal sealed partial class VersionRenameTransaction
     }
 
     private PendingInstanceRenameMarker CreateMarker(
-        string instanceId,
+        string ownerProof,
         string oldName,
         string newName,
         string? newIconSource,
         DateTimeOffset updatedAt) => new()
     {
         TransactionId = guidFactory().ToString("N"),
-        InstanceId = instanceId,
+        OwnerProof = ownerProof,
         OldName = oldName,
         NewName = newName,
         NewIconSource = newIconSource,

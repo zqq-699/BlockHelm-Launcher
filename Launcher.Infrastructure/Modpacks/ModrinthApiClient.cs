@@ -85,17 +85,15 @@ public sealed class ModrinthApiClient
         Dictionary<string, ModrinthVersionMatch> versions;
         try
         {
-            response = await httpClient.PostAsJsonAsync(
-                    uri,
+            response = await DownloadHttpDiagnostics.PostAsJsonAsync(httpClient, logger,
+                    uri.AbsoluteUri,
                     new ModrinthVersionFilesRequest(hashes, "sha1"),
                     JsonOptions,
                     cancellationToken)
                 .ConfigureAwait(false);
             statusCode = response.StatusCode;
             response.EnsureSuccessStatusCode();
-            versions = await response.Content.ReadFromJsonAsync<Dictionary<string, ModrinthVersionMatch>>(
-                    JsonOptions,
-                    cancellationToken)
+            versions = await DownloadHttpDiagnostics.ReadFromJsonAsync<Dictionary<string, ModrinthVersionMatch>>(response, logger, cancellationToken, JsonOptions)
                 .ConfigureAwait(false)
                 ?? new Dictionary<string, ModrinthVersionMatch>(StringComparer.OrdinalIgnoreCase);
             failureReason = null;
@@ -105,8 +103,9 @@ public sealed class ModrinthApiClient
         {
             throw;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
+            logger.LogWarning(exception, "Download metadata request failed. Host={Host} StatusCode={StatusCode}", uri.Host, (int?)response?.StatusCode);
             failureReason = response is null
                 ? DownloadFailureReason.ResponseHeadersTimeout
                 : DownloadFailureReason.BodyInterrupted;
@@ -114,8 +113,9 @@ public sealed class ModrinthApiClient
             recordResult = true;
             throw;
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException exception)
         {
+            logger.LogWarning(exception, "Download metadata request failed. Host={Host} StatusCode={StatusCode}", uri.Host, (int?)response?.StatusCode);
             failureReason = response is null
                 ? DownloadFailureReason.Network
                 : response.IsSuccessStatusCode
@@ -125,13 +125,19 @@ public sealed class ModrinthApiClient
             recordResult = true;
             throw;
         }
-        catch (IOException)
+        catch (IOException exception)
         {
+            logger.LogWarning(exception, "Download metadata request failed. Host={Host} StatusCode={StatusCode}", uri.Host, (int?)response?.StatusCode);
             failureReason = response is null
                 ? DownloadFailureReason.Network
                 : DownloadFailureReason.BodyInterrupted;
             statusCode = response?.StatusCode;
             recordResult = true;
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Download metadata read or parse failed. Host={Host} StatusCode={StatusCode}", uri.Host, (int?)response?.StatusCode);
             throw;
         }
         finally

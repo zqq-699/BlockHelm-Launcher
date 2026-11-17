@@ -49,8 +49,8 @@ public sealed partial class LaunchService
         if (!string.IsNullOrWhiteSpace(resolvedSettings.PreLaunchCommand))
         {
             logger.LogInformation(
-                "Running pre-launch command. InstanceId={InstanceId} WaitForExit={WaitForExit}",
-                instance.Id,
+                "Running pre-launch command. InstanceDirectory={InstanceDirectory} WaitForExit={WaitForExit}",
+                instance.InstanceDirectory,
                 resolvedSettings.WaitForPreLaunchCommand);
             progress?.Report(new LauncherProgress(
                 LaunchProgressStages.RunningPreLaunchCommand,
@@ -102,7 +102,7 @@ public sealed partial class LaunchService
         if (accountSession.ThirdParty is not null)
         {
             if (authlibInjectorProvisioningService is null)
-                throw new InvalidOperationException("The authlib-injector provisioning service is unavailable.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("The authlib-injector provisioning service is unavailable."), "DownloadValidation", ("Reason", "The authlib-injector provisioning service is unavailable."));
             authlibInjector = authlibInjectorProvisioningService is AuthlibInjectorProvisioningService concreteProvisioner
                 ? await concreteProvisioner.EnsureAvailableAsync(progress, cancellationToken).ConfigureAwait(false)
                 : await authlibInjectorProvisioningService.EnsureAvailableAsync(cancellationToken).ConfigureAwait(false);
@@ -118,14 +118,14 @@ public sealed partial class LaunchService
             try
             {
                 if (offlineSkinLaunchService is null)
-                    throw new InvalidOperationException("The offline skin launch service is unavailable.");
+                    throw SafeExceptionLog.Describe(new InvalidOperationException("The offline skin launch service is unavailable."), "DownloadValidation", ("Reason", "The offline skin launch service is unavailable."));
                 offlineSkin = await offlineSkinLaunchService.PrepareAsync(
                     account,
                     accountSession.Uuid,
                     cancellationToken).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException("The active offline skin could not be prepared.");
+                    ?? throw SafeExceptionLog.Describe(new InvalidOperationException("The active offline skin could not be prepared."), "DownloadValidation", ("Reason", "The active offline skin could not be prepared."));
                 if (authlibInjectorProvisioningService is null)
-                    throw new InvalidOperationException("The authlib-injector provisioning service is unavailable.");
+                    throw SafeExceptionLog.Describe(new InvalidOperationException("The authlib-injector provisioning service is unavailable."), "DownloadValidation", ("Reason", "The authlib-injector provisioning service is unavailable."));
                 authlibInjector = authlibInjectorProvisioningService is AuthlibInjectorProvisioningService concreteProvisioner
                     ? await concreteProvisioner.EnsureAvailableAsync(progress, cancellationToken).ConfigureAwait(false)
                     : await authlibInjectorProvisioningService.EnsureAvailableAsync(cancellationToken).ConfigureAwait(false);
@@ -141,9 +141,9 @@ public sealed partial class LaunchService
                 warnings.Add(LaunchWarningKind.OfflineSkinUnavailable);
                 logger.LogWarning(
                     exception,
-                    "Offline skin preparation failed; continuing with the default game skin. AccountId={AccountId} InstanceId={InstanceId}",
+                    "Offline skin preparation failed; continuing with the default game skin. AccountId={AccountId} InstanceDirectory={InstanceDirectory}",
                     account.Id,
-                    instance.Id);
+                    instance.InstanceDirectory);
             }
         }
         await ApplyGameLanguageAsync(instance, settings, cancellationToken).ConfigureAwait(false);
@@ -163,14 +163,14 @@ public sealed partial class LaunchService
             // token 只作为诊断写入器的敏感值表传入，用于替换日志内容，不会被直接记录。
             [accountSession.AccessToken]);
         logger.LogInformation(
-            "Launch account session and Java runtime prepared. InstanceId={InstanceId} JavaSelected={JavaSelected} JavaVersion={JavaVersion} JavaSource={JavaSource}",
-            instance.Id,
+            "Launch account session and Java runtime prepared. InstanceDirectory={InstanceDirectory} JavaSelected={JavaSelected} JavaVersion={JavaVersion} JavaSource={JavaSource}",
+            instance.InstanceDirectory,
             javaRuntime is not null,
             javaRuntime?.Version,
             javaRuntime?.Source);
         logger.LogDebug(
-            "Launch Java executable resolved. InstanceId={InstanceId} JavaPath={JavaPath}",
-            instance.Id,
+            "Launch Java executable resolved. InstanceDirectory={InstanceDirectory} JavaPath={JavaPath}",
+            instance.InstanceDirectory,
             javaRuntime?.ExecutablePath);
         progress?.Report(new LauncherProgress(
             LaunchProgressStages.PreparingProcess,
@@ -257,15 +257,15 @@ public sealed partial class LaunchService
         if (autoJoinArgument.Status is MinecraftAutoJoinArgumentStatus.InvalidAddress)
         {
             logger.LogWarning(
-                "Configured auto-join server address is invalid; continuing launch without auto-join. InstanceId={InstanceId}",
-                instance.Id);
+                "Configured auto-join server address is invalid; continuing launch without auto-join. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
         }
         else if (autoJoinArgument.Argument is not null)
         {
             extraGameArguments.Add(autoJoinArgument.Argument);
             logger.LogInformation(
-                "Auto-join server launch argument added. InstanceId={InstanceId} Mode={Mode}",
-                instance.Id,
+                "Auto-join server launch argument added. InstanceDirectory={InstanceDirectory} Mode={Mode}",
+                instance.InstanceDirectory,
                 autoJoinArgument.UsesQuickPlay ? "QuickPlay" : "Legacy");
         }
         if (extraGameArguments.Count > 0)
@@ -278,6 +278,7 @@ public sealed partial class LaunchService
             .ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(launchOption.NativesDirectory))
         {
+            if (Persistence.InstanceDirectoryOwnership.IsObserved(instance)) Persistence.InstanceDirectoryOwnership.EnsureCurrent(instance);
             FinalLaunchNativeDirectoryPreparer.Prepare(
                 process.StartInfo,
                 launchOption.NativesDirectory,
@@ -321,8 +322,9 @@ public sealed partial class LaunchService
         crashMonitorSession.Configure(process);
         ConfigurePostExitCommand(process, resolvedSettings.PostExitCommand, instance.InstanceDirectory);
         progress?.Report(new LauncherProgress(LaunchProgressStages.StartingProcess, "Starting game process", 99));
+        if (Persistence.InstanceDirectoryOwnership.IsObserved(instance)) Persistence.InstanceDirectoryOwnership.EnsureCurrent(instance);
         if (!process.Start())
-            throw new InvalidOperationException("Minecraft process did not start.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("Minecraft process did not start."), "DownloadValidation", ("Reason", "Minecraft process did not start."));
         crashMonitorSession.BeginMonitoring(process, preparedRuntime.DiagnosticContext);
 
         logger.LogInformation(

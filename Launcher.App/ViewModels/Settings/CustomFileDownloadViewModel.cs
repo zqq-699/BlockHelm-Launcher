@@ -121,6 +121,7 @@ public sealed partial class CustomFileDownloadViewModel : ObservableObject
         DownloadTaskItem taskItem,
         IProgress<LauncherProgress> progress)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "CustomFileDownload", taskItem.Id);
         try
         {
             await downloadService.DownloadAsync(

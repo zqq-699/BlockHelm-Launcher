@@ -27,6 +27,8 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.FileSystem;
 
+using Microsoft.Extensions.Logging;
+
 namespace Launcher.Infrastructure.Accounts;
 
 /// <summary>
@@ -38,28 +40,30 @@ internal sealed partial class AccountSkinCacheService
     private const string SkinCacheVersion = "v1";
     private const string SharedLibraryDirectoryName = "_shared-library";
 
+    private readonly ILogger? logger;
     private readonly HttpClient httpClient;
     private readonly string skinDirectory;
     private readonly IUserFileDeletionService userFileDeletionService;
 
-    public AccountSkinCacheService(HttpClient httpClient, LauncherPathProvider pathProvider)
+    public AccountSkinCacheService(HttpClient httpClient, LauncherPathProvider pathProvider, ILogger? logger = null)
         : this(
             httpClient,
             Path.Combine(pathProvider.DefaultAccountDataDirectory, "microsoft", "skins"),
-            new UserFileDeletionService())
+            new UserFileDeletionService(), logger)
     {
     }
 
-    internal AccountSkinCacheService(HttpClient httpClient, string skinDirectory)
-        : this(httpClient, skinDirectory, new UserFileDeletionService())
+    internal AccountSkinCacheService(HttpClient httpClient, string skinDirectory, ILogger? logger = null)
+        : this(httpClient, skinDirectory, new UserFileDeletionService(), logger)
     {
     }
 
     internal AccountSkinCacheService(
         HttpClient httpClient,
         string skinDirectory,
-        IUserFileDeletionService userFileDeletionService)
+        IUserFileDeletionService userFileDeletionService, ILogger? logger = null)
     {
+        this.logger = logger;
         this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.skinDirectory = skinDirectory;
         this.userFileDeletionService = userFileDeletionService;

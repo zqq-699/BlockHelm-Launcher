@@ -44,15 +44,15 @@ public sealed partial class InstanceBackupSettingsViewModel
             selectedInstance.BackupDirectory = normalizedDirectory;
 
             logger.LogDebug(
-                "Opening instance backup folder. InstanceId={InstanceId} BackupDirectory={BackupDirectory}",
-                selectedInstance.Id,
+                "Opening instance backup folder. InstanceDirectory={InstanceDirectory} BackupDirectory={BackupDirectory}",
+                selectedInstance.InstanceDirectory,
                 normalizedDirectory);
 
             if (!instanceFolderService.TryOpen(normalizedDirectory))
             {
                 logger.LogWarning(
-                    "Failed to open instance backup folder. InstanceId={InstanceId} BackupDirectory={BackupDirectory}",
-                    selectedInstance.Id,
+                    "Failed to open instance backup folder. InstanceDirectory={InstanceDirectory} BackupDirectory={BackupDirectory}",
+                    selectedInstance.InstanceDirectory,
                     normalizedDirectory);
                 statusService.Report(Strings.Status_OpenBackupDirectoryFailed);
             }
@@ -61,8 +61,8 @@ public sealed partial class InstanceBackupSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to prepare instance backup folder for opening. InstanceId={InstanceId}",
-                selectedInstance.Id);
+                "Failed to prepare instance backup folder for opening. InstanceDirectory={InstanceDirectory}",
+                selectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_OpenBackupDirectoryFailed);
         }
     }
@@ -110,8 +110,8 @@ public sealed partial class InstanceBackupSettingsViewModel
             DateTimeOffset.Now.ToString("yyyy-MM-dd HH-mm"));
         IsCreateBackupDialogOpen = true;
         logger.LogDebug(
-            "Instance backup naming dialog opened. InstanceId={InstanceId}",
-            selectedInstance?.Id ?? "<none>");
+            "Instance backup naming dialog opened. InstanceDirectory={InstanceDirectory}",
+            selectedInstance?.InstanceDirectory ?? "<none>");
     }
 
     /// <summary>
@@ -150,8 +150,8 @@ public sealed partial class InstanceBackupSettingsViewModel
             // 用户看到本地化原因和简短诊断，完整异常仍保留在日志中。
             logger.LogError(
                 exception,
-                "Failed to create instance backup from backup settings page. InstanceId={InstanceId}",
-                instance.Id);
+                "Failed to create instance backup from backup settings page. InstanceDirectory={InstanceDirectory}",
+                instance.InstanceDirectory);
             BackupFailureDialogMessage = string.Format(
                 Strings.Dialog_BackupCreateFailedMessageFormat,
                 GetFriendlyBackupFailureMessage(exception),
@@ -187,8 +187,8 @@ public sealed partial class InstanceBackupSettingsViewModel
             if (!instanceFolderService.TryRevealFile(backup.FullPath))
             {
                 logger.LogWarning(
-                    "Failed to reveal instance backup file. InstanceId={InstanceId} BackupFile={BackupFile}",
-                    selectedInstance?.Id ?? "<none>",
+                    "Failed to reveal instance backup file. InstanceDirectory={InstanceDirectory} BackupFile={BackupFile}",
+                    selectedInstance?.InstanceDirectory ?? "<none>",
                     backup.FullPath);
                 statusService.Report(Strings.Status_OpenBackupLocationFailed);
             }
@@ -197,8 +197,8 @@ public sealed partial class InstanceBackupSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to reveal instance backup file. InstanceId={InstanceId} BackupFile={BackupFile}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to reveal instance backup file. InstanceDirectory={InstanceDirectory} BackupFile={BackupFile}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 backup.FullPath);
             statusService.Report(Strings.Status_OpenBackupLocationFailed);
         }
@@ -296,6 +296,7 @@ public sealed partial class InstanceBackupSettingsViewModel
                 DateTimeOffset.Now.ToString("yyyy-MM-dd HH-mm"));
             await backupService.CreateBackupAsync(instance, backupDirectory, protectionBackupName);
             await backupService.RestoreBackupAsync(instance, backupDirectory, backup.FullPath);
+            await RefreshRestoredInstanceAsync(instance);
             await RefreshBackupsAsync();
             floatingMessageService.Show(Strings.Status_BackupRestored);
         }
@@ -303,8 +304,8 @@ public sealed partial class InstanceBackupSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to restore instance backup from backup settings page. InstanceId={InstanceId} BackupFile={BackupFile}",
-                instance.Id,
+                "Failed to restore instance backup from backup settings page. InstanceDirectory={InstanceDirectory} BackupFile={BackupFile}",
+                instance.InstanceDirectory,
                 backup.FullPath);
             statusService.Report(Strings.Status_BackupRestoreFailed);
         }
@@ -312,6 +313,27 @@ public sealed partial class InstanceBackupSettingsViewModel
         {
             IsRestoringBackup = false;
         }
+    }
+
+    private async Task RefreshRestoredInstanceAsync(GameInstance restoredInstance)
+    {
+        try
+        {
+            var instances = await instanceService.GetInstancesAsync();
+            var current = instances.FirstOrDefault(instance =>
+                MinecraftDirectoryPath.Equals(instance.InstanceDirectory, restoredInstance.InstanceDirectory));
+            if (current is not null)
+            {
+                Parent.NotifyInstanceSettingsSaved(current);
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Failed to refresh restored instance. InstanceDirectory={InstanceDirectory}", restoredInstance.InstanceDirectory);
+            statusService.Report(Strings.Status_LoadInstancesFailed);
+        }
+        Parent.NotifyInstancesReloadRequired();
     }
 
     [RelayCommand]
@@ -338,7 +360,7 @@ public sealed partial class InstanceBackupSettingsViewModel
         if (pendingDeleteBackups.Count == 0 || string.IsNullOrWhiteSpace(BackupDirectory))
             return;
 
-        var instanceId = selectedInstance?.Id ?? "<none>";
+        var instanceDirectory = selectedInstance?.InstanceDirectory ?? "<none>";
         var backupDirectory = BackupDirectory;
         // 冻结本次删除集合；关闭对话框后新的选择不会混入正在执行的批次。
         var backups = pendingDeleteBackups;
@@ -364,8 +386,8 @@ public sealed partial class InstanceBackupSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to delete instance backup from backup settings page. InstanceId={InstanceId} BackupCount={BackupCount}",
-                instanceId,
+                "Failed to delete instance backup from backup settings page. InstanceDirectory={InstanceDirectory} BackupCount={BackupCount}",
+                instanceDirectory,
                 backups.Count);
             statusService.Report(Strings.Status_BackupDeleteFailed);
         }

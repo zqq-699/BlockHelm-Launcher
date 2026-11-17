@@ -42,6 +42,7 @@ internal async Task InstallAsync(
         if (item is null || target is null || installationService is null)
             return;
 
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "ResourceInstall");
         var context = new InstallOperationContext(item, target, selectedProject);
         try
         {
@@ -118,11 +119,11 @@ internal async Task InstallAsync(
             PresentFailure(context, message);
             logger?.LogError(
                 exception,
-                "Resource project installation failed. Kind={Kind} ProjectId={ProjectId} VersionId={VersionId} InstanceId={InstanceId}",
+                "Resource project installation failed. Kind={Kind} ProjectId={ProjectId} VersionId={VersionId} InstanceDirectory={InstanceDirectory}",
                 options.Kind,
                 selectedProject?.Project.ProjectId,
                 item.Version.VersionId,
-                target.Instance?.Id);
+                target.Instance?.InstanceDirectory);
         }
         finally
         {
@@ -182,11 +183,11 @@ internal async Task InstallAsync(
         floatingMessageService?.Show(Strings.Status_ResourceProjectDownloadAlreadyRunning);
         reportStatus(Strings.Status_ResourceProjectDownloadAlreadyRunning);
         logger?.LogInformation(
-            "Duplicate resource project installation request ignored. Kind={Kind} ProjectId={ProjectId} VersionId={VersionId} InstanceId={InstanceId}",
+            "Duplicate resource project installation request ignored. Kind={Kind} ProjectId={ProjectId} VersionId={VersionId} InstanceDirectory={InstanceDirectory}",
             options.Kind,
             context.Project?.Project.ProjectId,
             context.Item.Version.VersionId,
-            context.Target.Instance?.Id);
+            context.Target.Instance?.InstanceDirectory);
     }
 
     private static string NormalizeTargetPath(string path)
@@ -353,9 +354,9 @@ internal async Task InstallAsync(
                 return;
             }
         }
-        var instanceIdentity = string.IsNullOrWhiteSpace(instance.Id)
+        var instanceIdentity = string.IsNullOrWhiteSpace(instance.InstanceDirectory)
             ? NormalizeTargetPath(instance.InstanceDirectory)
-            : instance.Id;
+            : instance.InstanceDirectory;
         if (!TryBeginInstall(
                 context,
                 nameof(ResourceProjectInstallationTargetKind.ExistingInstance),

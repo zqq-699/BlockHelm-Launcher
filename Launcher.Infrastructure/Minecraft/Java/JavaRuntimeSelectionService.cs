@@ -273,8 +273,8 @@ public sealed class JavaRuntimeSelectionService : IJavaRuntimeSelectionService
         if (selectedRuntime is not null)
         {
             logger.LogInformation(
-                "Selected Java runtime for game launch. InstanceId={InstanceId} MinecraftVersion={MinecraftVersion} Loader={Loader} LoaderVersion={LoaderVersion} JavaRequirement={JavaRequirement} JavaVersion={JavaVersion} JavaArchitecture={JavaArchitecture} JavaSource={JavaSource}",
-                instance.Id,
+                "Selected Java runtime for game launch. InstanceDirectory={InstanceDirectory} MinecraftVersion={MinecraftVersion} Loader={Loader} LoaderVersion={LoaderVersion} JavaRequirement={JavaRequirement} JavaVersion={JavaVersion} JavaArchitecture={JavaArchitecture} JavaSource={JavaSource}",
+                instance.InstanceDirectory,
                 instance.MinecraftVersion,
                 instance.Loader,
                 instance.LoaderVersion,
@@ -288,8 +288,8 @@ public sealed class JavaRuntimeSelectionService : IJavaRuntimeSelectionService
         foreach (var runtime in runtimes.Where(runtime => !requirement.IsCompatible(runtime)))
         {
             logger.LogDebug(
-                "Excluded incompatible Java runtime from automatic selection. InstanceId={InstanceId} JavaVersion={JavaVersion} JavaArchitecture={JavaArchitecture} JavaSource={JavaSource} JavaRequirement={JavaRequirement} Reason={Reason}",
-                instance.Id,
+                "Excluded incompatible Java runtime from automatic selection. InstanceDirectory={InstanceDirectory} JavaVersion={JavaVersion} JavaArchitecture={JavaArchitecture} JavaSource={JavaSource} JavaRequirement={JavaRequirement} Reason={Reason}",
+                instance.InstanceDirectory,
                 runtime.Version,
                 runtime.Architecture,
                 runtime.Source,
@@ -323,10 +323,12 @@ public sealed class JavaRuntimeSelectionService : IJavaRuntimeSelectionService
             : instance.VersionName;
 
         if (!string.IsNullOrWhiteSpace(instance.InstanceDirectory) && !string.IsNullOrWhiteSpace(versionName))
-            yield return Path.Combine(instance.InstanceDirectory, $"{versionName}.json");
+            yield return Launcher.Infrastructure.Persistence.InstanceVersionFiles.TryResolveVersionJsonPath(instance.InstanceDirectory, versionName)
+                ?? Path.Combine(instance.InstanceDirectory, $"{versionName}.json");
 
         if (!string.IsNullOrWhiteSpace(settings.MinecraftDirectory) && !string.IsNullOrWhiteSpace(versionName))
-            yield return Path.Combine(settings.MinecraftDirectory, "versions", versionName, $"{versionName}.json");
+            yield return Launcher.Infrastructure.Persistence.InstanceVersionFiles.TryResolveVersionJsonPath(Path.Combine(settings.MinecraftDirectory, "versions", versionName), versionName)
+                ?? Path.Combine(settings.MinecraftDirectory, "versions", versionName, $"{versionName}.json");
     }
 
     private static int? TryReadJavaMajorVersion(

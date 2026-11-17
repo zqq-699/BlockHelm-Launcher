@@ -79,6 +79,38 @@ public sealed class AtomicJsonFileWriterTests : TestTempDirectory
         Assert.Empty(Directory.GetFiles(TempRoot, "*.tmp"));
     }
 
+    [Fact]
+    public async Task WriteRevalidatesTheDestinationAfterMoveFailure()
+    {
+        Directory.CreateDirectory(TempRoot);
+        var path = Path.Combine(TempRoot, "settings.json");
+        const string original = "{\"Name\":\"original\"}";
+        const string external = "{\"Name\":\"external\"}";
+        await File.WriteAllTextAsync(path, original);
+        using var blocker = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => AtomicJsonFileWriter.WriteAsync(
+            path,
+            new Payload("stale"),
+            new JsonSerializerOptions(),
+            CancellationToken.None,
+            maxMoveAttempts: 2,
+            retryAsync: async _ =>
+            {
+                // The first replace has failed. Change the destination before allowing the retry.
+                await File.WriteAllTextAsync(path, external);
+                blocker.Dispose();
+            },
+            validateDestination: () =>
+            {
+                if (File.ReadAllText(path) != original)
+                    throw new InvalidOperationException("Settings changed since they were read.");
+            }));
+
+        Assert.Equal(external, await File.ReadAllTextAsync(path));
+        Assert.Empty(Directory.EnumerateFiles(TempRoot, "*.tmp"));
+    }
+
     private static FileStream OpenExclusively(string path) =>
         new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 

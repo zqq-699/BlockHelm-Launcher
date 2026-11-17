@@ -26,6 +26,8 @@ using Launcher.Domain.Models;
 using Launcher.Infrastructure.CurseForge;
 using Microsoft.Extensions.Logging;
 
+using Launcher.Infrastructure.Minecraft;
+
 namespace Launcher.Infrastructure.Resources;
 
 /// <summary>
@@ -62,14 +64,17 @@ internal sealed class CurseForgeResourceClient(
 
         var apiKey = await apiKeyResolver.TryResolveAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            logger.LogWarning("CurseForge project lookup skipped. Reason=ApiKeyMissing ProjectId={ProjectId}", projectId);
             return null;
+        }
 
         using var request = CreateRequest(HttpMethod.Get, $"{BaseUrl}/mods/{projectId}", apiKey);
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await DownloadHttpDiagnostics.SendAsync(httpClient, request, logger, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
             return null;
         response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<ModResponse>(cancellationToken: cancellationToken)
+        var payload = await DownloadHttpDiagnostics.ReadFromJsonAsync<ModResponse>(response, logger, cancellationToken)
             .ConfigureAwait(false);
         return payload?.Data is { } project ? MapProject(project, reference.Kind) : null;
     }
@@ -145,6 +150,7 @@ internal sealed class CurseForgeResourceClient(
         var apiKey = await apiKeyResolver.TryResolveAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
+            logger.LogWarning("CurseForge version lookup skipped. Reason=ApiKeyMissing");
             return new ResourceProjectVersionsResult
             {
                 IsCurseForgeUnavailable = true,
@@ -164,11 +170,11 @@ internal sealed class CurseForgeResourceClient(
             query.Add($"modLoaderType={(int)loader}");
 
         using var httpRequest = CreateRequest(HttpMethod.Get, $"{BaseUrl}/mods/{projectId}/files?{string.Join("&", query)}", apiKey);
-        using var response = await httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+        using var response = await DownloadHttpDiagnostics.SendAsync(httpClient, httpRequest, logger, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             return new ResourceProjectVersionsResult { IsCurseForgeUnavailable = true };
         response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<FilesResponse>(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var payload = await DownloadHttpDiagnostics.ReadFromJsonAsync<FilesResponse>(response, logger, cancellationToken).ConfigureAwait(false);
         var files = payload?.Data ?? [];
         var sourceFileCount = files.Count;
         IReadOnlyDictionary<long, CurseForgeFile> compatibilitySources = new Dictionary<long, CurseForgeFile>();
@@ -268,11 +274,11 @@ internal sealed class CurseForgeResourceClient(
             query.Add($"categoryId={categoryId.Value}");
 
         using var httpRequest = CreateRequest(HttpMethod.Get, $"{BaseUrl}/mods/search?{string.Join("&", query)}", apiKey);
-        using var response = await httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+        using var response = await DownloadHttpDiagnostics.SendAsync(httpClient, httpRequest, logger, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             return new ResourceProviderSearchResult([], false, true);
         response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<SearchResponse>(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var payload = await DownloadHttpDiagnostics.ReadFromJsonAsync<SearchResponse>(response, logger, cancellationToken).ConfigureAwait(false);
         var projects = payload?.Data.Select(mod => MapProject(mod, request.Kind)).ToList() ?? [];
         var hasMore = payload?.Pagination?.TotalCount is { } total
             ? offset + projects.Count < total
@@ -289,11 +295,11 @@ internal sealed class CurseForgeResourceClient(
             return new Dictionary<string, ResourceProject>(StringComparer.OrdinalIgnoreCase);
         using var request = CreateRequest(HttpMethod.Post, $"{BaseUrl}/mods", apiKey);
         request.Content = JsonContent.Create(new ModsRequest(ids.Select(long.Parse).ToList()));
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await DownloadHttpDiagnostics.SendAsync(httpClient, request, logger, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             return new Dictionary<string, ResourceProject>(StringComparer.OrdinalIgnoreCase);
         response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<SearchResponse>(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var payload = await DownloadHttpDiagnostics.ReadFromJsonAsync<SearchResponse>(response, logger, cancellationToken).ConfigureAwait(false);
         return payload?.Data
             .Where(mod => mod.Id > 0 && mod.ClassId == ModsClassId)
             .Select(mod => MapProject(mod, ResourceProjectKind.Mod))
@@ -340,11 +346,11 @@ internal sealed class CurseForgeResourceClient(
         CancellationToken cancellationToken)
     {
         using var request = CreateRequest(HttpMethod.Get, $"{BaseUrl}/categories?gameId={MinecraftGameId}&classId={MapClassId(kind)}", apiKey);
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await DownloadHttpDiagnostics.SendAsync(httpClient, request, logger, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             return [];
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<CategoriesResponse>(cancellationToken: cancellationToken).ConfigureAwait(false))?.Data ?? [];
+        return (await DownloadHttpDiagnostics.ReadFromJsonAsync<CategoriesResponse>(response, logger, cancellationToken).ConfigureAwait(false))?.Data ?? [];
     }
 
     private async Task<IReadOnlyList<CurseForgeFile>> LoadFilesAsync(
@@ -354,9 +360,9 @@ internal sealed class CurseForgeResourceClient(
     {
         using var request = CreateRequest(HttpMethod.Post, $"{BaseUrl}/mods/files", apiKey);
         request.Content = JsonContent.Create(new CurseForgeFileIdsRequest { FileIds = fileIds });
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await DownloadHttpDiagnostics.SendAsync(httpClient, request, logger, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<FilesResponse>(cancellationToken: cancellationToken)
+        return (await DownloadHttpDiagnostics.ReadFromJsonAsync<FilesResponse>(response, logger, cancellationToken)
             .ConfigureAwait(false))?.Data ?? [];
     }
 

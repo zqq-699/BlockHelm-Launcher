@@ -1,6 +1,9 @@
 using System.IO;
+using Launcher.Application.Services;
 using System.Net;
 using System.Net.Http;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace Launcher.Infrastructure.Updates;
 
@@ -31,13 +34,16 @@ internal static class OfficialUpdateHttp
         HttpClient client,
         Uri initialUri,
         OfficialUpdateUriKind kind,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, ILogger? logger = null)
     {
+        using var diagnosticRequest = DownloadDiagnostics.BeginRequest(logger);
+        var stopwatch = Stopwatch.StartNew();
         ValidateInitialUri(initialUri, kind);
         var currentUri = initialUri;
         for (var redirectCount = 0; ; redirectCount++)
         {
             HttpResponseMessage response;
+            logger?.LogInformation("Official update HTTP request started. Endpoint={Endpoint} Host={Host} RedirectCount={RedirectCount}", kind, currentUri.Host, redirectCount);
             try
             {
                 response = await client.SendAsync(
@@ -46,15 +52,16 @@ internal static class OfficialUpdateHttp
                         cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new UpdateSourceUnavailableException("The update source timed out.");
+                throw new UpdateSourceUnavailableException("The update source timed out.", exception);
             }
             catch (HttpRequestException exception)
             {
                 throw new UpdateSourceUnavailableException("The update source could not be reached.", exception);
             }
 
+            logger?.LogInformation("Official update HTTP response. Endpoint={Endpoint} Host={Host} StatusCode={StatusCode} ContentLength={ContentLength} DurationMs={DurationMs}", kind, currentUri.Host, (int)response.StatusCode, response.Content.Headers.ContentLength, stopwatch.ElapsedMilliseconds);
             var finalUri = response.RequestMessage?.RequestUri ?? currentUri;
             ValidateRedirectUri(finalUri);
             if (!IsRedirect(response.StatusCode))
@@ -63,7 +70,7 @@ internal static class OfficialUpdateHttp
                 {
                     var statusCode = response.StatusCode;
                     response.Dispose();
-                    throw new UpdateSourceUnavailableException($"The update source returned HTTP {(int)statusCode}.");
+                    throw SafeExceptionLog.Describe(new UpdateSourceUnavailableException("The update source returned an unsuccessful status."), "UpdateHttpStatus", ("StatusCode", (int)statusCode), ("Host", currentUri.Host));
                 }
                 return response;
             }
@@ -71,13 +78,13 @@ internal static class OfficialUpdateHttp
             if (redirectCount >= MaxRedirects)
             {
                 response.Dispose();
-                throw new UpdateSecurityException("The update source exceeded the redirect limit.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update source exceeded the redirect limit."), "ComponentValidation", ("Reason", "The update source exceeded the redirect limit."));
             }
 
             var location = response.Headers.Location;
             response.Dispose();
             if (location is null)
-                throw new UpdateSecurityException("The update source returned a redirect without a location.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update source returned a redirect without a location."), "ComponentValidation", ("Reason", "The update source returned a redirect without a location."));
             currentUri = location.IsAbsoluteUri ? location : new Uri(finalUri, location);
             ValidateRedirectUri(currentUri);
         }
@@ -89,7 +96,7 @@ internal static class OfficialUpdateHttp
         CancellationToken cancellationToken)
     {
         if (response.Content.Headers.ContentLength is > 0 and var length && length > maximumBytes)
-            throw new UpdateSecurityException("The update response exceeded the size limit.");
+            throw SafeExceptionLog.Describe(new UpdateSecurityException("The update response exceeded the size limit."), "ComponentValidation", ("Reason", "The update response exceeded the size limit."));
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var destination = new MemoryStream(Math.Min(maximumBytes, 81920));
         var buffer = new byte[81920];
@@ -99,7 +106,7 @@ internal static class OfficialUpdateHttp
             if (read == 0)
                 return destination.ToArray();
             if (destination.Length + read > maximumBytes)
-                throw new UpdateSecurityException("The update response exceeded the size limit.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update response exceeded the size limit."), "ComponentValidation", ("Reason", "The update response exceeded the size limit."));
             destination.Write(buffer, 0, read);
         }
     }
@@ -116,7 +123,7 @@ internal static class OfficialUpdateHttp
             _ => false
         };
         if (!valid)
-            throw new UpdateSecurityException("The update URL is not an approved official source.");
+            throw SafeExceptionLog.Describe(new UpdateSecurityException("The update URL is not an approved official source."), "ComponentValidation", ("Reason", "The update URL is not an approved official source."));
     }
 
     private static void ValidateRedirectUri(Uri uri) => ValidateHttps(uri);
@@ -124,7 +131,7 @@ internal static class OfficialUpdateHttp
     private static void ValidateHttps(Uri uri)
     {
         if (!uri.IsAbsoluteUri || !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            throw new UpdateSecurityException("Only HTTPS update URLs are allowed.");
+            throw SafeExceptionLog.Describe(new UpdateSecurityException("Only HTTPS update URLs are allowed."), "ComponentValidation", ("Reason", "Only HTTPS update URLs are allowed."));
     }
 
     private static bool IsRedirect(HttpStatusCode statusCode) => statusCode is

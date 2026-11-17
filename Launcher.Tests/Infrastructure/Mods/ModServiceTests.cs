@@ -51,7 +51,7 @@ public sealed class ModServiceTests : TestTempDirectory
 
         var mod = Assert.Single(await service.GetModsAsync(new GameInstance
         {
-            Id = "localized-name",
+
             InstanceDirectory = instanceDirectory
         }));
 
@@ -73,7 +73,7 @@ public sealed class ModServiceTests : TestTempDirectory
 
         var mod = Assert.Single(await service.GetModsAsync(new GameInstance
         {
-            Id = "filename-only",
+
             InstanceDirectory = instanceDirectory
         }));
 
@@ -176,7 +176,7 @@ public sealed class ModServiceTests : TestTempDirectory
             using (ZipFile.Open(jarPath, ZipArchiveMode.Create))
             {
             }
-            instances.Add(new GameInstance { Id = $"instance-{index}", InstanceDirectory = instanceDirectory });
+            instances.Add(new GameInstance {  InstanceDirectory = instanceDirectory });
         }
 
         var service = CreateService();
@@ -206,7 +206,7 @@ public sealed class ModServiceTests : TestTempDirectory
             using (ZipFile.Open(Path.Combine(modsDirectory, $"mod-{index}.jar"), ZipArchiveMode.Create))
             {
             }
-            instances.Add(new GameInstance { Id = $"instance-{index}", InstanceDirectory = instanceDirectory });
+            instances.Add(new GameInstance {  InstanceDirectory = instanceDirectory });
         }
 
         var service = CreateService();

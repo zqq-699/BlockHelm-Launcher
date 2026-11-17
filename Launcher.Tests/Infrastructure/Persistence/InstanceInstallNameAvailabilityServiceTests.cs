@@ -38,7 +38,6 @@ public sealed class InstanceInstallNameAvailabilityServiceTests : TestTempDirect
         await using var transaction = await transactionService.BeginAsync(
             minecraftDirectory,
             "pending",
-            "instance",
             "game",
             initializeDefaultIfEmpty: false);
         var service = CreateService(new GameInstallCoordinator());

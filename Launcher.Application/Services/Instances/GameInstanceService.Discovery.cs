@@ -18,8 +18,6 @@
  */
 
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 using Launcher.Application.Repositories;
 using Launcher.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -35,7 +33,7 @@ private List<GameInstance> SynchronizeInstalledInstances(
         LauncherSettings settings,
         out bool changed)
     {
-        // 已存实例保留用户配置，但必须能匹配实际版本目录；未登记目录则生成稳定 ID 的发现实例。
+        // 已存实例保留用户配置，但必须能匹配实际版本目录；未登记目录按实际位置建立发现实例。
         changed = false;
         var syncedInstances = new List<GameInstance>();
         var seenVersions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -95,7 +93,7 @@ private List<GameInstance> SynchronizeInstalledInstances(
     {
         return new GameInstance
         {
-            Id = CreateDiscoveredInstanceId(settings.MinecraftDirectory, installedVersion.VersionName),
+
             Name = installedVersion.VersionName,
             MinecraftVersion = installedVersion.MinecraftVersion,
             Loader = installedVersion.Loader,
@@ -115,8 +113,7 @@ private List<GameInstance> SynchronizeInstalledInstances(
     private static bool ApplyInstalledVersion(GameInstance instance, InstalledGameVersion installedVersion)
     {
         var changed = false;
-        if (string.IsNullOrWhiteSpace(instance.Name))
-            changed |= SetIfChanged(instance.Name, installedVersion.VersionName, value => instance.Name = value ?? string.Empty);
+        changed |= SetIfChanged(instance.Name, installedVersion.VersionName, value => instance.Name = value ?? string.Empty);
         changed |= SetIfChanged(
             instance.MinecraftVersion,
             ResolvePreferredMinecraftVersion(instance.MinecraftVersion, installedVersion.MinecraftVersion, installedVersion.VersionName),
@@ -187,14 +184,6 @@ private List<GameInstance> SynchronizeInstalledInstances(
                || value.StartsWith("b", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string CreateDiscoveredInstanceId(string minecraftDirectory, string versionName)
-    {
-        var versionPath = Path.GetFullPath(Path.Combine(minecraftDirectory, "versions", versionName))
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .ToUpperInvariant();
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(versionPath));
-        return $"local-{Convert.ToHexString(hash)[..32].ToLowerInvariant()}";
-    }
 
     private static string GetVersionName(GameInstance instance)
     {

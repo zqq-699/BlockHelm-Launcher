@@ -75,12 +75,21 @@ public sealed class LocalSaveService : ILocalSaveService
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
         return Task.Run(
-            () => archiveImporter.Import(
-                instance.Id,
+            () =>
+            {
+                using var instanceScope = InstanceContentOwnership.Open(instance, instance.InstanceDirectory);
+                return archiveImporter.Import(
+                instance.InstanceDirectory,
                 GetSavesDirectory(instance),
                 archivePath,
-                ToLocalSave,
-                cancellationToken),
+                path =>
+                {
+                    using var scope = InstanceContentOwnership.Open(instance, GetSavesDirectory(instance));
+                    return scope.Bind(ToLocalSave(path));
+                },
+                cancellationToken,
+                instanceScope);
+            },
             cancellationToken);
     }
 
@@ -102,12 +111,13 @@ public sealed class LocalSaveService : ILocalSaveService
     {
         cancellationToken.ThrowIfCancellationRequested();
         var savesDirectory = GetSavesDirectory(instance);
+        using var contentScope = InstanceContentOwnership.Open(instance, savesDirectory);
         if (!Directory.Exists(savesDirectory))
         {
             snapshots.Remove(savesDirectory);
             logger.LogDebug(
-                "No local saves directory found. InstanceId={InstanceId} SavesDirectory={SavesDirectory}",
-                instance.Id,
+                "No local saves directory found. InstanceDirectory={InstanceDirectory} SavesDirectory={SavesDirectory}",
+                instance.InstanceDirectory,
                 savesDirectory);
             return [];
         }
@@ -120,19 +130,22 @@ public sealed class LocalSaveService : ILocalSaveService
         if (inventory.Length == 0)
         {
             snapshots.Remove(savesDirectory);
-            logger.LogDebug("Local save inventory checked. InstanceId={InstanceId} Count=0", instance.Id);
+            logger.LogDebug("Local save inventory checked. InstanceDirectory={InstanceDirectory} Count=0", instance.InstanceDirectory);
             return [];
         }
 
-        var snapshot = snapshots.GetOrCreate(savesDirectory);
-        var saves = snapshot.Reconcile(inventory, static item => item.FullPath, ToLocalSave);
-        logger.LogDebug("Local save inventory checked. InstanceId={InstanceId} Count={SaveCount}", instance.Id, saves.Count);
+        var snapshot = snapshots.GetOrCreate(savesDirectory, contentScope.CacheIdentity);
+        var saves = snapshot.Reconcile(inventory, static item => item.FullPath, ToLocalSave,
+            save => InstanceContentOwnership.CanReuse(save, save.FullPath));
+        foreach (var save in saves) contentScope.Bind(save);
+        logger.LogDebug("Local save inventory checked. InstanceDirectory={InstanceDirectory} Count={SaveCount}", instance.InstanceDirectory, saves.Count);
         return saves;
     }
 
     private void DeleteCore(LocalSave save, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        using var contentLease = InstanceContentOwnership.Acquire(save, save.FullPath);
         if (!Directory.Exists(save.FullPath))
         {
             logger.LogDebug("Skipping local save delete because directory does not exist. Path={Path}", save.FullPath);

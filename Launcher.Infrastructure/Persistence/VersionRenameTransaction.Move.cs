@@ -22,6 +22,8 @@ internal sealed partial class VersionRenameTransaction
     {
         var oldPath = Path.Combine(directory, oldName);
         var newPath = Path.Combine(directory, newName);
+        if (string.Equals(Path.GetFullPath(oldPath), Path.GetFullPath(newPath), StringComparison.OrdinalIgnoreCase))
+            return;
         if (File.Exists(oldPath) && File.Exists(newPath))
             throw new IOException($"Both old and new rename artifacts exist: {oldName}, {newName}");
         if (File.Exists(oldPath))
@@ -32,6 +34,8 @@ internal sealed partial class VersionRenameTransaction
     {
         var oldPath = Path.Combine(directory, oldName);
         var newPath = Path.Combine(directory, newName);
+        if (string.Equals(Path.GetFullPath(oldPath), Path.GetFullPath(newPath), StringComparison.OrdinalIgnoreCase))
+            return;
         if (Directory.Exists(oldPath) && Directory.Exists(newPath))
             throw new IOException($"Both old and new rename directories exist: {oldName}, {newName}");
         if (Directory.Exists(oldPath))
@@ -41,7 +45,7 @@ internal sealed partial class VersionRenameTransaction
     private async Task MoveWithRetryAsync(
         string source,
         string destination,
-        string expectedInstanceId,
+        string expectedOwnerProof,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; ; attempt++)
@@ -49,7 +53,7 @@ internal sealed partial class VersionRenameTransaction
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await MoveOwnedDirectoryAsync(source, destination, expectedInstanceId, cancellationToken)
+                await MoveOwnedDirectoryAsync(source, destination, expectedOwnerProof, cancellationToken)
                     .ConfigureAwait(false);
                 return;
             }
@@ -67,7 +71,7 @@ internal sealed partial class VersionRenameTransaction
     private async Task MoveOwnedDirectoryAsync(
         string source,
         string destination,
-        string expectedInstanceId,
+        string expectedOwnerProof,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -82,7 +86,7 @@ internal sealed partial class VersionRenameTransaction
             WindowsDirectoryHandleMover.MoveOwnedDirectory(
                 source,
                 destination,
-                () => GameInstanceSettingsStore.HasIdentity(source, expectedInstanceId),
+                () => GameInstanceSettingsStore.HasIdentity(source, expectedOwnerProof),
                 beforeOwnedDirectoryMove is null
                     ? null
                     : () => beforeOwnedDirectoryMove(source, destination));
@@ -90,7 +94,7 @@ internal sealed partial class VersionRenameTransaction
         catch (InvalidOperationException)
         {
             throw new GameInstanceMutationConflictException(
-                expectedInstanceId,
+                expectedOwnerProof,
                 Path.GetFileName(Path.TrimEndingDirectorySeparator(source)));
         }
     }

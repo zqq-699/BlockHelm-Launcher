@@ -114,7 +114,8 @@ public sealed partial class InstanceJavaSettingsViewModel : GameSettingsDetailsS
     public void SetSelectedInstance(GameInstance? instance)
     {
         selectedInstance = instance;
-        LoadEditorFromInstance();
+        if (!persistence.HasPendingSave("java"))
+            LoadEditorFromInstance();
         if (InstanceJavaRuntimes.Count == 0)
             _ = InstanceJavaSettings.RefreshJavaRuntimesForDisplayAsync();
     }

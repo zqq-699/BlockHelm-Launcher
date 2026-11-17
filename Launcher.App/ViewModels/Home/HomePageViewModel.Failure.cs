@@ -71,8 +71,8 @@ private void ObserveGameExit(GameLaunchSession session)
             {
                 logger.LogWarning(
                     exception,
-                    "Failed to observe Minecraft process exit. InstanceId={InstanceId}",
-                    session.InstanceId);
+                    "Failed to observe Minecraft process exit. InstanceDirectory={InstanceDirectory}",
+                    session.InstanceDirectory);
             }
         });
     }

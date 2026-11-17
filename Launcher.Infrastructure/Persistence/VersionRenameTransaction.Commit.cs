@@ -36,17 +36,13 @@ internal sealed partial class VersionRenameTransaction
                 if (targetAttempt == MaxStagingTargets)
                     break;
                 currentMarker = marker with { TransactionId = guidFactory().ToString("N") };
-                await AtomicJsonFileWriter.WriteAsync(
-                    PendingInstanceRenameDirectory.GetMarkerPath(sourceDirectory),
-                    currentMarker,
-                    JsonOptions,
-                    cancellationToken).ConfigureAwait(false);
+                await WriteOwnedMarkerAsync(sourceDirectory, currentMarker, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
             try
             {
-                await MoveWithRetryAsync(sourceDirectory, stagedDirectory, marker.InstanceId, cancellationToken)
+                await MoveWithRetryAsync(sourceDirectory, stagedDirectory, marker.OwnerProof, cancellationToken)
                     .ConfigureAwait(false);
                 logger.LogDebug(
                     "Instance rename entered committed staging. OldName={OldName} NewName={NewName} StagedDirectory={StagedDirectory}",
@@ -64,11 +60,7 @@ internal sealed partial class VersionRenameTransaction
                 if (targetAttempt == MaxStagingTargets)
                     break;
                 currentMarker = marker with { TransactionId = guidFactory().ToString("N") };
-                await AtomicJsonFileWriter.WriteAsync(
-                    PendingInstanceRenameDirectory.GetMarkerPath(sourceDirectory),
-                    currentMarker,
-                    JsonOptions,
-                    cancellationToken).ConfigureAwait(false);
+                await WriteOwnedMarkerAsync(sourceDirectory, currentMarker, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -109,7 +101,7 @@ internal sealed partial class VersionRenameTransaction
                 await MoveOwnedDirectoryAsync(
                         currentDirectory,
                         destinationDirectory,
-                        marker.InstanceId,
+                        marker.OwnerProof,
                         cancellationToken)
                     .ConfigureAwait(false);
                 currentDirectory = destinationDirectory;
@@ -137,7 +129,7 @@ internal sealed partial class VersionRenameTransaction
 
         await instanceSettingsStore.CompleteRenameAsync(
             currentDirectory,
-            marker.InstanceId,
+            marker.OwnerProof,
             marker.NewName,
             marker.NewIconSource,
             marker.UpdatedAtUtc,
@@ -146,8 +138,8 @@ internal sealed partial class VersionRenameTransaction
             PendingInstanceRenameDirectory.GetMarkerPath(currentDirectory),
             cancellationToken).ConfigureAwait(false);
         logger.LogInformation(
-            "Pending instance rename completed. InstanceId={InstanceId} OldName={OldName} NewName={NewName}",
-            marker.InstanceId,
+            "Pending instance rename completed. OwnerProof={OwnerProof} OldName={OldName} NewName={NewName}",
+            marker.OwnerProof,
             marker.OldName,
             marker.NewName);
     }
@@ -157,14 +149,15 @@ internal sealed partial class VersionRenameTransaction
         PendingInstanceRenameMarker marker,
         CancellationToken cancellationToken)
     {
-        RenameOptionalArtifact(directory, $"{marker.OldName}.jar", $"{marker.NewName}.jar");
+        var originalJsonName = marker.OriginalJsonRelativePath ?? $"{marker.OldName}.json";
+        RenameOptionalArtifact(directory, Path.ChangeExtension(originalJsonName, ".jar"), $"{marker.NewName}.jar");
         RenameOptionalDirectory(directory, $"{marker.OldName}-natives", $"{marker.NewName}-natives");
 
-        var oldJsonPath = Path.Combine(directory, $"{marker.OldName}.json");
+        var oldJsonPath = Path.Combine(directory, originalJsonName);
         var newJsonPath = Path.Combine(directory, $"{marker.NewName}.json");
-        if (File.Exists(oldJsonPath) && File.Exists(newJsonPath))
+        if (!string.Equals(oldJsonPath, newJsonPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldJsonPath) && File.Exists(newJsonPath))
             throw new IOException("Both old and new version JSON files exist.");
-        if (File.Exists(oldJsonPath))
+        if (!string.Equals(oldJsonPath, newJsonPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldJsonPath))
             File.Move(oldJsonPath, newJsonPath);
         if (!File.Exists(newJsonPath))
             throw new FileNotFoundException("Version JSON was not found while resuming rename.", newJsonPath);
@@ -175,9 +168,11 @@ internal sealed partial class VersionRenameTransaction
             json = (await JsonNode.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false)
                     ?? throw new InvalidDataException("Version JSON is empty.")).AsObject();
         }
+        var oldId = marker.OriginalJsonId ?? json["id"]?.GetValue<string>();
         json["id"] = marker.NewName;
         if (json["jar"] is JsonValue jarValue
-            && string.Equals(jarValue.ToString(), marker.OldName, StringComparison.OrdinalIgnoreCase))
+            && (string.Equals(jarValue.ToString(), marker.OldName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(jarValue.ToString(), oldId, StringComparison.OrdinalIgnoreCase)))
         {
             json["jar"] = marker.NewName;
         }
@@ -199,15 +194,15 @@ internal sealed partial class VersionRenameTransaction
                 throw new IOException($"Rename rollback destination already exists: {originalDirectory}");
 
             await EnsureOwnedOrQuarantineAsync(currentDirectory, marker, cancellationToken).ConfigureAwait(false);
-            await MoveWithRetryAsync(currentDirectory, originalDirectory, marker.InstanceId, cancellationToken)
+            await MoveWithRetryAsync(currentDirectory, originalDirectory, marker.OwnerProof, cancellationToken)
                 .ConfigureAwait(false);
             currentDirectory = originalDirectory;
         }
 
         await DeleteOrQuarantineMarkerAsync(currentDirectory, cancellationToken).ConfigureAwait(false);
         logger.LogWarning(
-            "Pending instance rename was rolled back because its destination is occupied. InstanceId={InstanceId} OldName={OldName} NewName={NewName}",
-            marker.InstanceId,
+            "Pending instance rename was rolled back because its destination is occupied. OwnerProof={OwnerProof} OldName={OldName} NewName={NewName}",
+            marker.OwnerProof,
             marker.OldName,
             marker.NewName);
     }
@@ -217,14 +212,15 @@ internal sealed partial class VersionRenameTransaction
         PendingInstanceRenameMarker marker,
         CancellationToken cancellationToken)
     {
-        RenameOptionalArtifact(directory, $"{marker.NewName}.jar", $"{marker.OldName}.jar");
+        var originalJsonName = marker.OriginalJsonRelativePath ?? $"{marker.OldName}.json";
+        RenameOptionalArtifact(directory, $"{marker.NewName}.jar", Path.ChangeExtension(originalJsonName, ".jar"));
         RenameOptionalDirectory(directory, $"{marker.NewName}-natives", $"{marker.OldName}-natives");
 
         var newJsonPath = Path.Combine(directory, $"{marker.NewName}.json");
-        var oldJsonPath = Path.Combine(directory, $"{marker.OldName}.json");
-        if (File.Exists(newJsonPath) && File.Exists(oldJsonPath))
+        var oldJsonPath = Path.Combine(directory, originalJsonName);
+        if (!string.Equals(newJsonPath, oldJsonPath, StringComparison.OrdinalIgnoreCase) && File.Exists(newJsonPath) && File.Exists(oldJsonPath))
             throw new IOException("Both old and new version JSON files exist while rolling back rename.");
-        if (File.Exists(newJsonPath))
+        if (!string.Equals(newJsonPath, oldJsonPath, StringComparison.OrdinalIgnoreCase) && File.Exists(newJsonPath))
             File.Move(newJsonPath, oldJsonPath);
         if (!File.Exists(oldJsonPath))
             throw new FileNotFoundException("Version JSON was not found while rolling back rename.", oldJsonPath);
@@ -235,11 +231,21 @@ internal sealed partial class VersionRenameTransaction
             json = (await JsonNode.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false)
                     ?? throw new InvalidDataException("Version JSON is empty.")).AsObject();
         }
-        json["id"] = marker.OldName;
-        if (json["jar"] is JsonValue jarValue
-            && string.Equals(jarValue.ToString(), marker.NewName, StringComparison.OrdinalIgnoreCase))
+        if (marker.OriginalJsonRelativePath is not null)
         {
-            json["jar"] = marker.OldName;
+            if (marker.OriginalJsonId is null) json.Remove("id");
+            else json["id"] = marker.OriginalJsonId;
+            if (marker.OriginalJarReference is null) json.Remove("jar");
+            else json["jar"] = marker.OriginalJarReference;
+        }
+        else
+        {
+            json["id"] = marker.OldName;
+            if (json["jar"] is JsonValue jarValue
+                && string.Equals(jarValue.ToString(), marker.NewName, StringComparison.OrdinalIgnoreCase))
+            {
+                json["jar"] = marker.OldName;
+            }
         }
         await AtomicJsonFileWriter.WriteAsync(oldJsonPath, json, JsonOptions, cancellationToken).ConfigureAwait(false);
     }

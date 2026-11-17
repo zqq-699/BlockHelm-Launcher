@@ -48,7 +48,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
         IModpackSandboxCleanupService? sandboxCleanupService = null)
         : this(
             providers,
-            new FinalVersionInstaller(),
+            new FinalVersionInstaller(logger),
             httpClient: null,
             downloadSpeedLimitState,
             tempRootDirectory: null,
@@ -197,7 +197,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
         if (string.IsNullOrWhiteSpace(selectedLoaderVersion))
         {
             if (!providers.TryGetValue(LoaderKind.Fabric, out var provider))
-                throw new InvalidOperationException("Fabric loader provider is not available.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("Fabric loader provider is not available."), "DownloadValidation", ("Reason", "Fabric loader provider is not available."));
 
             selectedLoaderVersion = (await provider.GetLoaderVersionsAsync(
                 minecraftVersion,
@@ -245,7 +245,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
         if (string.IsNullOrWhiteSpace(selectedLoaderVersion))
         {
             if (!providers.TryGetValue(LoaderKind.Quilt, out var provider))
-                throw new InvalidOperationException("Quilt loader provider is not available.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("Quilt loader provider is not available."), "DownloadValidation", ("Reason", "Quilt loader provider is not available."));
 
             selectedLoaderVersion = (await provider.GetLoaderVersionsAsync(
                 minecraftVersion,
@@ -402,7 +402,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
         {
             var separatedPathProvider = provider as ISeparatedInstallPathLoaderProvider;
             finalVersionName = provider is IStagedLoaderProvider stagedProvider
-                ? await stagedProvider.InstallStagedAsync(
+                ? await DownloadDiagnostics.RunStageAsync(logger, "LoaderInstall", () => stagedProvider.InstallStagedAsync(
                     minecraftVersion,
                     sandboxMinecraftDirectory,
                     target.MinecraftDirectory,
@@ -411,7 +411,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
                     progress,
                     downloadSourcePreference,
                     cancellationToken,
-                    downloadSpeedLimitMbPerSecond).ConfigureAwait(false)
+                    downloadSpeedLimitMbPerSecond)).ConfigureAwait(false)
                 : separatedPathProvider is not null
                     ? await separatedPathProvider.InstallWithSeparatedPathsAsync(
                         minecraftVersion,
@@ -422,7 +422,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
                         downloadSourcePreference,
                         cancellationToken,
                         downloadSpeedLimitMbPerSecond).ConfigureAwait(false)
-                    : await provider.InstallAsync(
+                    : await DownloadDiagnostics.RunStageAsync(logger, "LoaderInstall", () => provider.InstallAsync(
                         minecraftVersion,
                         sandboxMinecraftDirectory,
                         target.LogicalVersionName,
@@ -430,9 +430,9 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
                         progress,
                         downloadSourcePreference,
                         cancellationToken,
-                        downloadSpeedLimitMbPerSecond).ConfigureAwait(false);
+                        downloadSpeedLimitMbPerSecond)).ConfigureAwait(false);
             if (!string.Equals(finalVersionName, target.LogicalVersionName, StringComparison.Ordinal))
-                throw new InvalidDataException("Loader returned a version identity different from the logical install name.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Loader returned a version identity different from the logical install name."), "DownloadValidation", ("Reason", "Loader returned a version identity different from the logical install name."));
 
             logger.LogDebug(
                 "Instance loader sandbox publication started. Loader={Loader} VersionName={VersionName} SessionDirectory={SessionDirectory}",

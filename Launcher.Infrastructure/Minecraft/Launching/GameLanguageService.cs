@@ -37,7 +37,7 @@ public sealed class GameLanguageService : IGameLanguageService
         CancellationToken cancellationToken = default)
     {
         var instanceDirectory = Path.GetFullPath(instance.InstanceDirectory);
-        Directory.CreateDirectory(instanceDirectory);
+        using var instanceLease = Persistence.InstanceDirectoryOwnership.AcquireReadLease(instance);
 
         var optionsPath = Path.Combine(instanceDirectory, "options.txt");
         var minecraftLanguage = ResolveMinecraftLanguage(launcherLanguage, ResolveGameVersion(instance));

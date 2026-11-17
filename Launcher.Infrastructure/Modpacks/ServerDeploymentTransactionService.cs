@@ -76,7 +76,7 @@ internal sealed class ServerDeploymentTransactionService : IServerDeploymentTran
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (completed)
-                throw new InvalidOperationException("Server deployment transaction is already complete.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("Server deployment transaction is already complete."), "DownloadValidation", ("Reason", "Server deployment transaction is already complete."));
             if (Directory.Exists(FinalDirectory) || File.Exists(FinalDirectory))
                 throw new ServerDeploymentDirectoryExistsException(FinalDirectory);
             ValidateOwnedStagingDirectory();
@@ -123,14 +123,14 @@ internal sealed class ServerDeploymentTransactionService : IServerDeploymentTran
                 "Server deployment staging directory");
             var markerPath = Path.Combine(StagingDirectory, markerFileName);
             if (!File.Exists(markerPath))
-                throw new InvalidDataException("Server deployment staging marker is missing.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Server deployment staging marker is missing."), "DownloadValidation", ("Reason", "Server deployment staging marker is missing."));
             var marker = JsonSerializer.Deserialize<ServerDeploymentMarker>(File.ReadAllText(markerPath));
             if (marker is null || !string.Equals(marker.TransactionId, transactionId, StringComparison.Ordinal))
-                throw new InvalidDataException("Server deployment staging marker does not match the active transaction.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Server deployment staging marker does not match the active transaction."), "DownloadValidation", ("Reason", "Server deployment staging marker does not match the active transaction."));
             if (Directory.EnumerateFileSystemEntries(StagingDirectory, "*", SearchOption.AllDirectories)
                 .Any(path => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0))
             {
-                throw new InvalidDataException("Server deployment staging directory contains a reparse point.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Server deployment staging directory contains a reparse point."), "DownloadValidation", ("Reason", "Server deployment staging directory contains a reparse point."));
             }
         }
     }

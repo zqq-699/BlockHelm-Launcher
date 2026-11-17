@@ -82,6 +82,7 @@ public sealed partial class DownloadInstallViewModel : ObservableObject
         var installTask = downloadTasksPage.BeginTask(
             $"{request.LoaderDisplayName} {request.MinecraftVersion}",
             request.InstanceName);
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "InstanceInstall", installTask.Id);
         logger.LogInformation(
             "Starting instance installation. MinecraftVersion={MinecraftVersion} Loader={Loader} InstanceName={InstanceName}",
             request.MinecraftVersion,
@@ -127,8 +128,8 @@ public sealed partial class DownloadInstallViewModel : ObservableObject
             SetLatestInstallCompletion(installSequence, completionMessage);
             installTask.Complete(completionMessage);
             logger.LogInformation(
-                "Instance installation completed. InstanceId={InstanceId} MinecraftVersion={MinecraftVersion} Loader={Loader} DurationMs={DurationMs}",
-                instance.Id,
+                "Instance installation completed. InstanceDirectory={InstanceDirectory} MinecraftVersion={MinecraftVersion} Loader={Loader} DurationMs={DurationMs}",
+                instance.InstanceDirectory,
                 request.MinecraftVersion,
                 request.Loader,
                 System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);

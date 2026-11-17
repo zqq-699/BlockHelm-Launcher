@@ -35,6 +35,8 @@ namespace Launcher.App.ViewModels.GameSettings;
 /// </summary>
 public sealed partial class InstanceResourcePackManagementSettingsViewModel : GameSettingsDetailsSectionViewModelBase
 {
+    internal long ContentRevision => localResourcePacksViewModel.Revision;
+
     // LocalResourcePacksViewModel 是目录内容的唯一来源；本类只保存筛选、选择和页面生命周期状态。
     private readonly LocalResourcePacksViewModel localResourcePacksViewModel;
     private readonly IStatusService statusService;
@@ -201,9 +203,16 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel : Ga
             return true;
         }
 
+        var changed = !ReferenceEquals(selectedInstance, instance);
+        if (changed)
+        {
+            Interlocked.Increment(ref lifecycleGeneration);
+            loadTask = null;
+        }
         selectedInstance = instance;
+        localResourcePacksViewModel.SetSelectedInstance(instance);
         ImportLocalResourcePackCommand.NotifyCanExecuteChanged();
-        return false;
+        return changed;
     }
 
     public override void OnSectionDeactivated()
@@ -291,7 +300,7 @@ public sealed partial class InstanceResourcePackManagementSettingsViewModel : Ga
     {
         return isSectionActive
             && generation == Volatile.Read(ref lifecycleGeneration)
-            && string.Equals(expectedInstance.Id, selectedInstance?.Id, StringComparison.Ordinal)
+            && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.Ordinal)
             && string.Equals(expectedInstance.InstanceDirectory, selectedInstance?.InstanceDirectory, StringComparison.OrdinalIgnoreCase);
     }
 }

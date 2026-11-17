@@ -26,4 +26,8 @@ internal sealed record ResolvedDownloadRequest(
     string ActualUrl,
     DownloadSourcePreference RequestedSourcePreference,
     string ResolvedSourceKind,
-    string ResourceCategory);
+    string ResourceCategory)
+{
+    public int? NetworkAttempts { get; init; }
+    public bool? FallbackUsed { get; init; }
+}

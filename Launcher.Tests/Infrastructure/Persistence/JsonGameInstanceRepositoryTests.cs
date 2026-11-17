@@ -47,7 +47,7 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
         [
             new GameInstance
             {
-                Id = "demo-pack",
+
                 Name = "Demo Pack",
                 MinecraftVersion = "1.20.1",
                 VersionName = "demo-pack",
@@ -70,7 +70,8 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
 
         var savedJson = await File.ReadAllTextAsync(settingsPath);
         using var document = JsonDocument.Parse(savedJson);
-        Assert.Equal("Demo Pack", document.RootElement.GetProperty("Name").GetString());
+        Assert.Equal("demo-pack", document.RootElement.GetProperty("Name").GetString());
+        Assert.False(document.RootElement.TryGetProperty("Id", out _));
         Assert.Equal("stored beside the instance", document.RootElement.GetProperty("Description").GetString());
         Assert.Equal(Path.Combine(TempRoot, "backups", "demo-pack"), document.RootElement.GetProperty("BackupDirectory").GetString());
         Assert.Equal((int)MemorySettingsMode.Auto, document.RootElement.GetProperty("MemorySettingsMode").GetInt32());
@@ -111,7 +112,7 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
             "instance-settings.json");
         Assert.True(File.Exists(newSettingsPath));
         var reloaded = await new JsonGameInstanceRepository(settingsService).GetAllAsync();
-        Assert.Contains(reloaded, instance => instance.Id == "newly-installed");
+        Assert.Contains(reloaded, instance => instance.InstanceDirectory == newDirectory);
     }
 
     [Fact]
@@ -129,10 +130,10 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
         await currentRepository.SaveAllAsync([replacement]);
 
         staleInstance.Description = "stale overwrite";
-        await staleRepository.SaveAllAsync([staleInstance]);
+        await Assert.ThrowsAsync<GameInstanceMutationConflictException>(() => staleRepository.SaveAllAsync([staleInstance]));
 
         var reloaded = Assert.Single(await currentRepository.GetAllAsync());
-        Assert.Equal("replacement", reloaded.Id);
+        Assert.Equal(directory, reloaded.InstanceDirectory);
         Assert.Equal("keep replacement", reloaded.Description);
     }
 
@@ -151,25 +152,6 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
         var repository = new JsonGameInstanceRepository(settingsService);
 
         Assert.Throws<ArgumentException>(() => repository.GetVersionDirectory(settings.MinecraftDirectory, versionName));
-    }
-
-    [Fact]
-    public void DeleteVersionDirectoryRejectsUnsafeVersionNameAndDoesNotDeleteOutsideVersions()
-    {
-        var settings = new LauncherSettings
-        {
-            DataDirectory = TempRoot,
-            MinecraftDirectory = Path.Combine(TempRoot, ".minecraft")
-        };
-        var settingsService = new TestSettingsService(settings);
-        var repository = new JsonGameInstanceRepository(settingsService);
-        var sentinelDirectory = Path.Combine(settings.MinecraftDirectory, "sentinel");
-        Directory.CreateDirectory(sentinelDirectory);
-        File.WriteAllText(Path.Combine(sentinelDirectory, "keep.txt"), "keep");
-
-        Assert.Throws<ArgumentException>(() => repository.DeleteVersionDirectory(settings.MinecraftDirectory, @"..\sentinel"));
-
-        Assert.True(File.Exists(Path.Combine(sentinelDirectory, "keep.txt")));
     }
 
     [Theory]
@@ -206,7 +188,7 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
         Directory.CreateDirectory(Path.Combine(oldDirectory, "Old Pack-natives"));
         var instance = new GameInstance
         {
-            Id = "old",
+
             Name = "Old Pack",
             MinecraftVersion = "1.20.1",
             VersionName = "Old Pack",
@@ -347,8 +329,14 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
         Assert.Equal(0, deleteAttempts);
     }
 
-    [Fact]
-    public async Task TryDeleteStagedVersionDirectoryUsesRecycleBinBeforePermanentDeletion()
+    [Theory]
+    [InlineData(1, false, false)]
+    [InlineData(1, true, false)]
+    [InlineData(1, false, true)]
+    [InlineData(1, true, true)]
+    [InlineData(3, false, false)]
+    [InlineData(3, true, false)]
+    public async Task TryDeleteStagedVersionDirectoryUsesRecycleBinBeforePermanentDeletion(int schemaVersion, bool recycleFails, bool wasQuarantined)
     {
         var (settings, settingsService) = CreateSettings();
         var stagedDirectory = Path.Combine(
@@ -356,7 +344,7 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
             "versions",
             ".bhl-delete-pending-Test-a83f21c4");
         Directory.CreateDirectory(stagedDirectory);
-        WriteDeletionMarker(stagedDirectory, "Test", "a83f21c4000000000000000000000000");
+        WriteDeletionMarker(stagedDirectory, "Test", "a83f21c4000000000000000000000000", schemaVersion, wasQuarantined);
         var recycleAttempts = 0;
         var permanentDeleteAttempts = 0;
         var repository = new JsonGameInstanceRepository(
@@ -365,10 +353,15 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
             moveDirectoryAsync: null,
             deletionGuidFactory: null,
             stageDeletionMove: null,
-            deleteStagedDirectory: (_, _) => permanentDeleteAttempts++,
+            deleteStagedDirectory: (path, recursive) =>
+            {
+                permanentDeleteAttempts++;
+                Directory.Delete(path, recursive);
+            },
             recycleStagedDirectory: path =>
             {
                 recycleAttempts++;
+                if (recycleFails) throw new IOException("Recycle bin is unavailable.");
                 Directory.Delete(path, recursive: true);
             });
 
@@ -377,15 +370,29 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
             stagedDirectory));
 
         Assert.Equal(1, recycleAttempts);
-        Assert.Equal(0, permanentDeleteAttempts);
+        Assert.Equal(recycleFails ? 1 : 0, permanentDeleteAttempts);
         Assert.False(Directory.Exists(stagedDirectory));
     }
 
-    private static void WriteDeletionMarker(string directory, string versionName, string transactionId)
+    [Fact]
+    public async Task QuarantinedLegacyDeletionWithMismatchedDirectoryIsNotResumed()
+    {
+        var (settings, settingsService) = CreateSettings();
+        var stagedDirectory = Path.Combine(settings.MinecraftDirectory, "versions", ".bhl-delete-pending-Test-a83f21c4");
+        Directory.CreateDirectory(stagedDirectory);
+        WriteDeletionMarker(stagedDirectory, "Other", "a83f21c4000000000000000000000000", 1, true);
+        var repository = new JsonGameInstanceRepository(settingsService);
+
+        Assert.False(await repository.TryDeleteStagedVersionDirectoryAsync(settings.MinecraftDirectory, stagedDirectory));
+        Assert.True(Directory.Exists(stagedDirectory));
+        Assert.True(File.Exists(Path.Combine(stagedDirectory, PendingInstanceDeletionDirectory.AbortedMarkerFileName)));
+    }
+
+    private static void WriteDeletionMarker(string directory, string versionName, string transactionId, int schemaVersion = 3, bool wasQuarantined = false)
     {
         File.WriteAllText(
-            Path.Combine(directory, ".bhl-delete-pending-.json"),
-            $$"""{"schemaVersion":1,"transactionId":"{{transactionId}}","versionName":"{{versionName}}","createdAtUtc":"2026-07-13T00:00:00Z"}""");
+            Path.Combine(directory, wasQuarantined ? PendingInstanceDeletionDirectory.AbortedMarkerFileName : PendingInstanceDeletionDirectory.MarkerFileName),
+            JsonSerializer.Serialize(new { schemaVersion, transactionId, versionName, ownerProof = schemaVersion >= 2 ? InstanceDirectoryOwnership.Capture(directory) : null, createdAtUtc = DateTimeOffset.UtcNow }));
     }
 
     private static async Task<string> CreateStoredInstanceAsync(
@@ -399,7 +406,7 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
         [
             new GameInstance
             {
-                Id = versionName.ToLowerInvariant(),
+
                 Name = versionName,
                 MinecraftVersion = "1.20.1",
                 VersionName = versionName,
@@ -413,7 +420,7 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
     {
         return new GameInstance
         {
-            Id = id,
+
             Name = versionName,
             MinecraftVersion = "1.20.1",
             VersionName = versionName,
@@ -429,7 +436,7 @@ public sealed class JsonGameInstanceRepositoryTests : TestTempDirectory
             Path.Combine(metadataDirectory, "instance-settings.json"),
             JsonSerializer.Serialize(new GameInstance
             {
-                Id = instanceId,
+
                 Name = Path.GetFileName(instanceDirectory),
                 MinecraftVersion = "1.20.1",
                 VersionName = Path.GetFileName(instanceDirectory),

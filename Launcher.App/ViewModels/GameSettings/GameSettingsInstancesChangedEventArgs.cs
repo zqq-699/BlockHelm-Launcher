@@ -26,33 +26,35 @@ public sealed class GameSettingsInstancesChangedEventArgs : EventArgs
     private GameSettingsInstancesChangedEventArgs(
         GameSettingsInstancesChangedKind kind,
         GameInstance? updatedInstance,
-        string? deletedInstanceId)
+        string? deletedInstanceDirectory)
     {
         Kind = kind;
         UpdatedInstance = updatedInstance;
-        DeletedInstanceId = deletedInstanceId;
+        DeletedInstanceDirectory = deletedInstanceDirectory;
     }
 
     public GameSettingsInstancesChangedKind Kind { get; }
 
+    public string? PreviousInstanceDirectory { get; private init; }
+
     public GameInstance? UpdatedInstance { get; }
 
-    public string? DeletedInstanceId { get; }
+    public string? DeletedInstanceDirectory { get; }
 
-    public static GameSettingsInstancesChangedEventArgs Updated(GameInstance instance)
+    public static GameSettingsInstancesChangedEventArgs Updated(GameInstance instance, string? previousInstanceDirectory = null)
     {
         return new GameSettingsInstancesChangedEventArgs(
             GameSettingsInstancesChangedKind.Updated,
             instance,
-            null);
+            null) { PreviousInstanceDirectory = previousInstanceDirectory };
     }
 
-    public static GameSettingsInstancesChangedEventArgs Deleted(string instanceId)
+    public static GameSettingsInstancesChangedEventArgs Deleted(string instanceDirectory)
     {
         return new GameSettingsInstancesChangedEventArgs(
             GameSettingsInstancesChangedKind.Deleted,
             null,
-            instanceId);
+            instanceDirectory);
     }
 
     public static GameSettingsInstancesChangedEventArgs ReloadRequired()

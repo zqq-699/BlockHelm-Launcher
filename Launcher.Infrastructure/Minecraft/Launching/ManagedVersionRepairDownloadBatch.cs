@@ -66,6 +66,7 @@ internal sealed class ManagedVersionRepairDownloadBatch
         IEnumerable<RepairDownloadRequest> downloads,
         CancellationToken cancellationToken)
     {
+        using var diagnosticOperation = DownloadDiagnostics.BeginOperation(logger, "RepairDownload");
         var uniqueDownloads = downloads
             .Where(download => !string.IsNullOrWhiteSpace(download.OriginalUrl)
                 && !string.IsNullOrWhiteSpace(download.DestinationPath))
@@ -137,6 +138,7 @@ internal sealed class ManagedVersionRepairDownloadBatch
                 download.DestinationPath,
                 download.OriginalUrl,
                 download.ExpectedSize);
+            using var diagnosticLogScope = logScope.RestoreContext();
             try
             {
                 var resolution = await executor.DownloadFileAsync(
@@ -190,7 +192,7 @@ internal sealed class ManagedVersionRepairDownloadBatch
             || download.PersistenceMode != first.PersistenceMode
             || !PathComparer.Equals(ResolveManagedRoot(download), firstManagedRoot)))
         {
-            throw new InvalidDataException("Conflicting download identities resolved to the same destination path.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Conflicting download identities resolved to the same destination path."), "DownloadValidation", ("Reason", "Conflicting download identities resolved to the same destination path."));
         }
         return first;
 

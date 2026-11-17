@@ -76,8 +76,8 @@ public sealed partial class InstanceBackupSettingsViewModel
 
             logger.LogWarning(
                 exception,
-                "Failed to refresh instance backups. InstanceId={InstanceId} BackupDirectory={BackupDirectory}",
-                selectedInstance?.Id ?? "<none>",
+                "Failed to refresh instance backups. InstanceDirectory={InstanceDirectory} BackupDirectory={BackupDirectory}",
+                selectedInstance?.InstanceDirectory ?? "<none>",
                 directory);
             allBackups = Array.Empty<InstanceBackupItemViewModel>();
             VisibleBackups = Array.Empty<InstanceBackupItemViewModel>();

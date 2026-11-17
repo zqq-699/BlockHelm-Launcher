@@ -5,13 +5,13 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.Infrastructure.Persistence;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Launcher.Application;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
-using Launcher.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -48,7 +48,7 @@ internal sealed class LoaderArtifactRepairCoordinator
         GameFileLoaderIdentity identity,
         CancellationToken cancellationToken)
     {
-        var versionJsonPath = Path.Combine(versionDirectory, $"{versionName}.json");
+        var versionJsonPath = (InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) ?? Path.Combine(versionDirectory, $"{versionName}.json"));
         MinecraftPathGuard.EnsureSafeFileDestination(
             versionJsonPath,
             versionDirectory,
@@ -216,11 +216,11 @@ internal sealed class LoaderArtifactRepairCoordinator
         finally
         {
             if (cleanupWorkRoot)
-                LoaderVersionDirectoryTransaction.TryDeleteDirectory(workRoot);
+                LoaderVersionDirectoryTransaction.TryDeleteDirectory(workRoot, logger);
         }
     }
 
-    private static async Task PublishAsync(
+    private async Task PublishAsync(
         string minecraftDirectory,
         string versionName,
         string versionDirectory,
@@ -243,13 +243,13 @@ internal sealed class LoaderArtifactRepairCoordinator
             .ConfigureAwait(false);
 
         var versionRoot = Path.GetDirectoryName(Path.GetFullPath(versionDirectory))
-            ?? throw new InvalidDataException("Managed version directory has no parent.");
+            ?? throw SafeExceptionLog.Describe(new InvalidDataException("Managed version directory has no parent."), "DownloadValidation", ("Reason", "Managed version directory has no parent."));
         MinecraftPathGuard.EnsureSafeDirectory(versionDirectory, versionRoot, "Managed version directory");
         var rollback = new LoaderPublicationRollback(
-            Path.Combine(sandboxMinecraftDirectory, ".publish-rollback"));
+            Path.Combine(sandboxMinecraftDirectory, ".publish-rollback"), logger);
         try
         {
-            var targetJson = Path.Combine(versionDirectory, $"{versionName}.json");
+            var targetJson = (InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) ?? Path.Combine(versionDirectory, $"{versionName}.json"));
             MinecraftPathGuard.EnsureSafeFileDestination(targetJson, versionDirectory, "Managed version metadata");
             if (!await IsJsonFileValidAsync(targetJson, cancellationToken).ConfigureAwait(false))
             {
@@ -258,8 +258,8 @@ internal sealed class LoaderArtifactRepairCoordinator
             }
 
             var sourceJar = Path.Combine(sandboxVersionDirectory, $"{sandboxVersionName}.jar");
-            var targetJar = Path.Combine(versionDirectory, $"{versionName}.jar");
-            MinecraftPathGuard.EnsureSafeFileDestination(targetJar, versionDirectory, "Managed version client");
+            var targetJar = InstanceVersionFiles.ResolveJarPath(versionDirectory, versionName);
+            MinecraftPathGuard.EnsureSafeFileDestination(targetJar, versionRoot, "Managed version client");
             if (File.Exists(sourceJar))
             {
                 var sourceSha1 = AtomicSharedFilePublisher.ComputeSha1(sourceJar);
@@ -278,7 +278,7 @@ internal sealed class LoaderArtifactRepairCoordinator
                             targetJar,
                             rollback,
                             cancellationToken,
-                            versionDirectory)
+                            versionRoot)
                         .ConfigureAwait(false);
                 }
             }
@@ -302,15 +302,15 @@ internal sealed class LoaderArtifactRepairCoordinator
                     destination,
                     minecraftDirectory,
                     "Managed loader artifact");
-                var sourceStatus = await MinecraftFileIntegrity.EvaluateAsync(
+                var sourceStatus = await MinecraftFileIntegrity.InspectAsync(
                         source,
                         artifact.Sha1,
                         artifact.Size,
                         MinecraftFileVerification.Full,
                         cancellationToken)
                     .ConfigureAwait(false);
-                if (sourceStatus != MinecraftFileIntegrityStatus.Valid)
-                    throw new InvalidDataException($"Sandbox artifact is invalid: {artifact.RelativePath}");
+                if (sourceStatus.Status != MinecraftFileIntegrityStatus.Valid)
+                    throw sourceStatus.CreateException(source, "RepairSandboxArtifact");
 
                 var destinationStatus = await MinecraftFileIntegrity.EvaluateAsync(
                         destination,
@@ -357,7 +357,7 @@ internal sealed class LoaderArtifactRepairCoordinator
         }
     }
 
-    private static async Task PublishTrustedReplacementAsync(
+    private async Task PublishTrustedReplacementAsync(
         string source,
         string destination,
         LoaderPublicationRollback rollback,
@@ -371,11 +371,11 @@ internal sealed class LoaderArtifactRepairCoordinator
                 destination,
                 sha1,
                 cancellationToken,
-                managedRoot)
+                managedRoot, logger)
             .ConfigureAwait(false);
     }
 
-    internal sealed class LoaderPublicationRollback(string backupDirectory)
+    internal sealed class LoaderPublicationRollback(string backupDirectory, ILogger? logger = null)
     {
         private readonly Dictionary<string, PublicationSnapshot> snapshots = new(
             OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -440,7 +440,7 @@ internal sealed class LoaderArtifactRepairCoordinator
         {
             if (!committed && !rolledBack)
                 return;
-            LoaderVersionDirectoryTransaction.TryDeleteDirectory(backupDirectory);
+            LoaderVersionDirectoryTransaction.TryDeleteDirectory(backupDirectory, logger);
         }
 
         private sealed record PublicationSnapshot(
@@ -453,7 +453,7 @@ internal sealed class LoaderArtifactRepairCoordinator
         string versionDirectory,
         string versionName,
         CancellationToken cancellationToken) =>
-        IsJsonFileValidAsync(Path.Combine(versionDirectory, $"{versionName}.json"), cancellationToken);
+        IsJsonFileValidAsync((InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) ?? Path.Combine(versionDirectory, $"{versionName}.json")), cancellationToken);
 
     private static async Task<bool> IsJsonFileValidAsync(string path, CancellationToken cancellationToken)
     {

@@ -72,11 +72,11 @@ public sealed class RemoteManifestLauncherUpdateService : ILauncherUpdateService
         try
         {
             if (!Uri.TryCreate(source.CreateManifestUrl(expectedChannel), UriKind.Absolute, out var manifestUri))
-                throw new UpdateSecurityException("The update manifest URL is invalid.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update manifest URL is invalid."), "ComponentValidation", ("Reason", "The update manifest URL is invalid."));
             var manifestBytes = await DownloadBytesAsync(manifestUri, MaximumManifestBytes, cancellationToken)
                 .ConfigureAwait(false);
             var manifest = JsonSerializer.Deserialize<RemoteUpdateManifestDto>(manifestBytes, JsonOptions)
-                ?? throw new UpdateSecurityException("The update manifest JSON is empty.");
+                ?? throw SafeExceptionLog.Describe(new UpdateSecurityException("The update manifest JSON is empty."), "ComponentValidation", ("Reason", "The update manifest JSON is empty."));
             ValidateManifest(manifest, expectedChannel);
             return ManifestSourceResult.Valid(source, manifest);
         }
@@ -103,7 +103,7 @@ public sealed class RemoteManifestLauncherUpdateService : ILauncherUpdateService
         try
         {
             using var response = await OfficialUpdateHttp.SendAsync(
-                httpClient, uri, OfficialUpdateUriKind.Manifest, timeout.Token).ConfigureAwait(false);
+                httpClient, uri, OfficialUpdateUriKind.Manifest, timeout.Token, logger).ConfigureAwait(false);
             return await OfficialUpdateHttp.ReadLimitedBytesAsync(response, maximumBytes, timeout.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
@@ -154,7 +154,7 @@ public sealed class RemoteManifestLauncherUpdateService : ILauncherUpdateService
             || string.IsNullOrWhiteSpace(manifest.VersionName)
             || manifest.Assets.Count != 1)
         {
-            throw new UpdateSecurityException("The update manifest metadata is invalid.");
+            throw SafeExceptionLog.Describe(new UpdateSecurityException("The update manifest metadata is invalid."), "ComponentValidation", ("Reason", "The update manifest metadata is invalid."));
         }
 
         var asset = manifest.Assets[0];
@@ -168,14 +168,14 @@ public sealed class RemoteManifestLauncherUpdateService : ILauncherUpdateService
             || !asset.FileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
             || asset.Urls.Count == 0)
         {
-            throw new UpdateSecurityException("The update executable metadata is invalid.");
+            throw SafeExceptionLog.Describe(new UpdateSecurityException("The update executable metadata is invalid."), "ComponentValidation", ("Reason", "The update executable metadata is invalid."));
         }
 
         foreach (var url in asset.Urls)
         {
             if (string.IsNullOrWhiteSpace(url.Name)
                 || !Uri.TryCreate(url.Url, UriKind.Absolute, out var uri))
-                throw new UpdateSecurityException("The update download URL is invalid.");
+                throw SafeExceptionLog.Describe(new UpdateSecurityException("The update download URL is invalid."), "ComponentValidation", ("Reason", "The update download URL is invalid."));
             OfficialUpdateHttp.ValidateInitialUri(uri, OfficialUpdateUriKind.Executable);
         }
     }

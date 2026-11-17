@@ -26,17 +26,6 @@ namespace Launcher.Infrastructure.Persistence;
 
 internal sealed class VersionDirectoryManager(ILogger logger)
 {
-    public string GetUniqueInstanceDirectory(string dataDirectory, string name)
-    {
-        var baseDirectory = Path.Combine(dataDirectory, "instances");
-        Directory.CreateDirectory(baseDirectory);
-        var candidate = Path.Combine(baseDirectory, name);
-        var suffix = 2;
-        while (Directory.Exists(candidate))
-            candidate = Path.Combine(baseDirectory, $"{name}-{suffix++}");
-        return candidate;
-    }
-
     public string GetVersionDirectory(string minecraftDirectory, string versionName)
     {
         if (!VersionDirectoryName.IsSafeDirectoryName(versionName))
@@ -56,13 +45,4 @@ internal sealed class VersionDirectoryManager(ILogger logger)
         logger.LogDebug("Instance directories ensured. InstanceDirectory={InstanceDirectory}", directory);
     }
 
-    public void DeleteVersionDirectory(string minecraftDirectory, string versionName)
-    {
-        var directory = GetVersionDirectory(minecraftDirectory, versionName);
-        if (!Directory.Exists(directory))
-            return;
-        Directory.Delete(directory, recursive: true);
-        logger.LogInformation("Version directory deleted. VersionName={VersionName}", versionName);
-        logger.LogDebug("Deleted version directory path. VersionName={VersionName} VersionDirectory={VersionDirectory}", versionName, directory);
-    }
 }

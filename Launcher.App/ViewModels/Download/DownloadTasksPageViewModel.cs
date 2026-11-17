@@ -1,4 +1,4 @@
-﻿/*
+/*
  * BlockHelm Launcher
  * Copyright (C) 2026 Quan Zhou
  *
@@ -123,7 +123,7 @@ public sealed partial class DownloadTasksPageViewModel : ObservableObject
         foreach (var task in Tasks.ToList())
         {
             if (task.State is DownloadTaskState.Running)
-                task.Cancel();
+                task.Cancel("ApplicationExit");
         }
     }
 
@@ -290,6 +290,7 @@ public sealed partial class DownloadTasksPageViewModel : ObservableObject
 public sealed partial class DownloadTaskItem : ObservableObject
 {
     private readonly CancellationTokenSource cancellation = new();
+    private readonly string? diagnosticOperationId;
     private readonly IDisposable speedMeterLifetime;
     private readonly IProgress<LauncherProgress> speedMeterProgress;
 
@@ -297,6 +298,7 @@ public sealed partial class DownloadTaskItem : ObservableObject
     {
         Title = title;
         Subtitle = subtitle;
+        diagnosticOperationId = DownloadDiagnostics.Capture().TryGetValue("OperationId", out var operationId) ? operationId as string : null;
         var synchronizationContext = SynchronizationContext.Current;
         void ReportOnCapturedContext(LauncherProgress value)
         {
@@ -394,8 +396,11 @@ public sealed partial class DownloadTaskItem : ObservableObject
         DownloadSpeedText = string.Empty;
     }
 
-    public void Cancel()
+    public void Cancel() => Cancel("User");
+
+    internal void Cancel(string cancellationOrigin)
     {
+        Serilog.Log.ForContext("OperationId", diagnosticOperationId ?? Id).Information("Download task cancellation requested. TaskId={TaskId} CancellationOrigin={CancellationOrigin}", Id, cancellationOrigin);
         speedMeterLifetime.Dispose();
         if (!cancellation.IsCancellationRequested)
             cancellation.Cancel();

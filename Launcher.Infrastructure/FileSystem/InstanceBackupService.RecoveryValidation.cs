@@ -34,44 +34,34 @@ public sealed partial class InstanceBackupService
 {
     private static async Task ValidateAndPrepareRestoredInstanceAsync(
         string restoredDirectory,
-        string expectedInstanceId,
+        string expectedOwnerProof,
         string expectedVersionName,
         string finalInstanceDirectory,
         CancellationToken cancellationToken)
     {
         EnsureNoReparsePoints(restoredDirectory);
         var settingsPath = GetInstanceSettingsPath(restoredDirectory);
-        GameInstance restoredInstance;
-        await using (var settingsStream = File.OpenRead(settingsPath))
-        {
-            restoredInstance = await JsonSerializer.DeserializeAsync<GameInstance>(
-                                       settingsStream,
-                                       JsonOptions,
-                                       cancellationToken)
-                                   .ConfigureAwait(false)
-                               ?? throw new InvalidDataException("Backup instance settings are empty.");
-        }
-        if (!string.Equals(restoredInstance.Id, expectedInstanceId, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(restoredInstance.VersionName, expectedVersionName, StringComparison.Ordinal))
-        {
-            throw new InstanceBackupException(
-                InstanceBackupFailureReason.InstanceChanged,
-                "The selected backup belongs to a different instance or version name.");
-        }
-
-        var versionJsonPath = Path.Combine(restoredDirectory, $"{expectedVersionName}.json");
-        await using (var versionStream = File.OpenRead(versionJsonPath))
-        using (var versionJson = await JsonDocument.ParseAsync(
-                   versionStream,
-                   cancellationToken: cancellationToken).ConfigureAwait(false))
-        {
-            if (!versionJson.RootElement.TryGetProperty("id", out var id)
-                || !string.Equals(id.GetString(), expectedVersionName, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("Backup version JSON identity does not match the target instance.");
-            }
-        }
-
+        var restoredInstance = File.Exists(settingsPath)
+            ? JsonSerializer.Deserialize<GameInstance>(await File.ReadAllTextAsync(settingsPath, cancellationToken), JsonOptions)
+            : new GameInstance();
+        restoredInstance ??= new GameInstance();
+        var versionJsonPath = InstanceVersionFiles.TryResolveVersionJsonPath(restoredDirectory, Path.GetFileName(restoredDirectory))
+            ?? throw new InvalidDataException("Backup does not contain an unambiguous version JSON.");
+        var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(versionJsonPath, cancellationToken))!.AsObject();
+        var oldId = json["id"]?.GetValue<string>();
+        if (json["jar"]?.GetValue<string>() is { } jar && string.Equals(jar, oldId, StringComparison.OrdinalIgnoreCase))
+            json["jar"] = expectedVersionName;
+        var targetJson = Path.Combine(restoredDirectory, $"{expectedVersionName}.json");
+        var sourceJar = Path.ChangeExtension(versionJsonPath, ".jar");
+        var targetJar = Path.Combine(restoredDirectory, $"{expectedVersionName}.jar");
+        if (!string.Equals(sourceJar, targetJar, StringComparison.OrdinalIgnoreCase) && File.Exists(sourceJar))
+            File.Move(sourceJar, targetJar, overwrite: true);
+        json["id"] = expectedVersionName;
+        await AtomicJsonFileWriter.WriteAsync(targetJson, json, JsonOptions, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(versionJsonPath, targetJson, StringComparison.OrdinalIgnoreCase)) File.Delete(versionJsonPath);
+        restoredInstance.IconSource = InstanceIconPaths.ToStorage(restoredInstance.IconSource, restoredInstance.InstanceDirectory);
+        restoredInstance.Name = expectedVersionName;
+        restoredInstance.VersionName = expectedVersionName;
         restoredInstance.InstanceDirectory = finalInstanceDirectory;
         await AtomicJsonFileWriter.WriteAsync(settingsPath, restoredInstance, JsonOptions, cancellationToken)
             .ConfigureAwait(false);
@@ -80,14 +70,14 @@ public sealed partial class InstanceBackupService
     private static async Task WriteRestoreOwnerAsync(
         string restoredDirectory,
         string transactionId,
-        string instanceId,
+        string ownerProof,
         CancellationToken cancellationToken)
     {
         var ownerPath = GetRestoreOwnerPath(restoredDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(ownerPath)!);
         await AtomicJsonFileWriter.WriteAsync(
                 ownerPath,
-                new RestoreOwnerMarker(1, transactionId, instanceId),
+                new RestoreOwnerMarker(2, transactionId, ownerProof),
                 JsonOptions,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -99,8 +89,8 @@ public sealed partial class InstanceBackupService
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!GameInstanceSettingsStore.HasIdentity(restoredDirectory, marker.InstanceId)
-            || !HasRestoreOwner(restoredDirectory, marker.TransactionId, marker.InstanceId))
+        if (!GameInstanceSettingsStore.HasIdentity(restoredDirectory, marker.OwnerProof)
+            || !HasRestoreOwner(restoredDirectory, marker.TransactionId, marker.OwnerProof))
         {
             throw new InstanceBackupException(
                 InstanceBackupFailureReason.InstanceChanged,
@@ -122,13 +112,13 @@ public sealed partial class InstanceBackupService
             {
                 return false;
             }
-            var parsed = JsonSerializer.Deserialize<RestoreTransactionMarker>(File.ReadAllText(markerPath), JsonOptions);
+            var parsed = InstanceDirectoryOwnership.ReadLegacyMarker<RestoreTransactionMarker>(File.ReadAllText(markerPath), JsonOptions);
             if (parsed is null
-                || parsed.SchemaVersion != 1
+                || parsed.SchemaVersion is not (1 or 2)
                 || !Guid.TryParseExact(parsed.TransactionId, "N", out _)
-                || string.IsNullOrWhiteSpace(parsed.InstanceId)
+                || string.IsNullOrWhiteSpace(parsed.OwnerProof)
                 || !VersionDirectoryName.IsSafeDirectoryName(parsed.VersionName)
-                || parsed.State is not (RestoreStatePrepared or RestoreStateCommitted))
+                || parsed.State is not (RestoreStateExtracting or RestoreStatePrepared or RestoreStateCommitted))
             {
                 return false;
             }
@@ -151,17 +141,17 @@ public sealed partial class InstanceBackupService
         }
     }
 
-    private static bool HasRestoreOwner(string directory, string transactionId, string instanceId)
+    private static bool HasRestoreOwner(string directory, string transactionId, string ownerProof)
     {
         try
         {
             var path = GetRestoreOwnerPath(directory);
             if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
                 return false;
-            var owner = JsonSerializer.Deserialize<RestoreOwnerMarker>(File.ReadAllText(path), JsonOptions);
-            return owner is { SchemaVersion: 1 }
+            var owner = InstanceDirectoryOwnership.ReadLegacyMarker<RestoreOwnerMarker>(File.ReadAllText(path), JsonOptions);
+            return owner is { SchemaVersion: 1 or 2 }
                    && string.Equals(owner.TransactionId, transactionId, StringComparison.Ordinal)
-                   && string.Equals(owner.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase);
+                   && string.Equals(owner.OwnerProof, ownerProof, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception exception) when (exception is IOException
                                            or UnauthorizedAccessException
@@ -180,7 +170,7 @@ public sealed partial class InstanceBackupService
         {
             if (!File.Exists(ownerPath))
                 return;
-            var owner = JsonSerializer.Deserialize<RestoreOwnerMarker>(File.ReadAllText(ownerPath), JsonOptions);
+            var owner = InstanceDirectoryOwnership.ReadLegacyMarker<RestoreOwnerMarker>(File.ReadAllText(ownerPath), JsonOptions);
             if (owner is not null && string.Equals(owner.TransactionId, transactionId, StringComparison.Ordinal))
                 File.Delete(ownerPath);
         }
@@ -191,11 +181,11 @@ public sealed partial class InstanceBackupService
         }
     }
 
-    private static void DeleteOwnedRestorePrevious(string previousDirectory, string expectedInstanceId)
+    private static void DeleteOwnedRestorePrevious(string previousDirectory, string expectedOwnerProof)
     {
         if (!Directory.Exists(previousDirectory))
             return;
-        if (!GameInstanceSettingsStore.HasIdentity(previousDirectory, expectedInstanceId))
+        if (!GameInstanceSettingsStore.HasIdentity(previousDirectory, expectedOwnerProof))
             throw new InvalidDataException("Restore previous directory identity could not be proven.");
         DeleteTreeWithoutFollowingReparsePoints(previousDirectory);
     }
@@ -206,8 +196,8 @@ public sealed partial class InstanceBackupService
     {
         if (!Directory.Exists(restoredDirectory))
             return;
-        if (!GameInstanceSettingsStore.HasIdentity(restoredDirectory, marker.InstanceId)
-            || !HasRestoreOwner(restoredDirectory, marker.TransactionId, marker.InstanceId))
+        if (!GameInstanceSettingsStore.HasIdentity(restoredDirectory, marker.OwnerProof)
+            || !HasRestoreOwner(restoredDirectory, marker.TransactionId, marker.OwnerProof))
         {
             throw new InvalidDataException("Restore candidate directory identity could not be proven.");
         }

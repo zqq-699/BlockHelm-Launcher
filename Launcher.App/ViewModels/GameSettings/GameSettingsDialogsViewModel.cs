@@ -43,6 +43,7 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
     [ObservableProperty] private bool hasDeleteInstanceDialogError;
     [ObservableProperty] private bool isDeleteContentDialogOpen;
     private PendingContentDeletion? pendingContentDeletion;
+    private GameInstance? pendingDeleteSnapshot;
     [ObservableProperty] private bool isReplaceModImportDialogOpen;
     [ObservableProperty] private ModImportConflictRequest? pendingModImportConflict;
     [ObservableProperty] private bool isInvalidImportDialogOpen;
@@ -200,6 +201,7 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
         IsDeleteInstanceDialogBusy = false;
         HasDeleteInstanceDialogError = false;
         InstancePendingDelete = instance;
+        pendingDeleteSnapshot = instance.Instance;
         IsDeleteInstanceDialogOpen = true;
     }
 
@@ -307,17 +309,18 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanConfirmDeleteInstanceDialog))]
     private async Task ConfirmDeleteInstanceDialogAsync()
     {
-        if (IsDeleteInstanceDialogBusy || InstancePendingDelete is null)
+        if (IsDeleteInstanceDialogBusy || InstancePendingDelete is null || pendingDeleteSnapshot is null)
             return;
 
         var pending = InstancePendingDelete;
+        var pendingSnapshot = pendingDeleteSnapshot;
         HasDeleteInstanceDialogError = false;
         IsDeleteInstanceDialogBusy = true;
         details.SuspendLocalWatchersForInstanceMove();
         var deletionCommitted = false;
         try
         {
-            if (!await instanceService.DeleteInstanceAsync(pending.Instance.Id))
+            if (!await instanceService.DeleteInstanceAsync(pendingSnapshot))
             {
                 statusService.Report(Strings.Status_DeleteInstanceFailed);
                 HasDeleteInstanceDialogError = true;
@@ -325,7 +328,7 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
             }
 
             deletionCommitted = true;
-            details.ClearSelectedInstanceIf(pending.Instance.Id);
+            details.ClearSelectedInstanceIf(pending.Instance.InstanceDirectory);
             statusService.Report(string.Format(Strings.Status_InstanceDeletedFormat, pending.Name));
             InstanceDeleted?.Invoke(pending);
             IsDeleteInstanceDialogOpen = false;
@@ -333,7 +336,7 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Failed to delete game instance. InstanceId={InstanceId}", pending.Instance.Id);
+            logger.LogWarning(exception, "Failed to delete game instance. InstanceDirectory={InstanceDirectory}", pending.Instance.InstanceDirectory);
             statusService.Report(Strings.Status_DeleteInstanceFailed);
             HasDeleteInstanceDialogError = true;
         }
@@ -360,6 +363,18 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
             return;
         IsDeleteContentDialogOpen = false;
         SetPendingContentDeletion(null);
+        if (!ReferenceEquals(pending.InstanceSnapshot, details.SelectedInstance?.Instance)
+            || pending.ContentRevision != GetContentRevision(pending.Kind))
+        {
+            statusService.Report(pending.Kind switch
+            {
+                ContentKind.Saves => Strings.Status_SelectedSavesDeleteFailed,
+                ContentKind.ResourcePacks => Strings.Status_SelectedResourcePacksDeleteFailed,
+                ContentKind.ShaderPacks => Strings.Status_SelectedShaderPacksDeleteFailed,
+                _ => Strings.Status_SelectedModsDeleteFailed
+            });
+            return;
+        }
         switch (pending.Kind)
         {
             case ContentKind.Mods:
@@ -470,9 +485,18 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
 
     private void OpenContentDeletion(ContentKind kind, IReadOnlyList<string> fullPaths, IReadOnlyList<string> titles)
     {
-        SetPendingContentDeletion(new PendingContentDeletion(kind, fullPaths, titles));
+        SetPendingContentDeletion(new PendingContentDeletion(kind, fullPaths, titles, details.SelectedInstance?.Instance, GetContentRevision(kind)));
         IsDeleteContentDialogOpen = true;
     }
+
+    private long GetContentRevision(ContentKind kind) => kind switch
+    {
+        ContentKind.Mods => details.ModManagement.ContentRevision,
+        ContentKind.Saves => details.SaveManagement.ContentRevision,
+        ContentKind.ResourcePacks => details.ResourcePackManagement.ContentRevision,
+        ContentKind.ShaderPacks => details.ShaderPackManagement.ContentRevision,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
 
     private void SetPendingContentDeletion(PendingContentDeletion? value)
     {
@@ -514,5 +538,7 @@ public sealed partial class GameSettingsDialogsViewModel : ObservableObject
     private sealed record PendingContentDeletion(
         ContentKind Kind,
         IReadOnlyList<string> FullPaths,
-        IReadOnlyList<string> Titles);
+        IReadOnlyList<string> Titles,
+        GameInstance? InstanceSnapshot,
+        long ContentRevision);
 }

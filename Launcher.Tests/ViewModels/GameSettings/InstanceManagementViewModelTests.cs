@@ -37,7 +37,7 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
         await Task.WhenAll(firstRefresh, rootChangeRefresh);
 
         Assert.Equal(2, instanceService.RefreshCount);
-        Assert.Equal("root-b", Assert.Single(viewModel.Instances).Id);
+        Assert.Equal("root-b", Assert.Single(viewModel.Instances).InstanceDirectory);
         Assert.Equal(
             [Path.GetFullPath(Path.Combine(TempRoot, "root-a")), Path.GetFullPath(Path.Combine(TempRoot, "root-b"))],
             backupService.RecoveredDirectories);
@@ -63,11 +63,11 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
         await Task.WhenAll(earlierRefresh, postDeleteRefresh);
 
         Assert.Equal(2, instanceService.RefreshCount);
-        Assert.Equal("root-b", Assert.Single(viewModel.Instances).Id);
+        Assert.Equal("root-b", Assert.Single(viewModel.Instances).InstanceDirectory);
     }
 
     [Fact]
-    public async Task UnchangedCatalogPreservesInstanceReferenceCollectionAndRevision()
+    public async Task UnchangedCatalogPublishesFreshSnapshotAndNewGeneration()
     {
         var settings = new LauncherSettings
         {
@@ -90,13 +90,13 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
 
         await viewModel.RefreshInstancesAsync();
 
-        Assert.Same(original, Assert.Single(viewModel.Instances));
-        Assert.Equal(revision, viewModel.CatalogRevision);
-        Assert.Equal(0, collectionChanges);
+        Assert.NotSame(original, Assert.Single(viewModel.Instances));
+        Assert.True(viewModel.CatalogRevision > revision);
+        Assert.Equal(1, collectionChanges);
     }
 
     [Fact]
-    public async Task CatalogFieldChangeUpdatesStableInstanceAndAdvancesRevision()
+    public async Task CatalogFieldChangeReplacesSnapshotAndAdvancesRevision()
     {
         var settings = new LauncherSettings
         {
@@ -118,14 +118,14 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
 
         await viewModel.RefreshInstancesAsync();
 
-        Assert.Same(original, Assert.Single(viewModel.Instances));
-        Assert.Equal("After", original.Name);
+        Assert.NotSame(original, Assert.Single(viewModel.Instances));
+        Assert.Equal("After", Assert.Single(viewModel.Instances).Name);
         Assert.True(viewModel.CatalogRevision > revision);
-        Assert.Equal(0, collectionChanges);
+        Assert.True(collectionChanges > 0);
     }
 
     [Fact]
-    public async Task NonCatalogSettingChangeUpdatesStableInstanceWithoutAdvancingRevision()
+    public async Task NonCatalogSettingChangePublishesNewGeneration()
     {
         var settings = new LauncherSettings
         {
@@ -147,9 +147,9 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
 
         await viewModel.RefreshInstancesAsync();
 
-        Assert.Same(original, Assert.Single(viewModel.Instances));
-        Assert.Equal(8192, original.MemoryMb);
-        Assert.Equal(revision, viewModel.CatalogRevision);
+        Assert.NotSame(original, Assert.Single(viewModel.Instances));
+        Assert.Equal(8192, Assert.Single(viewModel.Instances).MemoryMb);
+        Assert.True(viewModel.CatalogRevision > revision);
     }
 
     [Fact]
@@ -202,14 +202,14 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
         releaseStaleRefresh.TrySetResult();
         await Task.WhenAll(staleRefresh, applyInstalled);
 
-        Assert.Equal(["instance-a", "instance-b"], viewModel.Instances.Select(instance => instance.Id));
+        Assert.Equal([existing.InstanceDirectory, installed.InstanceDirectory], viewModel.Instances.Select(instance => instance.InstanceDirectory));
     }
 
     private static GameInstance CreateInstance(string id, string name)
     {
         return new GameInstance
         {
-            Id = id,
+
             Name = name,
             MinecraftVersion = "1.21.4",
             VersionName = "1.21.4",
@@ -300,9 +300,9 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
             {
                 FirstRefreshStarted.TrySetResult();
                 await ReleaseFirstRefresh.Task.WaitAsync(cancellationToken);
-                return [new GameInstance { Id = "root-a", Name = "A" }];
+                return [new GameInstance { InstanceDirectory = "root-a", Name = "A" }];
             }
-            return [new GameInstance { Id = "root-b", Name = "B" }];
+            return [new GameInstance { InstanceDirectory = "root-b", Name = "B" }];
         }
 
         public Task<GameInstance?> GetDefaultInstanceAsync(CancellationToken cancellationToken = default) =>

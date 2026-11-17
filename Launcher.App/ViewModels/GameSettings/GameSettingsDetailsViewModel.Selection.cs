@@ -34,10 +34,10 @@ private void ApplySelectedInstanceChanged(GameSettingsInstanceItem? value)
     {
         // 先停止旧实例观察，再切换所有子 ViewModel，最后激活当前可见分区。
         var instance = value?.Instance;
-        persistence.SetInstance(instance);
-        General.SetSelectedInstance(value);
-        Launch.SetSelectedInstance(instance);
-        Java.SetSelectedInstance(instance);
+        var editableInstance = persistence.SetInstance(instance);
+        General.SetSelectedInstance(value, editableInstance);
+        Launch.SetSelectedInstance(editableInstance);
+        Java.SetSelectedInstance(editableInstance);
         ModManagement.OnSelectedInstanceChanged(instance);
         SaveManagement.OnSelectedInstanceChanged(instance);
         ResourcePackManagement.OnSelectedInstanceChanged(instance);
@@ -51,12 +51,12 @@ private void ApplySelectedInstanceChanged(GameSettingsInstanceItem? value)
 
     private void RefreshSelectedInstanceReference(GameSettingsInstanceItem? value)
     {
-        // 保存后仓储可能返回新对象，按稳定 Id 刷新引用而不是依赖旧对象身份。
+        // 无变化刷新保留编辑上下文；设置或目录已变化时接收新的受保护快照。
         var instance = value?.Instance;
-        persistence.SetInstance(instance);
-        General.SetSelectedInstance(value);
-        Launch.SetSelectedInstance(instance);
-        Java.SetSelectedInstance(instance);
+        var editableInstance = persistence.SetInstance(instance);
+        General.SetSelectedInstance(value, editableInstance);
+        Launch.SetSelectedInstance(editableInstance);
+        Java.SetSelectedInstance(editableInstance);
         var shouldReactivateCurrentSection =
             ModManagement.RefreshSelectedInstanceReference(instance)
             | SaveManagement.RefreshSelectedInstanceReference(instance)
@@ -89,9 +89,9 @@ private void ApplySelectedInstanceChanged(GameSettingsInstanceItem? value)
         {
             logger.LogError(
                 exception,
-                "Failed to activate game settings section. SectionType={SectionType} InstanceId={InstanceId}",
+                "Failed to activate game settings section. SectionType={SectionType} InstanceDirectory={InstanceDirectory}",
                 section.GetType().Name,
-                SelectedInstance?.Instance.Id);
+                SelectedInstance?.Instance.InstanceDirectory);
         }
     }
 }

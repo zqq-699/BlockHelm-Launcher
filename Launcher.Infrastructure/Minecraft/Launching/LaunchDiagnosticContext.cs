@@ -24,7 +24,6 @@ namespace Launcher.Infrastructure.Minecraft;
 internal sealed record LaunchDiagnosticContext(
     string MinecraftDirectory,
     string InstanceDirectory,
-    string InstanceId,
     string InstanceName,
     string VersionName,
     string MinecraftVersion,
@@ -34,4 +33,7 @@ internal sealed record LaunchDiagnosticContext(
     string? JavaVersion,
     string? JavaSource,
     int MemoryMb,
-    IReadOnlyList<string> SensitiveValues);
+    IReadOnlyList<string> SensitiveValues)
+{
+    internal string? InstanceDirectoryProof { get; init; }
+}

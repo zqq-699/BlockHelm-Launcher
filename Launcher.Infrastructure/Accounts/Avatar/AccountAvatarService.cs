@@ -24,6 +24,10 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
+using Microsoft.Extensions.Logging;
+using Launcher.Application.Services;
+using Launcher.Infrastructure.Minecraft;
+
 namespace Launcher.Infrastructure.Accounts;
 
 /// <summary>
@@ -41,18 +45,20 @@ internal sealed class AccountAvatarService
     private const byte AvatarOverlayShadowAlpha = 96;
     private const string AvatarCacheVersion = "v6";
 
+    private readonly ILogger? logger;
     private readonly HttpClient httpClient;
     private readonly string avatarDirectory;
 
-    public AccountAvatarService(HttpClient httpClient, LauncherPathProvider pathProvider)
+    public AccountAvatarService(HttpClient httpClient, LauncherPathProvider pathProvider, ILogger? logger = null)
         : this(
             httpClient,
-            Path.Combine(pathProvider.DefaultAccountDataDirectory, "microsoft", "avatars"))
+            Path.Combine(pathProvider.DefaultAccountDataDirectory, "microsoft", "avatars"), logger)
     {
     }
 
-    internal AccountAvatarService(HttpClient httpClient, string avatarDirectory)
+    internal AccountAvatarService(HttpClient httpClient, string avatarDirectory, ILogger? logger = null)
     {
+        this.logger = logger;
         this.httpClient = LauncherHttpUserAgent.Apply(httpClient);
         this.avatarDirectory = avatarDirectory;
         Directory.CreateDirectory(this.avatarDirectory);
@@ -83,14 +89,15 @@ internal sealed class AccountAvatarService
         {
             var avatarPath = CreateAvatarPath(uuid);
             var skinBytes = await ReadSkinBytesAsync(skinUrl, cancellationToken);
-            var skin = LoadBitmap(skinBytes);
-            var avatar = CreateAvatarBitmap(skin);
-            SavePng(avatar, avatarPath);
+            var skin = DownloadDiagnostics.RunStage(logger, "AvatarImageDecode", () => LoadBitmap(skinBytes));
+            var avatar = DownloadDiagnostics.RunStage(logger, "AvatarImageTransform", () => CreateAvatarBitmap(skin));
+            DownloadDiagnostics.RunStage(logger, "AvatarCacheWrite", () => SavePng(avatar, avatarPath));
             DeleteStaleAvatars(uuid, avatarPath);
             return new Uri(avatarPath).AbsoluteUri;
         }
-        catch
+        catch (Exception exception)
         {
+            logger?.LogWarning(exception, "AccountAvatarService remote content failed; using available fallback. CancellationRequested={CancellationRequested}", cancellationToken.IsCancellationRequested);
             if (cachedAvatarPath is not null)
                 return new Uri(cachedAvatarPath).AbsoluteUri;
 
@@ -108,7 +115,7 @@ internal sealed class AccountAvatarService
         if (File.Exists(skinSource))
             return await File.ReadAllBytesAsync(skinSource, cancellationToken);
 
-        return await httpClient.GetByteArrayAsync(skinSource, cancellationToken);
+        return await DownloadHttpDiagnostics.GetBytesAsync(httpClient, logger, skinSource, cancellationToken);
     }
 
     public void DeleteAvatar(string uuid)

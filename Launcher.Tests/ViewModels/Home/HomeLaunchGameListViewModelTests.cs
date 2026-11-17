@@ -91,7 +91,7 @@ public sealed class HomeLaunchGameListViewModelTests
     {
         return new GameInstance
         {
-            Id = id,
+
             Name = name,
             MinecraftVersion = "1.21.4",
             VersionName = "1.21.4",

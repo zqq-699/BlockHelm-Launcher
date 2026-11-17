@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.Infrastructure.Persistence;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Text.Json;
@@ -32,8 +33,13 @@ internal sealed class InstanceAuthoritativeVersionLoader(
     public async ValueTask<VersionMetadataCollection> GetVersionMetadatasAsync(
         CancellationToken cancellationToken = default)
     {
-        var localLoader = new LocalJsonVersionLoader(minecraftPath);
-        var localVersions = localLoader.GetVersionNameAndPaths().ToArray();
+        var localVersions = Directory.Exists(minecraftPath.Versions)
+            ? Directory.EnumerateDirectories(minecraftPath.Versions)
+                .Where(p => InstanceDirectoryClassifier.IsInstanceDirectory(p)
+                    && PendingInstanceRenameMarkerFile.Read(p).Status == PendingInstanceRenameMarkerStatus.Missing)
+                .Select(p => (Path.GetFileName(p), InstanceVersionFiles.TryResolveVersionJsonPath(p, Path.GetFileName(p))))
+                .Where(p => p.Item2 is not null).Select(p => (p.Item1, p.Item2!)).ToArray()
+            : [];
         var knownNames = localVersions
             .Select(version => version.Item1)
             .ToHashSet(StringComparer.Ordinal);
@@ -42,13 +48,7 @@ internal sealed class InstanceAuthoritativeVersionLoader(
 
         foreach (var (name, path) in localVersions)
         {
-            metadata.Add(new LocalVersionMetadata(
-                new JsonVersionMetadataModel
-                {
-                    Id = name,
-                    Type = "local"
-                },
-                path));
+            metadata.Add(new ReadOnlyLocalVersionMetadata(name, path));
 
             var parentName = await TryReadParentNameAsync(path, cancellationToken).ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(parentName) && !knownNames.Contains(parentName))
@@ -127,6 +127,28 @@ internal sealed class InstanceAuthoritativeVersionLoader(
         node is JsonValue value && value.TryGetValue<string>(out var text)
             ? text
             : null;
+
+    private sealed class ReadOnlyLocalVersionMetadata(string name, string path) : IVersionMetadata
+    {
+        public string Name => name;
+        public string? Type => "local";
+        public DateTimeOffset ReleaseTime => default;
+        public async Task<IVersion> GetVersionAsync(CancellationToken cancellationToken = default)
+        {
+            var node = JsonNode.Parse(await File.ReadAllTextAsync(path, cancellationToken))!.AsObject();
+            var originalId = GetString(node["id"]);
+            if (GetString(node["jar"]) is { } jar && string.Equals(jar, originalId, StringComparison.OrdinalIgnoreCase))
+                node["jar"] = name;
+            node["id"] = name;
+            return JsonVersionParser.ParseFromJsonString(node.ToJsonString(), new JsonVersionParserOptions());
+        }
+        public Task<IVersion> GetAndSaveVersionAsync(MinecraftPath path, CancellationToken cancellationToken = default) => GetVersionAsync(cancellationToken);
+        public Task SaveVersionAsync(MinecraftPath path, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class ReadOnlyRemoteVersionMetadata(
         string name,

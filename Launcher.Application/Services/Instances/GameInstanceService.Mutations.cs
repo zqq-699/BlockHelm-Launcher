@@ -18,6 +18,7 @@
  */
 
 using System.Collections.Concurrent;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Launcher.Application.Repositories;
@@ -29,7 +30,6 @@ namespace Launcher.Application.Services;
 
 public sealed partial class GameInstanceService
 {
-private const string ResourceProjectIconFileName = "resource-project-icon.png";
 
 public async Task<GameInstance> CreateInstanceAsync(
         string minecraftVersion,
@@ -62,42 +62,43 @@ public async Task<GameInstance> CreateInstanceAsync(
     public async Task SaveInstanceAsync(GameInstance instance, CancellationToken cancellationToken = default)
     {
         var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var instances = (await GetInstancesAsync(cancellationToken).ConfigureAwait(false)).ToList();
-        var index = instances.FindIndex(existing => existing.Id == instance.Id);
         instance.UpdatedAt = DateTimeOffset.UtcNow;
-
-        if (index >= 0)
-            instances[index] = instance;
-        else
-            instances.Add(instance);
 
         await repository.UpdateInstanceAsync(settings.MinecraftDirectory, instance, cancellationToken)
             .ConfigureAwait(false);
-        logger.LogInformation("Game instance saved. InstanceId={InstanceId} VersionName={VersionName}", instance.Id, instance.VersionName);
+        logger.LogInformation("Game instance saved. InstanceDirectory={InstanceDirectory} VersionName={VersionName}", instance.InstanceDirectory, instance.VersionName);
     }
 
     /// <summary>
     /// 校验实例新名称，事务性重命名版本目录，再提交实例元数据和图标变化。
     /// </summary>
-    public async Task<GameInstance> RenameInstanceAsync(
-        string instanceId,
+    public Task<GameInstance> RenameInstanceAsync(
+        string instanceDirectory,
         string? newName,
         string? newIconSource,
         CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(instanceId))
-            throw new InvalidOperationException("Instance id is required.");
+        => RenameInstanceCoreAsync(instanceDirectory, newName, newIconSource, null, cancellationToken);
 
-        var mutationKey = instanceId.Trim();
+    public Task<GameInstance> RenameInstanceAsync(GameInstance instance, string? newName, string? newIconSource, CancellationToken cancellationToken = default)
+        => RenameInstanceCoreAsync(instance.InstanceDirectory, newName, newIconSource, instance, cancellationToken);
+
+    private async Task<GameInstance> RenameInstanceCoreAsync(string instanceDirectory, string? newName, string? newIconSource,
+        GameInstance? expectedInstance, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(instanceDirectory))
+            throw new InvalidOperationException("Instance directory is required.");
+
+        var mutationKey = MinecraftDirectoryPath.Normalize(instanceDirectory);
         if (!pendingInstanceMutations.TryAdd(mutationKey, "rename"))
             throw new InvalidOperationException("Instance is already being modified.");
 
         try
         {
         var instances = (await GetInstancesAsync(cancellationToken).ConfigureAwait(false)).ToList();
-        var instance = instances.FirstOrDefault(existing =>
-            string.Equals(existing.Id, instanceId, StringComparison.OrdinalIgnoreCase))
+        var currentInstance = instances.FirstOrDefault(existing =>
+            string.Equals(existing.InstanceDirectory, instanceDirectory, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException("Instance was not found.");
+        var instance = expectedInstance ?? currentInstance;
 
         var sanitizedName = NormalizeUserInstanceName(newName);
         var normalizedIconSource = string.IsNullOrWhiteSpace(newIconSource) ? null : newIconSource.Trim();
@@ -105,7 +106,7 @@ public async Task<GameInstance> CreateInstanceAsync(
         var currentVersionName = GetVersionName(instance);
 
         if (instances.Any(existing =>
-                !string.Equals(existing.Id, instance.Id, StringComparison.OrdinalIgnoreCase)
+                !string.Equals(existing.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase)
                 && (string.Equals(existing.Name, sanitizedName, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(existing.VersionName, sanitizedName, StringComparison.OrdinalIgnoreCase))))
         {
@@ -119,7 +120,7 @@ public async Task<GameInstance> CreateInstanceAsync(
         if (!nameChanged && !iconChanged)
             return instance;
 
-        var directoryRenamed = !string.Equals(currentVersionName, sanitizedName, StringComparison.OrdinalIgnoreCase);
+        var directoryRenamed = !string.Equals(currentVersionName, sanitizedName, StringComparison.Ordinal);
         var updatedAt = DateTimeOffset.UtcNow;
         if (directoryRenamed)
         {
@@ -132,6 +133,7 @@ public async Task<GameInstance> CreateInstanceAsync(
                 normalizedIconSource,
                 sourceDirectory,
                 destinationDirectory);
+            var originalDirectory = instance.InstanceDirectory;
             try
             {
                 await repository.RenameVersionAsync(
@@ -149,6 +151,12 @@ public async Task<GameInstance> CreateInstanceAsync(
 
             instance.VersionName = sanitizedName;
             instance.InstanceDirectory = repository.GetVersionDirectory(settings.MinecraftDirectory, sanitizedName);
+            await settingsService.UpdateAsync(latest =>
+            {
+                if (PathsEqual(latest.MinecraftDirectory, settings.MinecraftDirectory)
+                    && MinecraftDirectoryPath.Equals(latest.DefaultInstanceDirectory, originalDirectory))
+                    latest.DefaultInstanceDirectory = instance.InstanceDirectory;
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         instance.Name = sanitizedName;
@@ -156,7 +164,7 @@ public async Task<GameInstance> CreateInstanceAsync(
         instance.UpdatedAt = updatedAt;
 
         var index = instances.FindIndex(existing =>
-            string.Equals(existing.Id, instance.Id, StringComparison.OrdinalIgnoreCase));
+            string.Equals(existing.InstanceDirectory, instance.InstanceDirectory, StringComparison.OrdinalIgnoreCase));
         if (index >= 0)
             instances[index] = instance;
 
@@ -167,8 +175,8 @@ public async Task<GameInstance> CreateInstanceAsync(
                 .ConfigureAwait(false);
         }
         logger.LogInformation(
-            "Game instance renamed. InstanceId={InstanceId} VersionName={VersionName} IconChanged={IconChanged}",
-            instance.Id,
+            "Game instance renamed. InstanceDirectory={InstanceDirectory} VersionName={VersionName} IconChanged={IconChanged}",
+            instance.InstanceDirectory,
             instance.VersionName,
             iconChanged);
         return instance;
@@ -193,34 +201,24 @@ public async Task<GameInstance> CreateInstanceAsync(
             return requestedIconSource;
         }
 
-        var expectedSourcePath = Path.Combine(
-            sourceDirectory,
-            LauncherApplicationIdentity.StorageDirectoryName,
-            ResourceProjectIconFileName);
-        if (!PathsEqual(iconUri.LocalPath, expectedSourcePath))
-            return requestedIconSource;
-
-        var destinationPath = Path.Combine(
-            destinationDirectory,
-            LauncherApplicationIdentity.StorageDirectoryName,
-            ResourceProjectIconFileName);
-        return new Uri(Path.GetFullPath(destinationPath)).AbsoluteUri;
+        return InstanceIconPaths.Resolve(requestedIconSource, sourceDirectory, destinationDirectory);
     }
 
-    public async Task<bool> SetDefaultInstanceAsync(string instanceId, CancellationToken cancellationToken = default)
+    public async Task<bool> SetDefaultInstanceAsync(string instanceDirectory, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(instanceId))
+        if (string.IsNullOrWhiteSpace(instanceDirectory))
             return false;
 
         var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var instances = await repository.GetAllAsync(settings.MinecraftDirectory, cancellationToken).ConfigureAwait(false);
-        var instance = instances.FirstOrDefault(existing =>
-            string.Equals(existing.Id, instanceId, StringComparison.OrdinalIgnoreCase));
-
-        if (instance is null)
+        if (IsInstallingVersion(settings.MinecraftDirectory, Path.GetFileName(Path.TrimEndingDirectorySeparator(instanceDirectory))))
+            return false;
+        if (!await repository.IsInstalledInstanceDirectoryAsync(settings.MinecraftDirectory, instanceDirectory, cancellationToken)
+                .ConfigureAwait(false))
             return false;
 
-        if (string.Equals(settings.DefaultInstanceId, instance.Id, StringComparison.Ordinal))
+        instanceDirectory = MinecraftDirectoryPath.Normalize(instanceDirectory);
+
+        if (string.Equals(settings.DefaultInstanceDirectory, instanceDirectory, StringComparison.Ordinal))
             return true;
 
         var persisted = false;
@@ -229,43 +227,49 @@ public async Task<GameInstance> CreateInstanceAsync(
                 {
                     if (!PathsEqual(latest.MinecraftDirectory, settings.MinecraftDirectory))
                         return;
-                    latest.DefaultInstanceId = instance.Id;
+                    latest.DefaultInstanceDirectory = instanceDirectory;
                     persisted = true;
                 },
                 cancellationToken)
             .ConfigureAwait(false);
         if (!persisted)
             return false;
-        settings.DefaultInstanceId = instance.Id;
-        logger.LogInformation("Default game instance changed. InstanceId={InstanceId}", instance.Id);
+        settings.DefaultInstanceDirectory = instanceDirectory;
+        logger.LogInformation("Default game instance changed. InstanceDirectory={InstanceDirectory}", instanceDirectory);
         return true;
     }
 
     /// <summary>
     /// 删除实例目录和持久化记录；若删除默认实例，同时选择新的默认项。
     /// </summary>
-    public async Task<bool> DeleteInstanceAsync(string instanceId, CancellationToken cancellationToken = default)
+    public Task<bool> DeleteInstanceAsync(string instanceDirectory, CancellationToken cancellationToken = default)
+        => DeleteInstanceCoreAsync(instanceDirectory, null, cancellationToken);
+
+    public Task<bool> DeleteInstanceAsync(GameInstance instance, CancellationToken cancellationToken = default)
+        => DeleteInstanceCoreAsync(instance.InstanceDirectory, instance, cancellationToken);
+
+    private async Task<bool> DeleteInstanceCoreAsync(string instanceDirectory, GameInstance? expectedInstance, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(instanceId))
+        if (string.IsNullOrWhiteSpace(instanceDirectory))
             return false;
 
-        var deletionKey = instanceId.Trim();
+        var deletionKey = MinecraftDirectoryPath.Normalize(instanceDirectory);
         if (!pendingInstanceMutations.TryAdd(deletionKey, "delete"))
         {
-            logger.LogWarning("Duplicate game instance deletion ignored. InstanceId={InstanceId}", instanceId);
+            logger.LogWarning("Duplicate game instance deletion ignored. InstanceDirectory={InstanceDirectory}", instanceDirectory);
             return false;
         }
 
         try
         {
             var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
-            var instances = (await repository.GetAllAsync(settings.MinecraftDirectory, cancellationToken)
-                .ConfigureAwait(false)).ToList();
+            var instances = (await GetInstancesAsync(cancellationToken).ConfigureAwait(false)).ToList();
             var instance = instances.FirstOrDefault(existing =>
-                string.Equals(existing.Id, instanceId, StringComparison.OrdinalIgnoreCase));
+                string.Equals(existing.InstanceDirectory, instanceDirectory, StringComparison.OrdinalIgnoreCase));
 
             if (instance is null)
                 return false;
+            instance = expectedInstance ?? instance;
 
             var versionName = GetVersionName(instance);
             if (string.IsNullOrWhiteSpace(versionName))
@@ -274,11 +278,12 @@ public async Task<GameInstance> CreateInstanceAsync(
             string stagedDirectory;
             try
             {
-                stagedDirectory = await repository
-                    .StageVersionForDeletionAsync(
+                stagedDirectory = expectedInstance is not null
+                    ? await repository.StageVersionForDeletionAsync(settings.MinecraftDirectory, expectedInstance, cancellationToken).ConfigureAwait(false)
+                    : await repository.StageVersionForDeletionAsync(
                         settings.MinecraftDirectory,
                         versionName,
-                        instance.Id,
+                        instance.InstanceDirectory,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -286,14 +291,14 @@ public async Task<GameInstance> CreateInstanceAsync(
             {
                 logger.LogWarning(
                     exception,
-                    "Stale game instance deletion was rejected. InstanceId={InstanceId} VersionName={VersionName}",
-                    instance.Id,
+                    "Stale game instance deletion was rejected. InstanceDirectory={InstanceDirectory} VersionName={VersionName}",
+                    instance.InstanceDirectory,
                     versionName);
                 return false;
             }
 
             // Directory.Move is the irreversible commit point. From here on the instance must never be restored.
-            instances.Remove(instance);
+            instances.RemoveAll(candidate => MinecraftDirectoryPath.Equals(candidate.InstanceDirectory, instance.InstanceDirectory));
             await PersistDefaultAfterDeletionBestEffortAsync(settings, instances, instance).ConfigureAwait(false);
 
             var physicalCleanupCompleted = await repository
@@ -303,8 +308,8 @@ public async Task<GameInstance> CreateInstanceAsync(
                     CancellationToken.None)
                 .ConfigureAwait(false);
             logger.LogInformation(
-                "Game instance deletion committed. InstanceId={InstanceId} VersionName={VersionName} PhysicalCleanupCompleted={PhysicalCleanupCompleted}",
-                instance.Id,
+                "Game instance deletion committed. InstanceDirectory={InstanceDirectory} VersionName={VersionName} PhysicalCleanupCompleted={PhysicalCleanupCompleted}",
+                instance.InstanceDirectory,
                 versionName,
                 physicalCleanupCompleted);
             return true;
@@ -320,10 +325,10 @@ public async Task<GameInstance> CreateInstanceAsync(
         IReadOnlyCollection<GameInstance> remainingInstances,
         GameInstance deletedInstance)
     {
-        if (!string.Equals(settings.DefaultInstanceId, deletedInstance.Id, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(settings.DefaultInstanceDirectory, deletedInstance.InstanceDirectory, StringComparison.OrdinalIgnoreCase))
             return;
 
-        var replacementDefaultInstanceId = remainingInstances.FirstOrDefault()?.Id ?? string.Empty;
+        var replacementDefaultInstanceDirectory = remainingInstances.FirstOrDefault()?.InstanceDirectory ?? string.Empty;
         try
         {
             var persisted = false;
@@ -332,31 +337,31 @@ public async Task<GameInstance> CreateInstanceAsync(
                     {
                         if (!PathsEqual(latest.MinecraftDirectory, settings.MinecraftDirectory)
                             || !string.Equals(
-                                latest.DefaultInstanceId,
-                                deletedInstance.Id,
+                                latest.DefaultInstanceDirectory,
+                                deletedInstance.InstanceDirectory,
                                 StringComparison.OrdinalIgnoreCase))
                         {
                             return;
                         }
-                        latest.DefaultInstanceId = replacementDefaultInstanceId;
+                        latest.DefaultInstanceDirectory = replacementDefaultInstanceDirectory;
                         persisted = true;
                     },
                     CancellationToken.None)
                 .ConfigureAwait(false);
             if (!persisted)
                 return;
-            settings.DefaultInstanceId = replacementDefaultInstanceId;
+            settings.DefaultInstanceDirectory = replacementDefaultInstanceDirectory;
             logger.LogInformation(
-                "Default game instance changed after deletion. DefaultInstanceId={DefaultInstanceId}",
-                settings.DefaultInstanceId);
+                "Default game instance changed after deletion. DefaultInstanceDirectory={DefaultInstanceDirectory}",
+                settings.DefaultInstanceDirectory);
         }
         catch (Exception exception)
         {
             logger.LogError(
                 exception,
-                "Failed to persist default game instance after deletion commit. DeletedInstanceId={DeletedInstanceId} DefaultInstanceId={DefaultInstanceId}",
-                deletedInstance.Id,
-                settings.DefaultInstanceId);
+                "Failed to persist default game instance after deletion commit. DeletedInstanceDirectory={DeletedInstanceDirectory} DefaultInstanceDirectory={DefaultInstanceDirectory}",
+                deletedInstance.InstanceDirectory,
+                settings.DefaultInstanceDirectory);
         }
     }
 

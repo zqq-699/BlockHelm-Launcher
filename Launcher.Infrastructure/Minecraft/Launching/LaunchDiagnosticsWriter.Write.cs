@@ -38,6 +38,10 @@ private static async Task<DiagnosticWriteResult> WriteDiagnosticAsync(
         Action<StringBuilder> appendSections)
     {
         // 写入使用单一入口以统一目录创建、命名、保留数量和失败降级行为。
+        using var instanceLease = context.InstanceDirectoryProof is null ? null
+            : FileSystem.WindowsDirectoryHandleMover.AcquireReadLease(context.InstanceDirectory);
+        if (context.InstanceDirectoryProof is { } proof && !Persistence.InstanceDirectoryOwnership.Matches(context.InstanceDirectory, proof))
+            throw new IOException("The instance directory changed before diagnostics could be written.");
         var logsDirectory = Path.Combine(
             context.InstanceDirectory,
             LauncherApplicationIdentity.StorageDirectoryName,

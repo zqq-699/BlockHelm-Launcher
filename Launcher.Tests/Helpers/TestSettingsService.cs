@@ -33,12 +33,14 @@ internal sealed class TestSettingsService : ISettingsService
     }
 
     public int SaveCount => Volatile.Read(ref saveCount);
+    public Action? BeforeLoad { get; set; }
 
     public TaskCompletionSource<bool> SaveStarted { get; } =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Task<LauncherSettings> LoadAsync(CancellationToken cancellationToken = default)
     {
+        BeforeLoad?.Invoke();
         return Task.FromResult(settings);
     }
 

@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using Launcher.Infrastructure.Persistence;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -35,7 +36,7 @@ private static async Task<JsonObject> ReadVersionJsonAsync(
         string versionName,
         CancellationToken cancellationToken)
     {
-        var jsonPath = Path.Combine(versionDirectory, $"{versionName}.json");
+        var jsonPath = (InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) ?? Path.Combine(versionDirectory, $"{versionName}.json"));
         MinecraftPathGuard.EnsureSafeFileDestination(
             jsonPath,
             versionDirectory,
@@ -74,7 +75,7 @@ private static async Task<JsonObject> ReadVersionJsonAsync(
         JsonObject versionJson,
         CancellationToken cancellationToken)
     {
-        var jsonPath = Path.Combine(versionDirectory, $"{versionName}.json");
+        var jsonPath = (InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) ?? Path.Combine(versionDirectory, $"{versionName}.json"));
         MinecraftPathGuard.EnsureSafeFileDestination(
             jsonPath,
             versionDirectory,

@@ -66,9 +66,9 @@ public sealed class MicrosoftAccountService : IMicrosoftAccountService
     {
         this.logger = logger ?? NullLogger<MicrosoftAccountService>.Instance;
         this.authProvider = authProvider;
-        avatarService = new AccountAvatarService(HttpClient, pathProvider);
-        skinCacheService = new AccountSkinCacheService(HttpClient, pathProvider);
-        capeCacheService = new AccountCapeCacheService(HttpClient, pathProvider);
+        avatarService = new AccountAvatarService(HttpClient, pathProvider, this.logger);
+        skinCacheService = new AccountSkinCacheService(HttpClient, pathProvider, this.logger);
+        capeCacheService = new AccountCapeCacheService(HttpClient, pathProvider, this.logger);
         profileClient = new MinecraftProfileClient(HttpClient);
         accountFactory = new MicrosoftAccountFactory(
             avatarService,

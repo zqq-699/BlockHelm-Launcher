@@ -133,7 +133,7 @@ public sealed partial class JavaRuntimeDiscoveryService : IJavaRuntimeDiscoveryS
                     NormalizePath(ResolveJavaExecutableIdentityPath(normalizedPath))),
                 cancellationToken);
             if (runtime.MajorVersion is null)
-                throw new InvalidOperationException("Java executable did not report a usable version.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("Java executable did not report a usable version."), "DownloadValidation", ("Reason", "Java executable did not report a usable version."));
 
             return runtime;
         }, cancellationToken);

@@ -122,51 +122,11 @@ public sealed partial class InstanceBackupService
             ?? throw new InvalidOperationException("Minecraft directory could not be determined from the instance path.");
     }
 
-    private static async Task EnsureCurrentInstanceIdentityAsync(
-        string instanceDirectory,
-        string expectedInstanceId,
-        CancellationToken cancellationToken)
+    private static Task EnsureCurrentInstanceIdentityAsync(string instanceDirectory, string expectedOwnerProof, CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(instanceDirectory))
-        {
-            throw new InstanceBackupException(
-                InstanceBackupFailureReason.InstanceChanged,
-                "The instance was moved or deleted while its backup was being restored.");
-        }
-
-        var settingsPath = Path.Combine(
-            instanceDirectory,
-            LauncherApplicationIdentity.StorageDirectoryName,
-            "instance-settings.json");
-        try
-        {
-            await using var stream = File.OpenRead(settingsPath);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            if (!document.RootElement.TryGetProperty("Id", out var idElement)
-                || !string.Equals(idElement.GetString(), expectedInstanceId, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InstanceBackupException(
-                    InstanceBackupFailureReason.InstanceChanged,
-                    "The instance directory now belongs to a different instance.");
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (InstanceBackupException)
-        {
-            throw;
-        }
-        catch (Exception exception) when (exception is IOException
-                                          or UnauthorizedAccessException
-                                          or JsonException)
-        {
-            throw new InstanceBackupException(
-                InstanceBackupFailureReason.InstanceChanged,
-                "The current instance identity could not be verified.",
-                exception);
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!GameInstanceSettingsStore.HasIdentity(instanceDirectory, expectedOwnerProof))
+            throw new InstanceBackupException(InstanceBackupFailureReason.InstanceChanged, "Instance changed during backup operation.");
+        return Task.CompletedTask;
     }
 }

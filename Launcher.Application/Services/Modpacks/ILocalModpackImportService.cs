@@ -32,5 +32,6 @@ public interface ILocalModpackImportService
         IProgress<LauncherProgress>? progress,
         CancellationToken cancellationToken = default,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
-        int downloadSpeedLimitMbPerSecond = 0);
+        int downloadSpeedLimitMbPerSecond = 0,
+        Func<StagedModpackInstance, Task>? prepareInstanceAsync = null);
 }

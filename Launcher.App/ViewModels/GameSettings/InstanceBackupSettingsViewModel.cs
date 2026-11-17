@@ -36,6 +36,7 @@ public sealed partial class InstanceBackupSettingsViewModel : GameSettingsDetail
 {
     // 服务负责持久化和文件操作；本类只编排对话框、命令可用性和列表投影。
     private readonly IGameInstanceService instanceService;
+    private readonly InstanceSettingsPersistenceCoordinator persistence;
     private readonly IInstanceBackupService backupService;
     private readonly DownloadTasksPageViewModel downloadTasksPage;
     private readonly IStatusService statusService;
@@ -107,9 +108,10 @@ public sealed partial class InstanceBackupSettingsViewModel : GameSettingsDetail
     [ObservableProperty]
     private IReadOnlyList<object> visibleBackupListItems = Array.Empty<object>();
 
-    public InstanceBackupSettingsViewModel(
+    internal InstanceBackupSettingsViewModel(
         GameSettingsDetailsViewModel parent,
         IGameInstanceService instanceService,
+        InstanceSettingsPersistenceCoordinator persistence,
         IInstanceBackupService backupService,
         DownloadTasksPageViewModel downloadTasksPage,
         IStatusService statusService,
@@ -120,6 +122,7 @@ public sealed partial class InstanceBackupSettingsViewModel : GameSettingsDetail
         : base(parent)
     {
         this.instanceService = instanceService;
+        this.persistence = persistence;
         this.backupService = backupService;
         this.downloadTasksPage = downloadTasksPage;
         this.statusService = statusService;

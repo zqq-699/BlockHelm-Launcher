@@ -66,7 +66,7 @@ public sealed class LocalSavesViewModel : IDisposable
     public void SetSelectedInstance(GameInstance? instance)
     {
         refreshCoordinator.SetInstance(instance);
-        logger.LogInformation("Selected instance changed for local saves view. InstanceId={InstanceId}", instance?.Id ?? "<none>");
+        logger.LogInformation("Selected instance changed for local saves view. InstanceDirectory={InstanceDirectory}", instance?.InstanceDirectory ?? "<none>");
     }
 
     public void SetSectionActive(bool active) => refreshCoordinator.SetSectionActive(active);

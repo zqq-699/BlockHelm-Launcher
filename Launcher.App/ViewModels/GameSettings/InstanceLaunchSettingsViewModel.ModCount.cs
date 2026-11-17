@@ -45,7 +45,7 @@ private async Task RefreshEnabledModCountAsync(GameInstance? instance)
             var mods = await modService.GetModsAsync(instance, cancellation.Token);
             // CancellationToken 之外再校验请求身份，覆盖底层服务忽略取消或恰好已完成的竞态。
             if (!ReferenceEquals(modCountRefreshCancellation, cancellation)
-                || !string.Equals(selectedInstance?.Id, instance.Id, StringComparison.Ordinal))
+                || !string.Equals(selectedInstance?.InstanceDirectory, instance.InstanceDirectory, StringComparison.Ordinal))
             {
                 return;
             }
@@ -59,7 +59,7 @@ private async Task RefreshEnabledModCountAsync(GameInstance? instance)
         catch (Exception)
         {
             // Mod 统计只是估算增强项；失败时按 0 计算，不让非关键读取破坏整个启动设置页。
-            if (string.Equals(selectedInstance?.Id, instance.Id, StringComparison.Ordinal))
+            if (string.Equals(selectedInstance?.InstanceDirectory, instance.InstanceDirectory, StringComparison.Ordinal))
             {
                 enabledModCount = 0;
                 RefreshSystemMemorySnapshot();

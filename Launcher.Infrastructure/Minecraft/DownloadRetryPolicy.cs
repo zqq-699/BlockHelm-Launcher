@@ -18,6 +18,7 @@
  */
 
 using System.Net;
+using Launcher.Application.Services;
 using System.Net.Http;
 
 namespace Launcher.Infrastructure.Minecraft;
@@ -63,7 +64,7 @@ internal enum DownloadFailureReason
     ResourceConflict
 }
 
-internal class DownloadAttemptException : Exception
+internal class DownloadAttemptException : Exception, ISafeDiagnosticException
 {
     public DownloadAttemptException(
         DownloadFailureDisposition disposition,
@@ -79,6 +80,15 @@ internal class DownloadAttemptException : Exception
         StatusCode = statusCode;
         RetryAfter = retryAfter;
     }
+
+    public string DiagnosticCode => Reason.ToString();
+    public Dictionary<string, object?> Details { get; } = new();
+    public IReadOnlyDictionary<string, object?> DiagnosticFields => new Dictionary<string, object?>(Details)
+    {
+        ["FailureDisposition"] = Disposition.ToString(), ["StatusCode"] = (int?)StatusCode,
+        ["FinalHost"] = FinalHost, ["RetryAfterMs"] = RetryAfter?.TotalMilliseconds
+    };
+    public DownloadAttemptException WithDetail(string key, object? value) { Details[key] = value; return this; }
 
     public DownloadFailureDisposition Disposition { get; private set; }
     public DownloadFailureReason Reason { get; }

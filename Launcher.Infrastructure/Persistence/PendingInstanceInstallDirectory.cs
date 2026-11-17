@@ -198,7 +198,7 @@ internal static class PendingInstanceInstallDirectory
                 failureReason = "instance settings are empty";
                 return false;
             }
-            if (!string.Equals(instance.Id, marker.InstanceId, StringComparison.Ordinal))
+            if (!GameInstanceSettingsStore.HasIdentity(normalizedCommittedDirectory, marker.OwnerProof))
             {
                 failureReason = "instance settings id does not match the install marker";
                 return false;
@@ -247,7 +247,7 @@ internal static class PendingInstanceInstallDirectory
                 failureReason = "transaction marker is missing";
                 return false;
             }
-            var parsed = JsonSerializer.Deserialize<PendingInstanceInstallMarker>(
+            var parsed = InstanceDirectoryOwnership.ReadLegacyMarker<PendingInstanceInstallMarker>(
                 File.ReadAllText(markerPath),
                 MarkerJsonOptions);
             if (parsed is null)
@@ -255,12 +255,12 @@ internal static class PendingInstanceInstallDirectory
                 failureReason = "transaction marker is empty";
                 return false;
             }
-            if (parsed.SchemaVersion != 1)
+            if (parsed.SchemaVersion is not (1 or 2))
             {
                 failureReason = "unsupported schema version";
                 return false;
             }
-            if (string.IsNullOrWhiteSpace(parsed.InstanceId))
+            if (string.IsNullOrWhiteSpace(parsed.OwnerProof))
             {
                 failureReason = "instance id is missing";
                 return false;
@@ -289,7 +289,7 @@ internal static class PendingInstanceInstallDirectory
 internal sealed record PendingInstanceInstallMarker(
     int SchemaVersion,
     string TransactionId,
-    string InstanceId,
+    string OwnerProof,
     string LogicalVersionName,
     string InstallKind,
     bool InitializeDefaultIfEmpty,

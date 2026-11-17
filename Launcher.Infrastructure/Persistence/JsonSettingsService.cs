@@ -30,7 +30,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Launcher.Infrastructure.Persistence;
 
-public sealed class JsonSettingsService : ISettingsService
+public sealed partial class JsonSettingsService : ISettingsService
 {
     private static readonly TimeSpan BootstrapCrossProcessLockTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan DefaultCrossProcessLockRetryDelay = TimeSpan.FromMilliseconds(100);
@@ -348,8 +348,14 @@ public sealed class JsonSettingsService : ISettingsService
 
     private async Task SaveCoreAsync(LauncherSettings settings, CancellationToken cancellationToken)
     {
-        await AtomicJsonFileWriter.WriteAsync(settingsPath, settings, JsonOptions, cancellationToken)
-            .ConfigureAwait(false);
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(settings, JsonOptions)!.AsObject();
+        if (File.Exists(settingsPath) && !selectionMigrationCommitted)
+        {
+            var old = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(settingsPath, cancellationToken));
+            if (old?["DefaultInstanceId"] is { } legacy)
+                node["DefaultInstanceId"] = legacy.DeepClone();
+        }
+        await AtomicJsonFileWriter.WriteAsync(settingsPath, node, JsonOptions, cancellationToken).ConfigureAwait(false);
     }
 
     private LauncherSettings Normalize(LauncherSettings settings)

@@ -33,25 +33,24 @@ namespace Launcher.App.ViewModels.GameSettings;
 public sealed partial class InstanceModManagementSettingsViewModel
 {
     [RelayCommand]
-    private void OpenModFolder()
+    private async Task OpenModFolder()
     {
         if (selectedInstance is null)
             return;
 
         try
         {
-            var modsDirectory = instanceFolderService.EnsureDirectoryExists(
-                Path.Combine(selectedInstance.InstanceDirectory, "mods"));
+            var modsDirectory = await instanceFolderService.EnsureInstanceContentDirectoryAsync(selectedInstance, ResourceProjectKind.Mod);
             logger.LogDebug(
-                "Opening mod folder. InstanceId={InstanceId} ModsDirectory={ModsDirectory}",
-                selectedInstance.Id,
+                "Opening mod folder. InstanceDirectory={InstanceDirectory} ModsDirectory={ModsDirectory}",
+                selectedInstance.InstanceDirectory,
                 modsDirectory);
 
             if (!instanceFolderService.TryOpen(modsDirectory))
             {
                 logger.LogWarning(
-                    "Failed to open mod folder. InstanceId={InstanceId} ModsDirectory={ModsDirectory}",
-                    selectedInstance.Id,
+                    "Failed to open mod folder. InstanceDirectory={InstanceDirectory} ModsDirectory={ModsDirectory}",
+                    selectedInstance.InstanceDirectory,
                     modsDirectory);
                 statusService.Report(Strings.Status_OpenInstanceFolderFailed);
             }
@@ -60,8 +59,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to prepare mod folder for opening. InstanceId={InstanceId}",
-                selectedInstance.Id);
+                "Failed to prepare mod folder for opening. InstanceDirectory={InstanceDirectory}",
+                selectedInstance.InstanceDirectory);
             statusService.Report(Strings.Status_OpenInstanceFolderFailed);
         }
     }
@@ -111,8 +110,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             return;
 
         logger.LogDebug(
-            "Importing local mod from file picker. InstanceId={InstanceId} SourcePath={SourcePath} OverwriteExisting={OverwriteExisting}",
-            selectedInstance.Id,
+            "Importing local mod from file picker. InstanceDirectory={InstanceDirectory} SourcePath={SourcePath} OverwriteExisting={OverwriteExisting}",
+            selectedInstance.InstanceDirectory,
             modPath,
             overwriteExisting);
 
@@ -124,8 +123,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         {
             logger.LogError(
                 exception,
-                "Failed to import local mod. InstanceId={InstanceId} SourcePath={SourcePath} OverwriteExisting={OverwriteExisting}",
-                selectedInstance.Id,
+                "Failed to import local mod. InstanceDirectory={InstanceDirectory} SourcePath={SourcePath} OverwriteExisting={OverwriteExisting}",
+                selectedInstance.InstanceDirectory,
                 modPath,
                 overwriteExisting);
             statusService.Report(Strings.Status_LocalModImportFailed);
@@ -139,6 +138,7 @@ public sealed partial class InstanceModManagementSettingsViewModel
     {
         if (selectedInstance is null)
             return;
+        var instance = selectedInstance;
 
         // 先对整个批次做类型/目录校验，避免导入一半后才发现输入中混有非法路径。
         if (!TryValidateImportPaths(paths, Strings.GameSettings_DropModsOnlyMessage, out var validationMessage))
@@ -150,8 +150,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
         }
 
         logger.LogInformation(
-            "Starting local mod import batch. InstanceId={InstanceId} Source={Source} FileCount={FileCount}",
-            selectedInstance.Id,
+            "Starting local mod import batch. InstanceDirectory={InstanceDirectory} Source={Source} FileCount={FileCount}",
+            selectedInstance.InstanceDirectory,
             source,
             paths.Count);
 
@@ -159,17 +159,19 @@ public sealed partial class InstanceModManagementSettingsViewModel
         var successCount = 0;
         foreach (var modPath in paths)
         {
+            if (!ReferenceEquals(instance, selectedInstance)) return;
             var fileName = Path.GetFileName(modPath);
             var overwriteExisting = false;
             if (localModsViewModel.Mods.Any(mod => string.Equals(mod.FileName, fileName, StringComparison.OrdinalIgnoreCase)))
             {
                 // 冲突判断基于当前快照；确认替换后由服务再次负责安全覆盖。
                 var replace = await RequestModImportConflictResolutionAsync(modPath, fileName);
+                if (!ReferenceEquals(instance, selectedInstance)) return;
                 if (!replace)
                 {
                     logger.LogDebug(
-                        "Skipping local mod replacement after user canceled conflict dialog. InstanceId={InstanceId} SourcePath={SourcePath}",
-                        selectedInstance.Id,
+                        "Skipping local mod replacement after user canceled conflict dialog. InstanceDirectory={InstanceDirectory} SourcePath={SourcePath}",
+                        selectedInstance.InstanceDirectory,
                         modPath);
                     continue;
                 }
@@ -193,8 +195,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
             {
                 logger.LogError(
                     exception,
-                    "Failed to import local mod during batch import. InstanceId={InstanceId} SourcePath={SourcePath} OverwriteExisting={OverwriteExisting}",
-                    selectedInstance.Id,
+                    "Failed to import local mod during batch import. InstanceDirectory={InstanceDirectory} SourcePath={SourcePath} OverwriteExisting={OverwriteExisting}",
+                    selectedInstance.InstanceDirectory,
                     modPath,
                     overwriteExisting);
                 statusService.Report(Strings.Status_LocalModImportFailed);
@@ -210,8 +212,8 @@ public sealed partial class InstanceModManagementSettingsViewModel
                 : string.Format(Strings.Status_LocalModsImportedFormat, successCount));
         }
         logger.LogInformation(
-            "Local mod import batch completed. InstanceId={InstanceId} RequestedCount={RequestedCount} ImportedCount={ImportedCount} SkippedCount={SkippedCount}",
-            selectedInstance.Id,
+            "Local mod import batch completed. InstanceDirectory={InstanceDirectory} RequestedCount={RequestedCount} ImportedCount={ImportedCount} SkippedCount={SkippedCount}",
+            selectedInstance.InstanceDirectory,
             paths.Count,
             successCount,
             paths.Count - successCount);

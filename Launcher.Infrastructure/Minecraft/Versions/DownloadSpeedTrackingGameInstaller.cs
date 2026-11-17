@@ -110,9 +110,9 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         CancellationToken cancellationToken)
     {
         var fileUrl = file.Url
-                ?? throw new InvalidDataException($"CmlLib game file URL is missing: {file.Name}");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException($"CmlLib game file URL is missing: {file.Name}"), "GameFileMetadataMissing", ("FileName", file.Name), ("Field", "url"));
         var filePath = file.Path
-                ?? throw new InvalidDataException($"CmlLib game file path is missing: {file.Name}");
+                ?? throw SafeExceptionLog.Describe(new InvalidDataException($"CmlLib game file path is missing: {file.Name}"), "GameFileMetadataMissing", ("FileName", file.Name), ("Field", "path"));
         if (minecraftPath is not null)
             filePath = MinecraftPathGuard.EnsureInstallFilePath(minecraftPath, filePath);
         long? expectedSize = file.Size > 0 ? file.Size : null;
@@ -130,6 +130,7 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
             filePath,
             fileUrl,
             expectedSize);
+        using var diagnosticLogScope = logScope.RestoreContext();
         var reportProgress = logScope.BeginSource((attempt, progressedBytes, totalBytes) =>
         {
             if (attempt != currentAttempt)

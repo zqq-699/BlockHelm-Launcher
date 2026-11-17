@@ -64,14 +64,14 @@ public sealed class CmlLibJavaRuntimeProvisioningService
             ? instance.MinecraftVersion
             : instance.VersionName;
         if (string.IsNullOrWhiteSpace(versionName))
-            throw new InvalidOperationException("Version name is required to prepare Java runtime.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("Version name is required to prepare Java runtime."), "DownloadValidation", ("Reason", "Version name is required to prepare Java runtime."));
 
         if (string.IsNullOrWhiteSpace(settings.MinecraftDirectory))
-            throw new InvalidOperationException("Minecraft directory is required to prepare Java runtime.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("Minecraft directory is required to prepare Java runtime."), "DownloadValidation", ("Reason", "Minecraft directory is required to prepare Java runtime."));
 
         logger.LogDebug(
-            "Preparing Java runtime for launch. InstanceId={InstanceId} InstanceName={InstanceName} VersionName={VersionName} MinecraftDirectory={MinecraftDirectory} DownloadSourcePreference={DownloadSourcePreference} DownloadSpeedLimitMbPerSecond={DownloadSpeedLimitMbPerSecond}",
-            instance.Id,
+            "Preparing Java runtime for launch. InstanceDirectory={InstanceDirectory} InstanceName={InstanceName} VersionName={VersionName} MinecraftDirectory={MinecraftDirectory} DownloadSourcePreference={DownloadSourcePreference} DownloadSpeedLimitMbPerSecond={DownloadSpeedLimitMbPerSecond}",
+            instance.InstanceDirectory,
             instance.Name,
             versionName,
             settings.MinecraftDirectory,
@@ -100,8 +100,8 @@ public sealed class CmlLibJavaRuntimeProvisioningService
             progress?.Report(new LauncherProgress(LaunchProgressStages.CheckingJava, string.Empty, ProgressEndPercent));
 
             logger.LogInformation(
-                "Java runtime preparation completed. InstanceId={InstanceId} VersionName={VersionName}",
-                instance.Id,
+                "Java runtime preparation completed. InstanceDirectory={InstanceDirectory} VersionName={VersionName}",
+                instance.InstanceDirectory,
                 versionName);
             logger.LogDebug("Java runtime preparation directory. MinecraftDirectory={MinecraftDirectory}", settings.MinecraftDirectory);
         }
@@ -109,8 +109,8 @@ public sealed class CmlLibJavaRuntimeProvisioningService
         {
             logger.LogError(
                 exception,
-                "Java runtime preparation failed. InstanceId={InstanceId} VersionName={VersionName} MinecraftDirectory={MinecraftDirectory}",
-                instance.Id,
+                "Java runtime preparation failed. InstanceDirectory={InstanceDirectory} VersionName={VersionName} MinecraftDirectory={MinecraftDirectory}",
+                instance.InstanceDirectory,
                 versionName,
                 settings.MinecraftDirectory);
             throw;

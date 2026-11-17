@@ -190,6 +190,27 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
         RaiseTargetStateChanged();
     }
 
+    public bool RefreshInstanceCatalog(IReadOnlyList<GameInstance> instances)
+    {
+        if (currentProject is null || options.InstallTargetMode is not ResourcesOnlineProjectInstallTargetMode.ExistingInstance)
+            return false;
+        var previous = SelectedTarget;
+        ApplyTargets(instances, string.Empty, CancellationToken.None, playEntranceAnimation: false);
+        if (previous?.Instance is not { } previousInstance)
+            return false;
+        SelectedTarget = InstallTargets.FirstOrDefault(target =>
+            MinecraftDirectoryPath.Equals(target.Instance?.InstanceDirectory, previousInstance.InstanceDirectory));
+        var current = SelectedTarget?.Instance;
+        if (current is null || current.MinecraftVersion != previousInstance.MinecraftVersion
+            || current.Loader != previousInstance.Loader || current.LoaderVersion != previousInstance.LoaderVersion)
+        {
+            CancelVersionsLoad();
+            ResetVersions(resetFilters: true);
+            if (current is not null) _ = RefreshAsync();
+        }
+        return current is null;
+    }
+
     [RelayCommand]
     private void SelectTarget(ResourcesModInstallTargetItemViewModel? target)
     {
@@ -356,7 +377,7 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
     /// <summary>
     /// 过滤不兼容目标并重建带首尾位置状态的安装目标列表。
     /// </summary>
-    private void ApplyTargets(IReadOnlyList<GameInstance> instances, string error, CancellationToken cancellationToken)
+    private void ApplyTargets(IReadOnlyList<GameInstance> instances, string error, CancellationToken cancellationToken, bool playEntranceAnimation = true)
     {
         if (cancellationToken.IsCancellationRequested)
             return;
@@ -392,7 +413,7 @@ public sealed partial class ResourcesProjectVersionsViewModel : ObservableObject
         TargetsLoadErrorMessage = error;
         IsLoadingTargets = false;
         RaiseTargetStateChanged();
-        if (InstallTargets.Count > 0)
+        if (playEntranceAnimation && InstallTargets.Count > 0)
             InstallTargetsEntranceAnimationToken++;
     }
 

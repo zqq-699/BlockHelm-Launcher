@@ -79,9 +79,8 @@ internal sealed class RemoteThumbnailDownloadClient
                     }
                     catch (InvalidDataException exception)
                     {
-                        throw new DownloadContentValidationException(
-                            "Remote thumbnail exceeds the maximum allowed size.",
-                            exception);
+                        throw SafeExceptionLog.Describe(new DownloadContentValidationException("Remote thumbnail exceeds the maximum allowed size.",
+                            exception), "DownloadContentValidationException", ("Reason", "Remote thumbnail exceeds the maximum allowed size."));
                     }
                 },
                 cancellationToken).ConfigureAwait(false);

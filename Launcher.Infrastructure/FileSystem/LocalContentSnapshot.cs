@@ -14,7 +14,8 @@ internal sealed class LocalContentSnapshot<TIdentity, TItem>
     public IReadOnlyList<TItem> Reconcile(
         IReadOnlyList<TIdentity> inventory,
         Func<TIdentity, string> pathSelector,
-        Func<TIdentity, TItem> createItem)
+        Func<TIdentity, TItem> createItem,
+        Func<TItem, bool>? canReuse = null)
     {
         var next = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
         var result = new TItem[inventory.Count];
@@ -24,7 +25,8 @@ internal sealed class LocalContentSnapshot<TIdentity, TItem>
             var identity = inventory[index];
             var path = pathSelector(identity);
             if (entries.TryGetValue(path, out var previous)
-                && EqualityComparer<TIdentity>.Default.Equals(previous.Identity, identity))
+                && EqualityComparer<TIdentity>.Default.Equals(previous.Identity, identity)
+                && (canReuse?.Invoke(previous.Item) ?? true))
             {
                 next[path] = previous;
                 result[index] = previous.Item;

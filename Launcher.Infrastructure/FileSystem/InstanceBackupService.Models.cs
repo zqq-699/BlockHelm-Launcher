@@ -35,13 +35,14 @@ public sealed partial class InstanceBackupService
     private sealed record RestoreTransactionMarker(
         int SchemaVersion,
         string TransactionId,
-        string InstanceId,
+        string OwnerProof,
         string VersionName,
         string State,
-        DateTimeOffset CreatedAtUtc);
+        DateTimeOffset CreatedAtUtc,
+        string? PreviousOwnerProof = null);
 
     private sealed record RestoreOwnerMarker(
         int SchemaVersion,
         string TransactionId,
-        string InstanceId);
+        string OwnerProof);
 }

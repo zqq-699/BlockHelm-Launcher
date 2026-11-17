@@ -33,6 +33,7 @@ public sealed partial class GameSettingsEditDialogViewModel : ObservableObject
     private const string BusyGlyph = "\uE895";
 
     private readonly IGameInstanceService instanceService;
+    private GameInstance? pendingInstanceSnapshot;
     private readonly IStatusService statusService;
     private string originalResolvedIconSource = string.Empty;
     private string? originalExplicitIconSource;
@@ -81,6 +82,8 @@ public sealed partial class GameSettingsEditDialogViewModel : ObservableObject
 
     public event Action<GameInstance>? InstanceUpdated;
 
+    public string? PreviousInstanceDirectory { get; private set; }
+
     public event Action? InstanceRenameStarting;
 
     public event Action? InstanceRenameFinished;
@@ -127,6 +130,7 @@ public sealed partial class GameSettingsEditDialogViewModel : ObservableObject
     {
         RemoveTransientIconOption();
         InstancePendingEdit = instance;
+        pendingInstanceSnapshot = instance.Instance;
         originalResolvedIconSource = instance.IconSource;
         originalExplicitIconSource = string.IsNullOrWhiteSpace(instance.Instance.IconSource)
             ? null
@@ -157,8 +161,9 @@ public sealed partial class GameSettingsEditDialogViewModel : ObservableObject
         }
 
         var pendingEdit = InstancePendingEdit;
+        var pendingInstance = pendingInstanceSnapshot;
         var selectedIcon = SelectedIconOption;
-        if (pendingEdit is null || selectedIcon is null)
+        if (pendingEdit is null || pendingInstance is null || selectedIcon is null)
             return;
 
         var newName = InstanceName.Trim();
@@ -169,9 +174,9 @@ public sealed partial class GameSettingsEditDialogViewModel : ObservableObject
         }
 
         var resolvedIconSource = ResolveIconSourceToPersist(selectedIcon);
-        var isNameUnchanged = string.Equals(newName, pendingEdit.Instance.Name, StringComparison.Ordinal)
-            && string.Equals(newName, pendingEdit.Instance.VersionName, StringComparison.OrdinalIgnoreCase);
-        var isIconUnchanged = string.Equals(resolvedIconSource, pendingEdit.Instance.IconSource, StringComparison.Ordinal);
+        var isNameUnchanged = string.Equals(newName, pendingInstance.Name, StringComparison.Ordinal)
+            && string.Equals(newName, pendingInstance.VersionName, StringComparison.OrdinalIgnoreCase);
+        var isIconUnchanged = string.Equals(resolvedIconSource, pendingInstance.IconSource, StringComparison.Ordinal);
         if (isNameUnchanged && isIconUnchanged)
         {
             statusService.Report(Strings.Status_InstanceRenameUnchanged);
@@ -187,8 +192,9 @@ public sealed partial class GameSettingsEditDialogViewModel : ObservableObject
             EditInstanceMessage = Strings.Status_RenamingInstance;
 
             InstanceRenameStarting?.Invoke();
+            PreviousInstanceDirectory = pendingInstance.InstanceDirectory;
             var updatedInstance = await instanceService.RenameInstanceAsync(
-                pendingEdit.Instance.Id,
+                pendingInstance,
                 newName,
                 resolvedIconSource);
 

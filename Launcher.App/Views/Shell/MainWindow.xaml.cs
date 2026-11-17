@@ -82,6 +82,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         StateChanged += MainWindow_StateChanged;
+        Activated += (_, _) => stateSyncService.RequestSync();
         UpdateWindowChromeCornerRadius();
         this.viewModel = viewModel;
         this.accountDialogService = accountDialogService;

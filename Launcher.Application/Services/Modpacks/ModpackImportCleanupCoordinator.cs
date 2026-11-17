@@ -61,15 +61,15 @@ internal sealed class ModpackImportCleanupCoordinator
             try
             {
                 // 清理由失败或取消触发，不能继续使用已经取消的调用方令牌。
-                await instanceService.DeleteInstanceAsync(session.ImportedInstance.Id, CancellationToken.None)
+                await instanceService.DeleteInstanceAsync(session.ImportedInstance, CancellationToken.None)
                     .ConfigureAwait(false);
             }
             catch (Exception exception)
             {
                 logger.LogWarning(
                     exception,
-                    "Failed to delete partially imported instance. InstanceId={InstanceId}",
-                    session.ImportedInstance.Id);
+                    "Failed to delete partially imported instance. InstanceDirectory={InstanceDirectory}",
+                    session.ImportedInstance.InstanceDirectory);
             }
         }
 

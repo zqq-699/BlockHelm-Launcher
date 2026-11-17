@@ -129,7 +129,7 @@ internal static class LoaderArtifactManifestStore
         }
 
         if (artifacts.Count == 0)
-            throw new InvalidDataException("Loader installer did not declare any client artifacts.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader installer did not declare any client artifacts."), "DownloadValidation", ("Reason", "Loader installer did not declare any client artifacts."));
 
         var installerSha256 = await ComputeHashAsync(installerJarPath, HashAlgorithmName.SHA256, cancellationToken)
             .ConfigureAwait(false);
@@ -272,19 +272,19 @@ internal static class LoaderArtifactManifestStore
     {
         ValidateIdentity(identity);
         if (manifest is null)
-            throw new InvalidDataException("Loader artifact manifest is empty.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader artifact manifest is empty."), "DownloadValidation", ("Reason", "Loader artifact manifest is empty."));
         if (manifest.SchemaVersion != CurrentSchemaVersion)
-            throw new InvalidDataException("Loader artifact manifest schema is unsupported.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader artifact manifest schema is unsupported."), "DownloadValidation", ("Reason", "Loader artifact manifest schema is unsupported."));
         if (manifest.LoaderKind != identity.LoaderKind
             || !string.Equals(manifest.MinecraftVersion, identity.MinecraftVersion, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(manifest.LoaderVersion ?? string.Empty, identity.LoaderVersion ?? string.Empty, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException("Loader artifact manifest identity does not match the instance.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader artifact manifest identity does not match the instance."), "DownloadValidation", ("Reason", "Loader artifact manifest identity does not match the instance."));
         }
         if (manifest.InstallerSha256.Length != 64 || !manifest.InstallerSha256.All(Uri.IsHexDigit))
-            throw new InvalidDataException("Loader artifact manifest source fingerprint is invalid.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader artifact manifest source fingerprint is invalid."), "DownloadValidation", ("Reason", "Loader artifact manifest source fingerprint is invalid."));
         if (manifest.Artifacts.Count == 0)
-            throw new InvalidDataException("Loader artifact manifest contains no artifacts.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader artifact manifest contains no artifacts."), "DownloadValidation", ("Reason", "Loader artifact manifest contains no artifacts."));
 
         var paths = new HashSet<string>(
             OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -293,7 +293,7 @@ internal static class LoaderArtifactManifestStore
             var normalized = NormalizeLibraryRelativePath(artifact.RelativePath);
             if (!string.Equals(normalized, artifact.RelativePath, StringComparison.Ordinal)
                 || !paths.Add(normalized))
-                throw new InvalidDataException("Loader artifact manifest contains duplicate or non-normalized paths.");
+                throw SafeExceptionLog.Describe(new InvalidDataException("Loader artifact manifest contains duplicate or non-normalized paths."), "DownloadValidation", ("Reason", "Loader artifact manifest contains duplicate or non-normalized paths."));
             if (!MinecraftFileIntegrity.IsSha1(artifact.Sha1)
                 || artifact.Sha256.Length != 64
                 || !artifact.Sha256.All(Uri.IsHexDigit)
@@ -305,16 +305,16 @@ internal static class LoaderArtifactManifestStore
     private static void ValidateIdentity(GameFileLoaderIdentity identity)
     {
         if (string.IsNullOrWhiteSpace(identity.MinecraftVersion))
-            throw new InvalidDataException("Minecraft version is missing from loader identity.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Minecraft version is missing from loader identity."), "DownloadValidation", ("Reason", "Minecraft version is missing from loader identity."));
         if (identity.LoaderKind is LoaderKind.Forge or LoaderKind.NeoForge
             && string.IsNullOrWhiteSpace(identity.LoaderVersion))
-            throw new InvalidDataException("Loader version is missing from Forge-like loader identity.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader version is missing from Forge-like loader identity."), "DownloadValidation", ("Reason", "Loader version is missing from Forge-like loader identity."));
     }
 
     private static string NormalizeLibraryRelativePath(string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath) || Path.IsPathRooted(relativePath))
-            throw new InvalidDataException("Loader artifact path must be relative.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader artifact path must be relative."), "DownloadValidation", ("Reason", "Loader artifact path must be relative."));
         var normalized = relativePath.Replace('\\', '/').TrimStart('/');
         if (!normalized.StartsWith("libraries/", StringComparison.OrdinalIgnoreCase)
             || normalized.Split('/').Any(segment => segment is "" or "." or ".."))

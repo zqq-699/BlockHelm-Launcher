@@ -288,9 +288,9 @@ public sealed partial class ResourcesProjectListViewModel : ObservableObject, ID
 
         NavigationResetRequested?.Invoke();
         logger?.LogDebug(
-            "Applied resource project filters from instance. Kind={Kind} InstanceId={InstanceId} VersionFilter={VersionFilter} LoaderFilter={LoaderFilter}",
+            "Applied resource project filters from instance. Kind={Kind} InstanceDirectory={InstanceDirectory} VersionFilter={VersionFilter} LoaderFilter={LoaderFilter}",
             options.Kind,
-            instance.Id,
+            instance.InstanceDirectory,
             SelectedVersionOption?.Id,
             SelectedLoaderOption?.Id);
         await RefreshAsync().ConfigureAwait(true);

@@ -8,6 +8,8 @@
 using System.IO;
 using CmlLib.Core;
 
+using Launcher.Application.Services;
+
 namespace Launcher.Infrastructure.Minecraft;
 
 internal sealed class MinecraftInstallPathLayout
@@ -50,21 +52,21 @@ internal sealed class MinecraftInstallPathLayout
     {
         var realVersionsDirectory = Normalize(System.IO.Path.Combine(SharedMinecraftDirectory, "versions"));
         if (!IsSameOrDescendant(Path.Versions, WorkspaceMinecraftDirectory))
-            throw new InvalidOperationException("The private versions directory escaped the install workspace.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("The private versions directory escaped the install workspace."), "DownloadValidation", ("Reason", "The private versions directory escaped the install workspace."));
         if (IsSameOrDescendant(Path.Versions, realVersionsDirectory)
             || IsSameOrDescendant(realVersionsDirectory, Path.Versions))
         {
-            throw new InvalidOperationException("The private and real versions directories overlap.");
+            throw SafeExceptionLog.Describe(new InvalidOperationException("The private and real versions directories overlap."), "DownloadValidation", ("Reason", "The private and real versions directories overlap."));
         }
 
         foreach (var sharedPath in new[] { Path.Library, Path.Assets, Path.Resource, Path.Runtime })
         {
             if (!IsSameOrDescendant(sharedPath, SharedMinecraftDirectory))
-                throw new InvalidOperationException("A shared runtime path escaped the Minecraft directory.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("A shared runtime path escaped the Minecraft directory."), "DownloadValidation", ("Reason", "A shared runtime path escaped the Minecraft directory."));
             if (IsSameOrDescendant(sharedPath, WorkspaceMinecraftDirectory)
                 || IsSameOrDescendant(WorkspaceMinecraftDirectory, sharedPath))
             {
-                throw new InvalidOperationException("A shared runtime path overlaps the install workspace.");
+                throw SafeExceptionLog.Describe(new InvalidOperationException("A shared runtime path overlaps the install workspace."), "DownloadValidation", ("Reason", "A shared runtime path overlaps the install workspace."));
             }
         }
     }

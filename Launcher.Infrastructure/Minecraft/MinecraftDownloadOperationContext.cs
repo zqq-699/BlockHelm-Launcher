@@ -8,6 +8,8 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
 
+using Launcher.Application.Services;
+
 namespace Launcher.Infrastructure.Minecraft;
 
 /// <summary>
@@ -68,7 +70,7 @@ internal sealed class MinecraftDownloadOperationContext : IDisposable
         var normalized = Path.GetFullPath(destinationPath);
         var identity = new AssetIdentity(sha1, size);
         if (assets.TryGetValue(normalized, out var existing) && existing != identity)
-            throw new InvalidDataException("Conflicting asset identities resolved to the same destination path.");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Conflicting asset identities resolved to the same destination path."), "DownloadValidation", ("Reason", "Conflicting asset identities resolved to the same destination path."));
         assets[normalized] = identity;
     }
 

@@ -60,10 +60,10 @@ private async Task<bool> InstallDependenciesAsync(
             PresentFailure(context, message);
             logger?.LogWarning(
                 exception,
-                "Failed to auto-install required resource dependency. ProjectId={ProjectId} DependencyProjectId={DependencyProjectId} InstanceId={InstanceId}",
+                "Failed to auto-install required resource dependency. ProjectId={ProjectId} DependencyProjectId={DependencyProjectId} InstanceDirectory={InstanceDirectory}",
                 context.Project?.Project.ProjectId,
                 exception.DependencyProjectId,
-                instance.Id);
+                instance.InstanceDirectory);
             return false;
         }
     }
@@ -155,10 +155,10 @@ private async Task<bool> InstallDependenciesAsync(
             }
         });
         logger?.LogInformation(
-            "Resource modpack imported as new instance. ProjectId={ProjectId} VersionId={VersionId} InstanceId={InstanceId} HasManualDownloads={HasManualDownloads}",
+            "Resource modpack imported as new instance. ProjectId={ProjectId} VersionId={VersionId} InstanceDirectory={InstanceDirectory} HasManualDownloads={HasManualDownloads}",
             context.Project?.Project.ProjectId,
             context.Item.Version.VersionId,
-            instance.Id,
+            instance.InstanceDirectory,
             result.HasManualDownloads);
     }
 }
