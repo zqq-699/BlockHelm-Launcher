@@ -128,11 +128,12 @@ internal sealed partial class LoaderInstallerArtifactService
             downloadSourcePreference, downloadSpeedLimitMbPerSecond, cancellationToken, operationContext, speedMeter).ConfigureAwait(false);
     }
 
-    public async Task ValidatePublishedArtifactsAsync(
+    public async Task<IReadOnlyDictionary<string, ProcessorOutputInspection>> ValidatePublishedArtifactsAsync(
         string minecraftDirectory,
         ForgeInstallerPlan plan,
         CancellationToken cancellationToken,
-        MinecraftDownloadOperationContext? operationContext = null)
+        MinecraftDownloadOperationContext? operationContext = null,
+        IReadOnlyDictionary<string, ProcessorOutputInspection>? previouslyInspectedOutputs = null)
     {
         var fullHashVerificationCount = 0;
         var currentOperationVerificationReuseCount = 0;
@@ -152,19 +153,37 @@ internal sealed partial class LoaderInstallerArtifactService
                 fullHashVerificationCount++;
         }
 
-        foreach (var output in plan.ProcessorOutputs)
+        var libraryPaths = plan.AllLibraries.Select(library => library.Artifact.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var inspectedOutputs = new Dictionary<string, ProcessorOutputInspection>(StringComparer.OrdinalIgnoreCase);
+        foreach (var output in plan.ProcessorOutputs.Where(output => !libraryPaths.Contains(output.RelativePath)))
         {
             var path = ResolveLibraryPath(minecraftDirectory, output.RelativePath);
-            await EnsureValidAsync(path, output.TrustedSha1, expectedSize: null, "Forge processor output", cancellationToken)
-                .ConfigureAwait(false);
+            if (previouslyInspectedOutputs is not null)
+            {
+                var previous = previouslyInspectedOutputs[output.RelativePath];
+                await EnsureValidAsync(path, expectedSha1: null, previous.Size, "Forge processor output",
+                    cancellationToken, MinecraftFileVerification.SizeOnly).ConfigureAwait(false);
+                inspectedOutputs.Add(output.RelativePath, previous);
+                continue;
+            }
+            var inspection = await ProcessorOutputInspector.InspectAsync(path, output, cancellationToken).ConfigureAwait(false);
+            inspectedOutputs.Add(output.RelativePath, inspection);
             if (MinecraftFileIntegrity.IsSha1(output.TrustedSha1))
+            {
                 fullHashVerificationCount++;
+                if (inspection.VerificationLevel == GameFileVerificationLevel.SizeVerified)
+                    logger.LogWarning(
+                        "Generated loader output accepted after structural validation despite a declared hash mismatch. Artifact={Artifact} ExpectedHash={ExpectedHash} ActualHash={ActualHash} ActualSize={ActualSize} VerificationLevel={VerificationLevel} Stage={Stage}",
+                        output.RelativePath, output.TrustedSha1, inspection.Sha1, inspection.Size, inspection.VerificationLevel, "ArtifactValidation");
+            }
         }
 
         logger.LogDebug(
             "Loader installer artifact validation completed. FullHashVerificationCount={FullHashVerificationCount} CurrentOperationVerificationReuseCount={CurrentOperationVerificationReuseCount}",
             fullHashVerificationCount,
             currentOperationVerificationReuseCount);
+        return inspectedOutputs;
     }
 
     public static IReadOnlyDictionary<string, VerifiedSharedFileExpectation> CreateTrustedSharedLibraryExpectations(
@@ -191,13 +210,13 @@ internal sealed partial class LoaderInstallerArtifactService
     }
 
     public static IReadOnlyDictionary<string, string?> CreateReplaceableProcessorOutputExpectations(
-        ForgeInstallerPlan plan)
+        IReadOnlyDictionary<string, ProcessorOutputInspection> inspectedOutputs)
     {
         var expectations = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var output in plan.ProcessorOutputs
+        foreach (var output in inspectedOutputs.Values
                      .OrderBy(output => output.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
-            expectations[$"libraries/{output.RelativePath.Replace('\\', '/')}"] = output.TrustedSha1;
+            expectations[$"libraries/{output.RelativePath.Replace('\\', '/')}"] = output.Sha1;
         }
 
         return expectations;

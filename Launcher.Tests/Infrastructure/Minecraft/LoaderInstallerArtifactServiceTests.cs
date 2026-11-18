@@ -14,6 +14,7 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.Minecraft;
 using Launcher.Tests.Helpers;
+using Microsoft.Extensions.Logging;
 
 namespace Launcher.Tests.Infrastructure.Minecraft;
 
@@ -69,8 +70,9 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
             "libraries",
             output.RelativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        await File.WriteAllTextAsync(outputPath, "generated");
+        await File.WriteAllBytesAsync(outputPath, CreateJar("generated"));
         var identity = new GameFileLoaderIdentity(LoaderKind.Forge, "9.9.9", "77.0.1");
+        var inspections = await service.ValidatePublishedArtifactsAsync(minecraftDirectory, plan, CancellationToken.None);
 
         await LoaderArtifactManifestStore.WriteAsync(
             versionDirectory,
@@ -78,6 +80,7 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
             identity,
             installerPath,
             plan,
+            inspections,
             CancellationToken.None);
 
         var result = await LoaderArtifactManifestStore.ReadAsync(
@@ -156,10 +159,10 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
             "libraries",
             output.RelativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        const string finalContent = "profile-injected-patched-output";
-        await File.WriteAllTextAsync(outputPath, finalContent);
+        var finalContent = CreateJar("profile-injected-patched-output");
+        await File.WriteAllBytesAsync(outputPath, finalContent);
 
-        await service.ValidatePublishedArtifactsAsync(
+        var inspections = await service.ValidatePublishedArtifactsAsync(
             minecraftDirectory,
             plan,
             CancellationToken.None);
@@ -170,6 +173,7 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
             identity,
             installerPath,
             plan,
+            inspections,
             CancellationToken.None);
 
         var result = await LoaderArtifactManifestStore.ReadAsync(
@@ -180,42 +184,61 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
         Assert.Equal($"libraries/{output.RelativePath}", artifact.RelativePath);
         Assert.Equal(Sha1(finalContent), artifact.Sha1, ignoreCase: true);
         Assert.Equal(64, artifact.Sha256.Length);
-        Assert.Equal(Encoding.UTF8.GetByteCount(finalContent), artifact.Size);
+        Assert.Equal(finalContent.Length, artifact.Size);
         Assert.Equal(GameFileVerificationLevel.SizeVerified, artifact.VerificationLevel);
     }
 
-    [Fact]
-    public async Task NonPatchedProcessorOutputRetainsDeclaredHashValidation()
+    [Theory]
+    [InlineData(LoaderKind.Forge, true)]
+    [InlineData(LoaderKind.Forge, false)]
+    [InlineData(LoaderKind.NeoForge, false)]
+    public async Task GeneratedOutputUsesDeclaredOrStructuralVerificationThroughPublication(
+        LoaderKind loaderKind, bool matchesDeclaredHash)
     {
-        var installerPath = await WriteHashedSrgOutputInstallerAsync();
+        var expected = CreateJar("expected-srg");
+        var actual = matchesDeclaredHash ? expected : CreateJar("different-srg");
+        var installerPath = await WriteHashedSrgOutputInstallerAsync(expected);
         var minecraftDirectory = Path.Combine(TempRoot, "hashed-srg");
-        var service = new LoaderInstallerArtifactService(new HttpClient(new TestHandler("external")));
+        var logger = new OutputLogger();
+        var service = new LoaderInstallerArtifactService(new HttpClient(new TestHandler("external")), logger: logger);
         var plan = await service.ReadPlanAsync(installerPath, CancellationToken.None);
         var output = Assert.Single(plan.ProcessorOutputs);
-        Assert.Equal(Sha1("expected-srg"), output.TrustedSha1, ignoreCase: true);
+        Assert.Equal(Sha1(expected), output.TrustedSha1, ignoreCase: true);
         var outputPath = Path.Combine(
             minecraftDirectory,
             "libraries",
             output.RelativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        await File.WriteAllTextAsync(outputPath, "different-srg");
-
-        await Assert.ThrowsAsync<InvalidDataException>(() =>
-            service.ValidatePublishedArtifactsAsync(
-                minecraftDirectory,
-                plan,
-                CancellationToken.None));
-
-        await File.WriteAllTextAsync(outputPath, "expected-srg");
-        var versionDirectory = Path.Combine(minecraftDirectory, "versions", "Forge Test");
+        await File.WriteAllBytesAsync(outputPath, actual);
+        var inspections = await service.ValidatePublishedArtifactsAsync(minecraftDirectory, plan, CancellationToken.None);
+        Assert.Equal(!matchesDeclaredHash, logger.Warnings.Any());
+        if (!matchesDeclaredHash)
+        {
+            var warning = Assert.Single(logger.Warnings);
+            Assert.Contains(output.RelativePath, warning);
+            Assert.Contains(Sha1(actual), warning, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(Sha1(expected), warning, StringComparison.OrdinalIgnoreCase);
+        }
+        var sharedDirectory = Path.Combine(TempRoot, "shared");
+        var sharedOutput = Path.Combine(sharedDirectory, "libraries", output.RelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(sharedOutput)!);
+        await File.WriteAllBytesAsync(sharedOutput, CreateJar("old-output"));
+        await new LoaderInstallerPrerequisiteSeeder().PublishDeltaAsync(
+            new LoaderInstallerWorkspaceSnapshot(minecraftDirectory, new Dictionary<string, string>()),
+            sharedDirectory, CancellationToken.None,
+            replaceableFileExpectations: LoaderInstallerArtifactService.CreateReplaceableProcessorOutputExpectations(inspections));
+        Assert.Equal(actual, await File.ReadAllBytesAsync(sharedOutput));
+        var published = await service.ValidatePublishedArtifactsAsync(sharedDirectory, plan, CancellationToken.None);
+        var versionDirectory = Path.Combine(sharedDirectory, "versions", "Forge Test");
         Directory.CreateDirectory(versionDirectory);
-        var identity = new GameFileLoaderIdentity(LoaderKind.Forge, "1.17.1", "37.1.1");
+        var identity = new GameFileLoaderIdentity(loaderKind, "1.17.1", "37.1.1");
         await LoaderArtifactManifestStore.WriteAsync(
             versionDirectory,
-            minecraftDirectory,
+            sharedDirectory,
             identity,
             installerPath,
             plan,
+            published,
             CancellationToken.None);
 
         var result = await LoaderArtifactManifestStore.ReadAsync(
@@ -223,8 +246,182 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
             identity,
             CancellationToken.None);
         Assert.Equal(
-            GameFileVerificationLevel.HashVerified,
+            matchesDeclaredHash ? GameFileVerificationLevel.HashVerified : GameFileVerificationLevel.SizeVerified,
             Assert.Single(result.Manifest!.Artifacts).VerificationLevel);
+        Assert.Equal(Sha1(actual), Assert.Single(result.Manifest.Artifacts).Sha1, ignoreCase: true);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(actual)), Assert.Single(result.Manifest.Artifacts).Sha256, ignoreCase: true);
+    }
+
+    [Theory]
+    [InlineData("missing", true)]
+    [InlineData("empty", true)]
+    [InlineData("text", true)]
+    [InlineData("truncated", true)]
+    [InlineData("crc", true)]
+    [InlineData("empty-archive", true)]
+    [InlineData("crc", false)]
+    public async Task InvalidGeneratedArchivesAreRejectedWithoutMatchingDeclaredHash(string failure, bool hasDeclaredHash)
+    {
+        var bytes = CreateJar("generated");
+        if (failure == "empty") bytes = [];
+        if (failure == "text") bytes = "not a jar"u8.ToArray();
+        if (failure == "truncated") bytes = bytes[..^12];
+        if (failure == "crc") bytes[30 + "content.txt".Length] ^= 1;
+        if (failure == "empty-archive")
+        {
+            using var empty = new MemoryStream();
+            using (new ZipArchive(empty, ZipArchiveMode.Create, leaveOpen: true)) { }
+            bytes = empty.ToArray();
+        }
+        var output = new ForgeProcessorOutput("com/example/output.jar", hasDeclaredHash ? Sha1("declared bytes") : null);
+        var path = Path.Combine(TempRoot, "libraries", output.RelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (failure != "missing") await File.WriteAllBytesAsync(path, bytes);
+        var service = new LoaderInstallerArtifactService(new HttpClient(new RecordingHandler()));
+        var plan = new ForgeInstallerPlan([], [], [output], new JsonArray());
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.ValidatePublishedArtifactsAsync(TempRoot, plan, CancellationToken.None));
+
+        var diagnostic = SafeExceptionLog.Format(exception);
+        Assert.Contains("DiagnosticCode=ProcessorOutputInvalid", diagnostic);
+        Assert.Contains(output.RelativePath, diagnostic);
+        Assert.Contains(failure == "missing" ? "Missing" : failure == "empty" ? "Empty" : "InvalidArchive", diagnostic);
+    }
+
+    [Fact]
+    public async Task MatchingDeclaredHashDoesNotRequireArchiveParserCompatibility()
+    {
+        var bytes = "opaque installer output"u8.ToArray();
+        var output = new ForgeProcessorOutput("com/example/output.jar", Sha1(bytes));
+        var path = Path.Combine(TempRoot, "libraries", output.RelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, bytes);
+
+        var inspection = await ProcessorOutputInspector.InspectAsync(path, output, CancellationToken.None);
+
+        Assert.Equal(GameFileVerificationLevel.HashVerified, inspection.VerificationLevel);
+        Assert.Equal(Sha1(bytes), inspection.Sha1, ignoreCase: true);
+    }
+
+    [Theory]
+    [InlineData("same-size")]
+    [InlineData("wrong-size")]
+    [InlineData("missing")]
+    public async Task FinalPublicationCheckUsesInspectedSizeWithoutHashingOrOpeningArchive(string change)
+    {
+        var bytes = CreateJar("generated");
+        var output = new ForgeProcessorOutput("com/example/output.jar", null);
+        var path = Path.Combine(TempRoot, "libraries", output.RelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, bytes);
+        var plan = new ForgeInstallerPlan([], [], [output], new JsonArray());
+        var service = new LoaderInstallerArtifactService(new HttpClient(new RecordingHandler()));
+        var inspections = await service.ValidatePublishedArtifactsAsync(TempRoot, plan, CancellationToken.None);
+        if (change == "missing") File.Delete(path);
+        else await File.WriteAllBytesAsync(path, new byte[bytes.Length - (change == "wrong-size" ? 1 : 0)]);
+
+        var validation = service.ValidatePublishedArtifactsAsync(TempRoot, plan, CancellationToken.None,
+            previouslyInspectedOutputs: inspections);
+        if (change == "same-size")
+        {
+            var result = await validation;
+            Assert.Equal(inspections[output.RelativePath], result[output.RelativePath]);
+        }
+        else
+        {
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => validation);
+            Assert.Contains(change == "missing" ? "Missing" : "SizeMismatch", SafeExceptionLog.Format(exception));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RuntimeLibraryHashMismatchRemainsFatalWhenAlsoDeclaredAsOutput(bool overlappingOutput)
+    {
+        const string relativePath = "com/example/library.jar";
+        var expected = CreateJar("expected");
+        var actual = CreateJar("different");
+        var path = Path.Combine(TempRoot, "libraries", relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, actual);
+        var artifact = new ManagedLibraryArtifact("https://example.test/library.jar", relativePath,
+            "com.example:library:1.0", "ThirdParty", Sha1(expected));
+        var plan = new ForgeInstallerPlan([], [new ForgeInstallerLibrary(artifact, null)],
+            overlappingOutput ? [new ForgeProcessorOutput(relativePath, Sha1(actual))] : [], new JsonArray());
+        var service = new LoaderInstallerArtifactService(new HttpClient(new RecordingHandler()));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.ValidatePublishedArtifactsAsync(TempRoot, plan, CancellationToken.None));
+        Assert.Equal(actual, await File.ReadAllBytesAsync(path));
+    }
+
+    [Fact]
+    public async Task DownloadedLibraryDeclarationWinsOverConflictingProcessorHash()
+    {
+        const string relativePath = "com/example/library.jar";
+        var actual = CreateJar("downloaded");
+        var path = Path.Combine(TempRoot, "libraries", relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, actual);
+        var installerPath = Path.Combine(TempRoot, "installer.jar");
+        await File.WriteAllBytesAsync(installerPath, CreateJar("installer"));
+        var artifact = new ManagedLibraryArtifact("https://example.test/library.jar", relativePath,
+            "com.example:library:1.0", "ThirdParty", Sha1(actual), actual.Length);
+        var plan = new ForgeInstallerPlan([], [new ForgeInstallerLibrary(artifact, null)],
+            [new ForgeProcessorOutput(relativePath, Sha1("other"))], new JsonArray());
+        var service = new LoaderInstallerArtifactService(new HttpClient(new RecordingHandler()));
+        var inspections = await service.ValidatePublishedArtifactsAsync(TempRoot, plan, CancellationToken.None);
+        Assert.Empty(LoaderInstallerArtifactService.CreateReplaceableProcessorOutputExpectations(inspections));
+        var identity = new GameFileLoaderIdentity(LoaderKind.Forge, "1.20.1", "47.4.29");
+        var versionDirectory = Path.Combine(TempRoot, "versions", "test");
+        await LoaderArtifactManifestStore.WriteAsync(versionDirectory, TempRoot, identity, installerPath,
+            plan, inspections, CancellationToken.None);
+        var manifest = await LoaderArtifactManifestStore.ReadAsync(versionDirectory, identity, CancellationToken.None);
+        Assert.Equal(LoaderArtifactKind.RuntimeLibrary, Assert.Single(manifest.Manifest!.Artifacts).Kind);
+        Assert.Equal(GameFileVerificationLevel.HashVerified, Assert.Single(manifest.Manifest.Artifacts).VerificationLevel);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChangedOrCanceledAcceptedOutputDoesNotReplaceSharedFile(bool cancel)
+    {
+        var installerPath = await WriteHashedSrgOutputInstallerAsync(CreateJar("declared"));
+        var workspace = Path.Combine(TempRoot, "workspace");
+        var service = new LoaderInstallerArtifactService(new HttpClient(new RecordingHandler()));
+        var plan = await service.ReadPlanAsync(installerPath, CancellationToken.None);
+        var output = Assert.Single(plan.ProcessorOutputs);
+        var source = Path.Combine(workspace, "libraries", output.RelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        await File.WriteAllBytesAsync(source, CreateJar("accepted"));
+        var inspections = await service.ValidatePublishedArtifactsAsync(workspace, plan, CancellationToken.None);
+        var shared = Path.Combine(TempRoot, "shared");
+        var destination = Path.Combine(shared, "libraries", output.RelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        var original = CreateJar("original");
+        await File.WriteAllBytesAsync(destination, original);
+        using var cancellation = new CancellationTokenSource();
+        if (cancel) cancellation.Cancel();
+        else await File.WriteAllBytesAsync(source, CreateJar("changed!"));
+
+        var publish = new LoaderInstallerPrerequisiteSeeder().PublishDeltaAsync(
+            new LoaderInstallerWorkspaceSnapshot(workspace, new Dictionary<string, string>()), shared, cancellation.Token,
+            replaceableFileExpectations: LoaderInstallerArtifactService.CreateReplaceableProcessorOutputExpectations(inspections));
+        if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => publish);
+        else await Assert.ThrowsAsync<InvalidDataException>(() => publish);
+        Assert.Equal(original, await File.ReadAllBytesAsync(destination));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(destination)!, ".*.tmp"));
+
+        var identity = new GameFileLoaderIdentity(LoaderKind.Forge, "1.20.1", "47.4.29");
+        var versionDirectory = Path.Combine(workspace, "versions", "test");
+        if (!cancel)
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() => LoaderArtifactManifestStore.WriteAsync(
+                versionDirectory, workspace, identity, installerPath, plan, inspections, CancellationToken.None));
+            Assert.False(File.Exists(LoaderArtifactManifestStore.GetPath(versionDirectory)));
+        }
     }
 
     [Fact]
@@ -359,7 +556,7 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
         return installerPath;
     }
 
-    private async Task<string> WriteHashedSrgOutputInstallerAsync()
+    private async Task<string> WriteHashedSrgOutputInstallerAsync(byte[] expectedPayload)
     {
         Directory.CreateDirectory(TempRoot);
         var installerPath = Path.Combine(TempRoot, $"hashed-srg-{Guid.NewGuid():N}.jar");
@@ -372,7 +569,7 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
                   "client": "[net.minecraft:client:1.17.1:srg]"
                 },
                 "MC_SRG_SHA": {
-                  "client": "'{{Sha1("expected-srg")}}'"
+                  "client": "'{{Sha1(expectedPayload)}}'"
                 }
               },
               "processors": [
@@ -422,6 +619,21 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
     private static string Sha1(string value) =>
         Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
+    private static string Sha1(byte[] value) => Convert.ToHexString(SHA1.HashData(value)).ToLowerInvariant();
+
+    private static byte[] CreateJar(string content)
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = archive.CreateEntry("content.txt", CompressionLevel.NoCompression);
+            entry.LastWriteTime = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            using var data = entry.Open();
+            data.Write(Encoding.UTF8.GetBytes(content));
+        }
+        return stream.ToArray();
+    }
+
     private sealed class TestHandler(string content) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -445,6 +657,18 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
             {
                 RequestMessage = request
             });
+        }
+    }
+
+    private sealed class OutputLogger : ILogger
+    {
+        public List<string> Warnings { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (level == LogLevel.Warning) Warnings.Add(formatter(state, exception));
         }
     }
 }

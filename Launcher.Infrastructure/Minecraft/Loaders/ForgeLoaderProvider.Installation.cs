@@ -194,7 +194,7 @@ private async Task<string> InstallCoreAsync(
                 speedMeter)).ConfigureAwait(false);
 
             var sandboxValidationStopwatch = Stopwatch.StartNew();
-            await DownloadDiagnostics.RunStageAsync(logger, "ArtifactValidation", () => installerArtifactService.ValidatePublishedArtifactsAsync(
+            var sandboxOutputs = await DownloadDiagnostics.RunStageAsync(logger, "ArtifactValidation", () => installerArtifactService.ValidatePublishedArtifactsAsync(
                 installerMinecraftDirectory,
                 installerPlan,
                 cancellationToken)).ConfigureAwait(false);
@@ -242,7 +242,7 @@ private async Task<string> InstallCoreAsync(
                 cancellationToken,
                 LoaderInstallerArtifactService.CreateTrustedSharedLibraryExpectations(installerPlan),
                 downloadOperation,
-                LoaderInstallerArtifactService.CreateReplaceableProcessorOutputExpectations(installerPlan))).ConfigureAwait(false);
+                LoaderInstallerArtifactService.CreateReplaceableProcessorOutputExpectations(sandboxOutputs))).ConfigureAwait(false);
         logger.LogDebug(
                 "Forge Java sandbox shared output publication completed. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion} DurationMs={DurationMs}",
                 minecraftVersion,
@@ -280,7 +280,7 @@ private async Task<string> InstallCoreAsync(
                 cancellationToken,
                 downloadOperation,
                 speedMeter)).ConfigureAwait(false);
-            await DownloadDiagnostics.RunStageAsync(logger, "ArtifactValidation", () => installerArtifactService.ValidatePublishedArtifactsAsync(
+            var publishedOutputs = await DownloadDiagnostics.RunStageAsync(logger, "ArtifactValidation", () => installerArtifactService.ValidatePublishedArtifactsAsync(
                 sharedMinecraftDirectory,
                 installerPlan,
                 cancellationToken,
@@ -291,6 +291,7 @@ private async Task<string> InstallCoreAsync(
                 new GameFileLoaderIdentity(LoaderKind.Forge, minecraftVersion, selectedLoaderVersion),
                 installerJarPath,
                 installerPlan,
+                publishedOutputs,
                 cancellationToken).ConfigureAwait(false);
         logger.LogInformation(
                 "Forge final version content installation completed. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion} VersionName={VersionName} DurationMs={DurationMs}",
@@ -317,7 +318,8 @@ private async Task<string> InstallCoreAsync(
                 sharedMinecraftDirectory,
                 installerPlan,
                 cancellationToken,
-                downloadOperation)).ConfigureAwait(false);
+                downloadOperation,
+                previouslyInspectedOutputs: publishedOutputs)).ConfigureAwait(false);
         logger.LogInformation(
                 "Forge published artifact validation completed. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion} DurationMs={DurationMs}",
                 minecraftVersion,

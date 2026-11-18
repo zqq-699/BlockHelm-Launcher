@@ -87,6 +87,7 @@ internal static class LoaderArtifactManifestStore
         GameFileLoaderIdentity identity,
         string installerJarPath,
         ForgeInstallerPlan plan,
+        IReadOnlyDictionary<string, ProcessorOutputInspection> inspectedOutputs,
         CancellationToken cancellationToken)
     {
         ValidateIdentity(identity);
@@ -116,15 +117,23 @@ internal static class LoaderArtifactManifestStore
         foreach (var output in plan.ProcessorOutputs)
         {
             var relativePath = NormalizeLibraryRelativePath($"libraries/{output.RelativePath}");
+            // A downloaded/embedded library declaration takes precedence over
+            // generated-output compatibility for the same destination.
+            if (artifacts.ContainsKey(relativePath))
+                continue;
+            if (!inspectedOutputs.TryGetValue(output.RelativePath, out var inspection))
+                throw SafeExceptionLog.Describe(new InvalidDataException("Loader output has not been validated."),
+                    "ProcessorOutputInspectionMissing", ("Artifact", relativePath));
             var fullPath = ResolveManagedPath(minecraftDirectory, relativePath);
             var entry = await CreateEntryAsync(
                 relativePath,
                 LoaderArtifactKind.ProcessorOutput,
                 source: null,
-                output.TrustedSha1,
-                expectedSize: null,
+                inspection.Sha1,
+                inspection.Size,
                 fullPath,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                inspection.VerificationLevel).ConfigureAwait(false);
             AddOrMerge(artifacts, entry);
         }
 
@@ -217,20 +226,29 @@ internal static class LoaderArtifactManifestStore
         string? authoritativeSha1,
         long? expectedSize,
         string fullPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        GameFileVerificationLevel? verificationLevel = null)
     {
         if (!File.Exists(fullPath))
-            throw new InvalidDataException($"Loader installer artifact is missing after installation: {relativePath}");
-        var file = new FileInfo(fullPath);
-        if (expectedSize is not null && file.Length != expectedSize.Value)
-            throw new InvalidDataException($"Loader installer artifact size does not match: {relativePath}");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader installer artifact is missing after installation."),
+                "LoaderArtifactInvalid", ("Artifact", relativePath), ("IntegrityStatus", "Missing"));
+        await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            128 * 1024, FileOptions.Asynchronous);
+        var size = stream.Length;
+        if (expectedSize is not null && size != expectedSize.Value)
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader installer artifact size does not match."),
+                "LoaderArtifactInvalid", ("Artifact", relativePath), ("IntegrityStatus", "SizeMismatch"),
+                ("ExpectedSize", expectedSize), ("ActualSize", size));
 
-        var actualSha1 = await ComputeHashAsync(fullPath, HashAlgorithmName.SHA1, cancellationToken).ConfigureAwait(false);
-        var actualSha256 = await ComputeHashAsync(fullPath, HashAlgorithmName.SHA256, cancellationToken).ConfigureAwait(false);
+        var actualSha1 = Convert.ToHexString(await SHA1.HashDataAsync(stream, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
+        stream.Position = 0;
+        var actualSha256 = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
         if (MinecraftFileIntegrity.IsSha1(authoritativeSha1)
             && !string.Equals(actualSha1, authoritativeSha1, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"Loader installer artifact hash does not match: {relativePath}");
+            throw SafeExceptionLog.Describe(new InvalidDataException("Loader installer artifact hash does not match."),
+                "LoaderArtifactInvalid", ("Artifact", relativePath), ("IntegrityStatus", "HashMismatch"),
+                ("ExpectedHash", authoritativeSha1), ("ActualHash", actualSha1));
         }
 
         return new LoaderArtifactManifestEntry(
@@ -239,8 +257,8 @@ internal static class LoaderArtifactManifestStore
             string.IsNullOrWhiteSpace(source) ? null : source,
             actualSha1,
             actualSha256,
-            file.Length,
-            LoaderArtifactVerificationPolicy.ResolveManifestLevel(kind, authoritativeSha1));
+            size,
+            verificationLevel ?? LoaderArtifactVerificationPolicy.ResolveManifestLevel(kind, authoritativeSha1));
     }
 
     private static void AddOrMerge(

@@ -229,7 +229,8 @@ public sealed class ServerDeploymentTests : TestTempDirectory
             "1.0",
             "server-output-1.0.jar");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
-        File.WriteAllText(output, "generated");
+        using var outputArchive = ZipFile.Open(output, ZipArchiveMode.Create);
+        AddEntry(outputArchive, "generated.txt", "generated");
     }
 
     private static void WriteTestJar(string path)
