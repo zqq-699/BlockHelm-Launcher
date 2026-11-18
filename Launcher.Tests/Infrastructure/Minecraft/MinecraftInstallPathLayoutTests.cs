@@ -295,7 +295,7 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             officialJson);
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await seeder.SeedAsync(
+        var snapshot = await seeder.SeedAsync(
             shared,
             workspace,
             minecraftVersion,
@@ -304,6 +304,7 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None);
 
+        Assert.Equal(minecraftVersion, snapshot.VerifiedVersionMetadata!["id"]!.GetValue<string>());
         Assert.False(Directory.Exists(Path.Combine(shared, "versions", minecraftVersion)));
         Assert.Equal(
             minecraftVersion,

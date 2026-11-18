@@ -145,6 +145,11 @@ private async Task<string> InstallCoreAsync(
                 downloadSpeedLimitMbPerSecond,
                 cancellationToken,
                 loaderCategory: "Forge")).ConfigureAwait(false);
+            var preparedInstaller = await DownloadDiagnostics.RunStageAsync(logger, "MappingsPreparation", () => installerArtifactService.PrepareClientInstallerAsync(
+                installerJarPath, installerPlan, minecraftVersion, installerMinecraftDirectory,
+                workspaceSnapshot.VerifiedVersionMetadata, downloadSourcePreference, downloadSpeedLimitMbPerSecond,
+                cancellationToken, downloadOperation, speedMeter)).ConfigureAwait(false);
+            installerPlan = preparedInstaller.Plan;
             await DownloadDiagnostics.RunStageAsync(logger, "InstallerDependencies", () => installerArtifactService.MaterializePrerequisitesAsync(
                 installerJarPath,
                 installerPlan,
@@ -168,6 +173,7 @@ private async Task<string> InstallCoreAsync(
                 selectedLoaderVersion);
             await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => RunForgeInstallerAsync(
                 installerJarPath,
+                preparedInstaller.ExecutionInstallerPath,
                 installerMinecraftDirectory,
                 sharedMinecraftDirectory,
                 minecraftVersion,
@@ -381,6 +387,7 @@ private async Task<string> InstallCoreAsync(
 
     private async Task RunForgeInstallerAsync(
         string installerJarPath,
+        string executionInstallerPath,
         string installerMinecraftDirectory,
         string sharedMinecraftDirectory,
         string minecraftVersion,
@@ -413,7 +420,7 @@ private async Task<string> InstallCoreAsync(
         {
             await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => installerRunner.RunInstallerAsync(
                 javaRuntime.ExecutablePath,
-                installerJarPath,
+                executionInstallerPath,
                 installerMinecraftDirectory,
                 cancellationToken));
         }

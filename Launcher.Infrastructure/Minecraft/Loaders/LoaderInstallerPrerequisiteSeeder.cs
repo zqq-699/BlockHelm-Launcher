@@ -51,7 +51,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         string loaderCategory = "Loader")
     {
         var seededFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        await SeedBaseVersionAsync(
+        var versionMetadata = await SeedBaseVersionAsync(
             sharedMinecraftDirectory,
             installerMinecraftDirectory,
             minecraftVersion,
@@ -66,7 +66,10 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
             installerJarPath,
             seededFiles,
             cancellationToken).ConfigureAwait(false);
-        return new LoaderInstallerWorkspaceSnapshot(installerMinecraftDirectory, seededFiles);
+        return new LoaderInstallerWorkspaceSnapshot(installerMinecraftDirectory, seededFiles)
+        {
+            VerifiedVersionMetadata = versionMetadata
+        };
     }
 
     public async Task PublishDeltaAsync(
@@ -477,7 +480,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         }
     }
 
-    private async Task SeedBaseVersionAsync(
+    private async Task<JsonObject> SeedBaseVersionAsync(
         string sourceGameDirectory,
         string destinationGameDirectory,
         string minecraftVersion,
@@ -495,6 +498,8 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
             "Loader installer official base metadata preparation started. LoaderCategory={LoaderCategory} MinecraftVersion={MinecraftVersion}",
             loaderCategory,
             minecraftVersion);
+        // Prepare only the base metadata/client here; final content resolves the
+        // remaining vanilla library graph against the shared directory.
         try
         {
             var root = await VanillaVersionMetadataClient.DownloadVerifiedVersionJsonAsync(
@@ -543,6 +548,7 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                 "Loader installer official base metadata preparation completed. LoaderCategory={LoaderCategory} MinecraftVersion={MinecraftVersion}",
                 loaderCategory,
                 minecraftVersion);
+            return root;
         }
         catch (OperationCanceledException)
         {
@@ -561,11 +567,6 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                 minecraftVersion);
             throw;
         }
-
-        // The Java installer only needs the base metadata/client plus the
-        // installer-declared prerequisites below. Do not mirror the complete
-        // vanilla library graph into its private sandbox: final content is
-        // resolved directly against the shared Minecraft directory.
     }
 
     private async Task SeedInstallerLibrariesAsync(
@@ -786,6 +787,9 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
 
 internal sealed record LoaderInstallerWorkspaceSnapshot(
     string WorkspaceMinecraftDirectory,
-    IReadOnlyDictionary<string, string> SeededFiles);
+    IReadOnlyDictionary<string, string> SeededFiles)
+{
+    public JsonObject? VerifiedVersionMetadata { get; init; }
+}
 
 internal sealed record VerifiedSharedFileExpectation(string Sha1, long? Size);

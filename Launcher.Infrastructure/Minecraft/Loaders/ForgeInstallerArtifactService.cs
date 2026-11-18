@@ -272,10 +272,20 @@ internal sealed partial class LoaderInstallerArtifactService
                 var verification = verifiedLease is not null
                     ? MinecraftFileVerification.SizeOnly
                     : MinecraftFileVerification.Full;
-                var status = await MinecraftFileIntegrity.EvaluateAsync(destinationPath, library.Artifact.Sha1, library.Artifact.Size,
-                    verification, cancellationToken).ConfigureAwait(false);
-                if (status == MinecraftFileIntegrityStatus.Valid)
-                    continue;
+                // Hold the file stable between full validation and recording its snapshot.
+                // Release this guard before attempting a replacement of an invalid file.
+                using (var validationLease = verifiedLease is null && operationContext is not null
+                           ? WindowsFileSnapshot.TryAcquire(destinationPath) : null)
+                {
+                    var status = await MinecraftFileIntegrity.EvaluateAsync(destinationPath, library.Artifact.Sha1, library.Artifact.Size,
+                        verification, cancellationToken).ConfigureAwait(false);
+                    if (status == MinecraftFileIntegrityStatus.Valid)
+                    {
+                        if (validationLease is not null)
+                            MarkVerified(destinationPath, library.Artifact, operationContext);
+                        continue;
+                    }
+                }
 
                 if (archiveEntries.TryGetValue(library.Artifact.RelativePath, out var entry))
                 {
