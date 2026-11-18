@@ -146,8 +146,7 @@ public sealed class MinecraftDownloadRetryTests
         Assert.Equal(LogLevel.Error, summary.Level);
         Assert.Contains("NeoForgeOfficial: ResponseHeadersTimeout x2", summary.Message, StringComparison.Ordinal);
         Assert.Contains("BmclApiNeoForge: HttpStatus (HTTP 404) x1", summary.Message, StringComparison.Ordinal);
-        Assert.Contains("https://maven.neoforged.net/<redacted-path>", summary.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(checksumUrl, summary.Message, StringComparison.Ordinal);
+        Assert.Contains(checksumUrl, summary.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Debug);
     }
 

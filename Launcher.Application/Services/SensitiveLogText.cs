@@ -30,7 +30,9 @@ public static class SensitiveLogText
     private static readonly Regex PendingAuthorization = Create(@"(?i)(?<![\w-])(?:proxy-)?authorization[""']?\s*[:=]\s*[""']?(?:(?:bearer|basic|digest|ntlm|negotiate)\s*)?\z");
     private static readonly Regex ContinuedAuthorization = Create($@"\A\s*(?<value>{QuotedValue}|[^\r\n]+)");
     private static readonly Regex Bearer = Create(@"(?i)\b((?:proxy-)?authorization[""']?\s*[:=]\s*[""']?(?:bearer|basic)\s+|\bbearer\s+)([^\s""',;}]+)");
-    private static readonly Regex Url = Create(@"(?i)\b[a-z][a-z0-9+.-]*://[^\s<>""']+");
+    // Consume our own placeholders too, so another pass cannot append a second
+    // path marker or mistake a redacted query value for the end of the URL.
+    private static readonly Regex Url = Create(@"(?i)\b[a-z][a-z0-9+.-]*://(?:<redacted(?:-path)?>|[^\s<>""'])+");
 
     public static string Redact(string text, IReadOnlyList<string>? sensitiveValues = null)
     {
@@ -91,13 +93,7 @@ public static class SensitiveLogText
         }
     }
 
-    private static string RedactUrl(string value)
-    {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
-            return "<redacted-url>";
-
-        return $"{uri.Scheme}://{uri.Host}{(uri.IsDefaultPort ? string.Empty : $":{uri.Port}")}/<redacted-path>";
-    }
+    private static string RedactUrl(string value) => LogUriSanitizer.Sanitize(value);
 
     private static Regex Create(string pattern) => new(pattern, RegexOptions.Compiled | RegexOptions.CultureInvariant, Timeout);
 
