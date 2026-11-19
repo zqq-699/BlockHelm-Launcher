@@ -104,7 +104,7 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
         using var client = CreateClient(handler);
         var destination = Path.Combine(TempRoot, "client.jar");
 
-        await CreateExecutor(client).DownloadFileAsync(
+        var result = await CreateExecutor(client).DownloadFileAsync(
             DownloadUrl,
             DownloadSourcePreference.Official,
             "ThirdParty",
@@ -114,9 +114,31 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
                 [(HashAlgorithmName.SHA512, Sha512(LargePayload))]),
             CancellationToken.None);
 
+        Assert.True(result.NetworkAttempts > 1);
+        Assert.Equal(0, result.RetryCount);
         Assert.Contains(handler.RangeHeaders, range => range is not null);
         Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
         AssertNoPendingFiles(destination);
+    }
+
+    [Fact]
+    public async Task AFailedSegmentRetryIsCountedSeparatelyFromOtherRequests()
+    {
+        var failures = 0;
+        var handler = new RecordingRequestHandler((_, request, _) =>
+        {
+            if (request.Headers.Range!.Ranges.Single().From != 0 && Interlocked.CompareExchange(ref failures, 1, 0) == 0)
+                throw new HttpRequestException("simulated temporary failure");
+            return Task.FromResult(CreatePartialResponse(request, LargePayload));
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "segment-retry.jar");
+        var result = await CreateExecutor(client, maxAttempts: 2).DownloadFileAsync(DownloadUrl,
+            DownloadSourcePreference.Official, "ThirdParty", destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None);
+        Assert.Equal(1, failures);
+        Assert.Equal(1, result.RetryCount);
+        Assert.True(result.NetworkAttempts > result.RetryCount);
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
     }
 
     [Fact]

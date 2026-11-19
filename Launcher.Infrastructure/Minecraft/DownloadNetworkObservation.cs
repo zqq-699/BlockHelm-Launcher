@@ -22,17 +22,20 @@ internal sealed class DownloadNetworkObservation : IDisposable
     private static readonly AsyncLocal<DownloadNetworkObservation?> CurrentSlot = new();
     private readonly DownloadNetworkObservation? previous;
     private int sends;
+    private int retries;
     private readonly ConcurrentDictionary<string, byte> candidates = new(StringComparer.Ordinal);
     public int CandidateCount => candidates.Count;
     public static void SelectCandidate(string url) => CurrentSlot.Value?.candidates.TryAdd(url, 0);
     public static DownloadNetworkObservation? Current => CurrentSlot.Value;
     public int Sends => Volatile.Read(ref sends);
+    public int Retries => Volatile.Read(ref retries);
     public DownloadNetworkObservation()
     {
         previous = CurrentSlot.Value;
         CurrentSlot.Value = this;
     }
     public static void Sent() { if (CurrentSlot.Value is { } value) Interlocked.Increment(ref value.sends); }
+    public static void Retried() { if (CurrentSlot.Value is { } value) Interlocked.Increment(ref value.retries); }
     public void Dispose() => CurrentSlot.Value = previous;
 }
 

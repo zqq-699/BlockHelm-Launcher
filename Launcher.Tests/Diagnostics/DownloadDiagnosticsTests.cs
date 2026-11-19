@@ -221,7 +221,47 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-installer.jar",
             DownloadSourcePreference.Official, "Forge", Path.Combine(TempRoot, "artifact.jar"), null, null, CancellationToken.None);
         Assert.Equal(2, resolution.NetworkAttempts);
+        Assert.Equal(0, resolution.RetryCount);
         Assert.True(resolution.FallbackUsed);
+    }
+
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 0)]
+    public async Task TerminalLogSeparatesRetriesFromRedirectRequests(bool redirect, int expectedRetries)
+    {
+        var sends = 0;
+        using (var sink = CreateMainLogger())
+        using (var factory = LoggerFactory.Create(builder => builder.AddSerilog(sink, false)))
+        using (var client = new HttpClient(new Handler(request =>
+        {
+            if (Interlocked.Increment(ref sends) != 1)
+                return new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent("good") };
+            if (!redirect) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { RequestMessage = request };
+            return new HttpResponseMessage(HttpStatusCode.Found)
+            { RequestMessage = request, Headers = { Location = new Uri("https://cdn.example.test/file") } };
+        })))
+        {
+            var logger = factory.CreateLogger("Counts");
+            var path = Path.Combine(TempRoot, "file.bin");
+            const string url = "https://example.test/file";
+            var file = new ForegroundDownloadLogScope(logger, "Test", "file.bin", path, url);
+            using var context = file.RestoreContext();
+            var executor = new MinecraftDownloadRequestExecutor(client, logger,
+                retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 2, RetryDelay = TimeSpan.Zero },
+                nextRetryJitter: () => 0,
+                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+            var result = await executor.DownloadFileAsync(url, DownloadSourcePreference.Official, "ThirdParty", path,
+                null, null, CancellationToken.None, reportTransferredBytes: file.ReportTransferredBytes);
+            file.Complete(result);
+            Assert.Equal(2, result.NetworkAttempts);
+            Assert.Equal(expectedRetries, result.RetryCount);
+            Assert.False(result.FallbackUsed);
+        }
+        var terminal = ReadLogs().Split('\n').Single(line => line.Contains("Foreground file download completed."));
+        Assert.Contains("HttpRequestCount=2", terminal);
+        Assert.Contains($"RetryCount={expectedRetries}", terminal);
+        Assert.Contains("FallbackUsed=false", terminal);
     }
 
     [Fact]
@@ -244,7 +284,8 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             file.Fail(new ModpackImportException(ModpackImportFailureReason.HashMismatch, "wrapped", exception));
         }
         var terminal = ReadLogs().Split('\n').Single(line => line.Contains("Foreground file download failed."));
-        Assert.Contains("Attempts=2", terminal);
+        Assert.Contains("HttpRequestCount=2", terminal);
+        Assert.Contains("RetryCount=0", terminal);
         Assert.Contains("FallbackUsed=true", terminal);
     }
 

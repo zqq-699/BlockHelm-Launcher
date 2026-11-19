@@ -358,7 +358,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                     executionMode: DownloadExecutionMode.FileSourceRounds,
                     fileCandidates: fileCandidates,
                     cancellationToken: cancellationToken).ConfigureAwait(false);
-                return result.Value! with { NetworkAttempts = network.Sends, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
+                return result.Value! with { NetworkAttempts = network.Sends, RetryCount = network.Retries, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
             }
         }
 
@@ -375,7 +375,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 cancellationToken,
                 options), quiet: true).ConfigureAwait(false);
             if (session.IsComplete)
-                return fileCandidates[0] with { NetworkAttempts = 0, FallbackUsed = false };
+                return fileCandidates[0] with { NetworkAttempts = 0, RetryCount = 0, FallbackUsed = false };
 
             fileCandidates = await PrepareCandidatesAsync(fileCandidates, preference, cancellationToken).ConfigureAwait(false);
             var segmented = await TryDownloadSegmentedAsync(
@@ -389,7 +389,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 reportTransferredBytes,
                 cancellationToken).ConfigureAwait(false);
             if (segmented.Resolution is not null)
-                return segmented.Resolution with { NetworkAttempts = network.Sends, FallbackUsed = segmented.Resolution.ActualUrl != fileCandidates[0].ActualUrl };
+                return segmented.Resolution with { NetworkAttempts = network.Sends, RetryCount = network.Retries, FallbackUsed = segmented.Resolution.ActualUrl != fileCandidates[0].ActualUrl };
 
             var sequentialProgress = OffsetAttemptProgress(reportAttemptProgress, segmented.AttemptCount);
 
@@ -417,7 +417,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 executionMode: DownloadExecutionMode.FileSourceRounds,
                 fileCandidates: fileCandidates,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-            return result.Value! with { NetworkAttempts = network.Sends, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
+            return result.Value! with { NetworkAttempts = network.Sends, RetryCount = network.Retries, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
         }
     }
 
@@ -473,7 +473,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 cancellationToken,
                 options), quiet: true).ConfigureAwait(false);
             if (session.IsComplete)
-                return fileCandidates[0] with { NetworkAttempts = 0, FallbackUsed = false };
+                return fileCandidates[0] with { NetworkAttempts = 0, RetryCount = 0, FallbackUsed = false };
 
             fileCandidates = await PrepareCandidatesAsync(fileCandidates, preference, cancellationToken).ConfigureAwait(false);
             var segmented = await TryDownloadSegmentedAsync(
@@ -487,7 +487,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 reportTransferredBytes,
                 cancellationToken).ConfigureAwait(false);
             if (segmented.Resolution is not null)
-                return segmented.Resolution with { NetworkAttempts = network.Sends, FallbackUsed = segmented.Resolution.ActualUrl != fileCandidates[0].ActualUrl };
+                return segmented.Resolution with { NetworkAttempts = network.Sends, RetryCount = network.Retries, FallbackUsed = segmented.Resolution.ActualUrl != fileCandidates[0].ActualUrl };
 
             var sequentialProgress = OffsetAttemptProgress(reportAttemptProgress, segmented.AttemptCount);
 
@@ -515,7 +515,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 executionMode: DownloadExecutionMode.FileSourceRounds,
                 fileCandidates: fileCandidates,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-            return result.Value! with { NetworkAttempts = network.Sends, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
+            return result.Value! with { NetworkAttempts = network.Sends, RetryCount = network.Retries, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
         }
     }
 
@@ -584,6 +584,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             catch (Exception exception)
             {
                 var failure = ClassifyException(exception);
+                CaptureNetworkCounts(failure);
                 failures.Add(failure);
                 session.ResetSegmentedDownload();
                 logger.LogWarning(
@@ -1175,6 +1176,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         {
             cancellationToken.ThrowIfCancellationRequested();
             var range = rangeProvider();
+            if (attempt > 1) DownloadNetworkObservation.Retried();
             try
             {
                 var reservedAdmission = attempt == 1 ? ownedAdmission : null;
@@ -1206,11 +1208,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 if (failure.IsHostThrottled)
                     failure.WithDisposition(DownloadFailureDisposition.SwitchSource);
                 RecordHostResult(resolution, failure);
-                hostHealthTracker.RecordFailure(
-                    resolution.ResolvedSourceKind,
-                    failure.FinalHost ?? GetCandidateHost(resolution),
-                    failure.Reason,
-                    failure.StatusCode);
+                RecordCandidateFailure(resolution, failure);
                 var retry = failure.Disposition is DownloadFailureDisposition.RetryCurrentSource
                     && attempt < retryOptions.MaxAttemptsPerSource;
                 logger.LogWarning(
@@ -1396,7 +1394,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         {
             return resolution;
         }
-        return resolution with { ActualUrl = finalUri.AbsoluteUri };
+        return resolution with { ActualUrl = finalUri.AbsoluteUri, HealthCandidateHost = GetCandidateHost(resolution) };
     }
 
     private static async Task ObserveSegmentTasksAsync(IEnumerable<Task> tasks)
@@ -1512,6 +1510,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             for (var attempt = 1; attempt <= retryOptions.MaxAttemptsPerSource; attempt++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (attempt > 1) DownloadNetworkObservation.Retried();
 
                 try
                 {
@@ -1582,11 +1581,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                         }
                     }
                     RecordHostResult(resolution, failure);
-                    hostHealthTracker.RecordFailure(
-                        resolution.ResolvedSourceKind,
-                        failure.FinalHost ?? GetCandidateHost(resolution),
-                        failure.Reason,
-                        failure.StatusCode);
+                    RecordCandidateFailure(resolution, failure);
                     // Abort 表示请求本身或本地写入不可通过换源修复；其余分类决定重试当前源还是直接换源。
                     if (failure.Disposition is DownloadFailureDisposition.Abort)
                     {
@@ -1676,6 +1671,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 try
                 {
                     var attempt = ++attempts[candidateIndex];
+                    if (attempt > 1) DownloadNetworkObservation.Retried();
                     var value = await ExecuteAttemptAsync(
                         resolution,
                         attempt,
@@ -1702,11 +1698,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                     if (failure.IsTransientMirrorForbidden && !mirrorForbiddenRetried.Add(candidateIndex))
                         failure.WithDisposition(DownloadFailureDisposition.SwitchSource);
                     RecordHostResult(resolution, failure);
-                    hostHealthTracker.RecordFailure(
-                        resolution.ResolvedSourceKind,
-                        failure.FinalHost ?? GetCandidateHost(resolution),
-                        failure.Reason,
-                        failure.StatusCode);
+                    RecordCandidateFailure(resolution, failure);
                     if (failure.Disposition is DownloadFailureDisposition.Abort)
                     {
                         LogFailure(resolution, attempts[candidateIndex], failure, retryCurrentSource: false);
@@ -1903,6 +1895,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 hostConcurrency?.CurrentTarget ?? 0);
             RecordHostResult(transportResult.AdmissionOrigin, failureReason: null, statusCode: null);
             hostHealthTracker.RecordSuccess(resolution.ResolvedSourceKind, transportResult.FinalHost);
+            hostHealthTracker.RecordSuccess(resolution.ResolvedSourceKind, GetCandidateHost(resolution));
             return value;
         }
         catch (DownloadNoResultException)
@@ -2177,8 +2170,8 @@ internal sealed class MinecraftDownloadRequestExecutor
         public void ReportBodyBytes(long bytes) => Interlocked.Add(ref bodyBytes, bytes);
     }
 
-    private static string GetCandidateHost(ResolvedDownloadRequest resolution) =>
-        Uri.TryCreate(resolution.ActualUrl, UriKind.Absolute, out var uri) ? uri.Host : string.Empty;
+    private static string GetCandidateHost(ResolvedDownloadRequest resolution) => resolution.HealthCandidateHost ??
+        (Uri.TryCreate(resolution.ActualUrl, UriKind.Absolute, out var uri) ? uri.Host : string.Empty);
 
     private TimeSpan GetCandidateCooldown(ResolvedDownloadRequest resolution) =>
         Uri.TryCreate(resolution.ActualUrl, UriKind.Absolute, out var uri)
@@ -2188,6 +2181,20 @@ internal sealed class MinecraftDownloadRequestExecutor
     // the last working source, so it must still receive a real request.
     private bool IsCandidateDegraded(ResolvedDownloadRequest resolution) =>
         hostHealthTracker.ShouldAvoid(resolution.ResolvedSourceKind, GetCandidateHost(resolution));
+
+    private void RecordCandidateFailure(ResolvedDownloadRequest resolution, DownloadAttemptException failure)
+    {
+        var candidateHost = GetCandidateHost(resolution);
+        hostHealthTracker.RecordFailure(resolution.ResolvedSourceKind, candidateHost, failure.Reason, failure.StatusCode);
+        if (failure.FinalHost is { } finalHost && !string.Equals(finalHost, candidateHost, StringComparison.OrdinalIgnoreCase))
+            hostHealthTracker.RecordFailure(resolution.ResolvedSourceKind, finalHost, failure.Reason, failure.StatusCode);
+    }
+
+    private static void CaptureNetworkCounts(DownloadAttemptException failure)
+    {
+        if (DownloadNetworkObservation.Current is { } network)
+            failure.WithDetail("HttpRequestCount", network.Sends).WithDetail("RetryCount", network.Retries);
+    }
 
     private void LogResolvedRequest(ResolvedDownloadRequest resolution, int attempt)
     {
@@ -2257,6 +2264,7 @@ internal sealed class MinecraftDownloadRequestExecutor
         int remainingCandidateCount = 0)
     {
         failure.WithDetail("NetworkAttempts", DownloadNetworkObservation.Current?.Sends);
+        CaptureNetworkCounts(failure);
         var concurrency = GetGlobalConcurrencySnapshot();
         failure.WithDetail("GlobalActive", concurrency.ActiveCount).WithDetail("GlobalWaiting", concurrency.WaitingCount)
             .WithDetail("GlobalTarget", concurrency.CurrentTarget);
@@ -2306,10 +2314,12 @@ internal sealed class MinecraftDownloadRequestExecutor
         {
             ["SourceKind"] = Resolution.ResolvedSourceKind,
             ["NetworkAttempts"] = NetworkAttempts,
+            ["RetryCount"] = RetryCount,
             ["FallbackUsed"] = FallbackUsed,
             ["AttemptFailures"] = Failures.Select(exception => SafeExceptionLog.Format(exception, includeStack: false)).ToArray()
         };
         public int NetworkAttempts { get; } = DownloadNetworkObservation.Current?.Sends ?? 0;
+        public int RetryCount { get; } = DownloadNetworkObservation.Current?.Retries ?? 0;
         public bool FallbackUsed { get; } = DownloadNetworkObservation.Current?.CandidateCount > 1;
         public ResolvedDownloadRequest Resolution { get; }
         public IReadOnlyList<Exception> Failures { get; }
