@@ -143,8 +143,6 @@ public sealed class ModUpdateProviderSelectionTests
             .ToArray();
 
     private static DownloadHostConcurrencyController CreateController() => new(
-        maximumJitter: TimeSpan.Zero,
-        nextJitter: () => 0,
         delayAsync: static (_, _) => ValueTask.CompletedTask);
 
     private sealed class FingerprintBatchHandler(string responseJson) : HttpMessageHandler

@@ -30,7 +30,7 @@ internal sealed class MinecraftDownloadTransport
     private readonly ILogger? logger;
     private readonly HttpClient httpClient;
     private readonly DownloadRetryOptions retryOptions;
-    private readonly Func<Uri, bool, CancellationToken, ValueTask<DownloadHostConcurrencyController.DownloadAdmissionLease>>?
+    private readonly Func<Uri, CancellationToken, ValueTask<DownloadHostConcurrencyController.DownloadAdmissionLease>>?
         acquireAdmissionAsync;
     private readonly Func<Uri, DownloadHostConcurrencyController.DownloadAdmissionLease?>?
         tryAcquireOpportunisticAdmission;
@@ -38,7 +38,7 @@ internal sealed class MinecraftDownloadTransport
     public MinecraftDownloadTransport(
         HttpClient httpClient,
         DownloadRetryOptions retryOptions,
-        Func<Uri, bool, CancellationToken, ValueTask<DownloadHostConcurrencyController.DownloadAdmissionLease>>?
+        Func<Uri, CancellationToken, ValueTask<DownloadHostConcurrencyController.DownloadAdmissionLease>>?
             acquireAdmissionAsync = null,
         Func<Uri, DownloadHostConcurrencyController.DownloadAdmissionLease?>?
             tryAcquireOpportunisticAdmission = null,
@@ -56,9 +56,9 @@ internal sealed class MinecraftDownloadTransport
         CancellationToken cancellationToken,
         Action<HttpRequestMessage>? configureRequest = null,
         DownloadRequestHeaders? sensitiveHeaders = null,
-        bool applyColdStartJitter = false,
         bool opportunisticAdmission = false,
-        DownloadHostConcurrencyController.DownloadAdmissionLease? preacquiredAdmission = null)
+        DownloadHostConcurrencyController.DownloadAdmissionLease? preacquiredAdmission = null,
+        Action? entryRedirected = null)
     {
         using var diagnosticRequest = DownloadDiagnostics.BeginRequest(logger);
         var originalUri = ParseHttpUri(actualUrl);
@@ -92,7 +92,6 @@ internal sealed class MinecraftDownloadTransport
                 {
                     admissionLease = await acquireAdmissionAsync(
                         currentUri,
-                        applyColdStartJitter,
                         cancellationToken).ConfigureAwait(false);
                 }
                 admissionHeartbeat.Change(Timeout.Infinite, Timeout.Infinite);
@@ -152,6 +151,8 @@ internal sealed class MinecraftDownloadTransport
                     throw InvalidRedirect("The HTTP redirect target was unsupported or formed a loop.");
                 }
 
+                if (redirectCount == 0)
+                    entryRedirected?.Invoke();
                 response.Dispose();
                 redirects.Add(nextUri);
                 currentUri = nextUri;
@@ -160,6 +161,7 @@ internal sealed class MinecraftDownloadTransport
             {
                 logger?.LogWarning(exception, "Download HTTP request failed. Host={Host} Redirect={Redirect} DurationMs={DurationMs} FailureReason={FailureReason}", currentUri.Host, redirectCount, stopwatch.ElapsedMilliseconds, exception.Reason);
                 throw exception
+                    .WithRedirectCount(redirectCount)
                     .WithFinalHost(currentUri.Host)
                     .WithFinalOrigin(DownloadHostConcurrencyController.NormalizeOrigin(currentUri));
             }
@@ -182,7 +184,7 @@ internal sealed class MinecraftDownloadTransport
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri)
             {
-                Version = HttpVersion.Version20,
+                Version = HttpVersion.Version11,
                 VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
             };
             configureRequest?.Invoke(request);

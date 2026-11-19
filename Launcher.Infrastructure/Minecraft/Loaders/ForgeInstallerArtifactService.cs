@@ -252,7 +252,7 @@ internal sealed partial class LoaderInstallerArtifactService
         SpeedMeter? speedMeter)
     {
         var archiveEntries = new Dictionary<string, ZipArchiveEntry>(StringComparer.OrdinalIgnoreCase);
-        var hostHealth = operationContext?.HostHealth ?? new DownloadHostHealthTracker(sticky: true);
+        var hostHealth = operationContext?.HostHealth ?? new DownloadHostHealthTracker();
         await using (var stream = new FileStream(installerJarPath, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024,
                          FileOptions.Asynchronous | FileOptions.SequentialScan))
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false))

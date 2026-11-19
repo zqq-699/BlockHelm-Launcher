@@ -15,12 +15,10 @@ internal sealed class DownloadHostHealthTracker
 
     private readonly ConcurrentDictionary<(string Source, string Host), HostState> states = new();
     private readonly TimeSpan cooldown = TimeSpan.FromSeconds(45);
-    private readonly bool sticky;
     private readonly TimeProvider clock;
 
-    internal DownloadHostHealthTracker(bool sticky = false, TimeProvider? clock = null)
+    internal DownloadHostHealthTracker(TimeProvider? clock = null)
     {
-        this.sticky = sticky;
         this.clock = clock ?? TimeProvider.System;
     }
 
@@ -34,10 +32,7 @@ internal sealed class DownloadHostHealthTracker
 
     public void RecordSuccess(string resolvedSourceKind, string host)
     {
-        // An occasional fallback success must not promote a degraded host for
-        // every remaining file. Sticky state ends with the install operation.
-        if (!sticky || !ShouldAvoid(resolvedSourceKind, host))
-            states.TryRemove((resolvedSourceKind, host), out _);
+        states.TryRemove((resolvedSourceKind, host), out _);
     }
 
     public void RecordFailure(
@@ -48,29 +43,23 @@ internal sealed class DownloadHostHealthTracker
     {
         if (!AffectsHealth(reason, statusCode))
             return;
+        var now = clock.GetUtcNow();
         states.AddOrUpdate(
             (resolvedSourceKind, host),
-            _ => CreateFailureState(reason, 1, DateTimeOffset.MinValue),
+            _ => new HostState(1, now + cooldown, DateTimeOffset.MinValue),
             (_, current) =>
             {
-                var failures = current.Failures + 1;
-                return CreateFailureState(reason, failures, current.AvoidUntil);
+                var failures = now >= current.ExpiresAt ? 1 : current.Failures + 1;
+                var avoidUntil = failures >= 3 ? now + cooldown : DateTimeOffset.MinValue;
+                return new HostState(failures, now + cooldown, avoidUntil);
             });
     }
 
     internal static bool AffectsHealth(DownloadFailureReason reason, System.Net.HttpStatusCode? statusCode = null) => reason is
         DownloadFailureReason.Dns or DownloadFailureReason.Network or DownloadFailureReason.ResponseHeadersTimeout
         or DownloadFailureReason.FirstByteTimeout or DownloadFailureReason.BodyIdleTimeout
-        or DownloadFailureReason.BodyTooSlow
         or DownloadFailureReason.BodyInterrupted
         || (reason is DownloadFailureReason.HttpStatus && statusCode is { } code && (int)code is >= 500 and <= 599);
 
-    private HostState CreateFailureState(DownloadFailureReason reason, int failures, DateTimeOffset avoidUntil)
-    {
-        if (failures >= 3)
-            avoidUntil = sticky ? DateTimeOffset.MaxValue : clock.GetUtcNow() + cooldown;
-        return new HostState(failures, avoidUntil);
-    }
-
-    private sealed record HostState(int Failures, DateTimeOffset AvoidUntil);
+    private sealed record HostState(int Failures, DateTimeOffset ExpiresAt, DateTimeOffset AvoidUntil);
 }

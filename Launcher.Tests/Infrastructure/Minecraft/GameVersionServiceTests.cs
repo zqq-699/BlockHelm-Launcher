@@ -83,7 +83,7 @@ public sealed class GameVersionServiceTests
     }
 
     private static GameVersionService CreateService(HttpClient client) =>
-        new(new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero), client);
+        new(new DownloadHostConcurrencyController(), client);
 
     private sealed class CatalogHandler(bool hangPreferred = false, string? preferredManifest = null) : HttpMessageHandler
     {

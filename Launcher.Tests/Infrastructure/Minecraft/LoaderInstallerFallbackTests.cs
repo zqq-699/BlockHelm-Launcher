@@ -35,7 +35,7 @@ public sealed class LoaderInstallerFallbackTests
         var logger = new RecordingLogger();
         var checksum = await LoaderInstallerChecksumResolver.ResolveOptionalSha1Async(client, null, logger,
             Url, DownloadSourcePreference.Auto, "NeoForge", 0, CancellationToken.None,
-            new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero)).WaitAsync(TimeSpan.FromSeconds(8));
+            new DownloadHostConcurrencyController()).WaitAsync(TimeSpan.FromSeconds(8));
         Assert.Null(checksum);
         await canceled.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Contains(LogLevel.Warning, logger.Levels);
@@ -60,7 +60,7 @@ public sealed class LoaderInstallerFallbackTests
         }));
         var checksum = await LoaderInstallerChecksumResolver.ResolveOptionalSha1Async(client, null, NullLogger.Instance,
             Url, DownloadSourcePreference.BmclApi, "NeoForge", 0, CancellationToken.None,
-            new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero)).WaitAsync(TimeSpan.FromSeconds(5));
+            new DownloadHostConcurrencyController()).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(ValidSha1, checksum);
         Assert.Equal(new[] { "maven.neoforged.net", "bmclapi2.bangbang93.com" }, requests.Select(uri => uri.Host));
     }
@@ -80,7 +80,7 @@ public sealed class LoaderInstallerFallbackTests
         }));
         var checksum = await LoaderInstallerChecksumResolver.ResolveOptionalSha1Async(client, null, NullLogger.Instance,
             Url, DownloadSourcePreference.Official, "NeoForge", 0, CancellationToken.None,
-            new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero)).WaitAsync(TimeSpan.FromSeconds(5));
+            new DownloadHostConcurrencyController()).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(ValidSha1, checksum);
         await canceled.Task.WaitAsync(TimeSpan.FromSeconds(2));
     }

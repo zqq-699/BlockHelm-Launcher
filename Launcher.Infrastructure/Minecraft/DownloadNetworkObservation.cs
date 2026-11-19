@@ -39,9 +39,10 @@ internal sealed class DownloadNetworkObservation : IDisposable
     public void Dispose() => CurrentSlot.Value = previous;
 }
 
-/// <summary>Observes independent HTTP clients without changing redirects, credentials or retry policy.</summary>
+/// <summary>Observes independent HTTP clients and bounds buffered metadata requests.</summary>
 internal static class DownloadHttpDiagnostics
 {
+    internal static readonly TimeSpan MetadataRequestTimeout = TimeSpan.FromSeconds(30);
     private sealed record ResponseEvidence(string? Host, IReadOnlyDictionary<string, object?> Context);
     private static readonly ConditionalWeakTable<HttpResponseMessage, ResponseEvidence> Responses = new();
 
@@ -49,42 +50,65 @@ internal static class DownloadHttpDiagnostics
         ObserveAsync(logger, $"RemoteImage:{Host(url)}", () => client.GetByteArrayAsync(url, token), token, client.Timeout);
 
     public static Task<T?> GetFromJsonAsync<T>(HttpClient client, ILogger? logger, string url, CancellationToken cancellationToken) =>
-        ObserveAsync(logger, $"{typeof(T).Name}:{Host(url)}", () => client.GetFromJsonAsync<T>(url, cancellationToken), cancellationToken, client.Timeout);
+        ExecuteMetadataAsync(client, logger, $"{typeof(T).Name}:{Host(url)}", token => client.GetFromJsonAsync<T>(url, token), cancellationToken);
 
     public static Task<T?> GetFromJsonAsync<T>(HttpClient client, ILogger? logger, string url, JsonSerializerOptions options, CancellationToken cancellationToken) =>
-        ObserveAsync(logger, $"{typeof(T).Name}:{Host(url)}", () => client.GetFromJsonAsync<T>(url, options, cancellationToken), cancellationToken, client.Timeout);
+        ExecuteMetadataAsync(client, logger, $"{typeof(T).Name}:{Host(url)}", token => client.GetFromJsonAsync<T>(url, options, token), cancellationToken);
 
     public static async Task<HttpResponseMessage> SendAsync(HttpClient client, HttpRequestMessage request, ILogger? logger, CancellationToken token)
     {
-        return await ObserveAsync(logger, "MetadataRequest", async () =>
+        return await ExecuteMetadataAsync(client, logger, "MetadataRequest", async requestToken =>
         {
             var stopwatch = Stopwatch.StartNew();
             logger?.LogInformation("Independent download request started. Method={Method} Host={Host}", request.Method.Method, request.RequestUri?.Host);
-            var response = await client.SendAsync(request, token).ConfigureAwait(false);
+            var response = await client.SendAsync(request, requestToken).ConfigureAwait(false);
             RecordResponse(response, request.RequestUri?.Host, logger, stopwatch.ElapsedMilliseconds);
             return response;
-        }, token, client.Timeout).ConfigureAwait(false);
+        }, token).ConfigureAwait(false);
     }
 
     public static Task<HttpResponseMessage> PostAsJsonAsync<T>(HttpClient client, ILogger? logger, string url,
         T value, JsonSerializerOptions options, CancellationToken token) =>
-        ObserveAsync(logger, $"MetadataPost:{typeof(T).Name}:{Host(url)}", async () =>
+        ExecuteMetadataAsync(client, logger, $"MetadataPost:{typeof(T).Name}:{Host(url)}", async requestToken =>
         {
             var stopwatch = Stopwatch.StartNew();
-            var response = await client.PostAsJsonAsync(url, value, options, token).ConfigureAwait(false);
+            var response = await client.PostAsJsonAsync(url, value, options, requestToken).ConfigureAwait(false);
             RecordResponse(response, Host(url), logger, stopwatch.ElapsedMilliseconds);
             return response;
-        }, token, client.Timeout);
+        }, token);
+
+    internal static Task<T> ExecuteMetadataAsync<T>(HttpClient client, ILogger? logger, string resource,
+        Func<CancellationToken, Task<T>> action, CancellationToken callerToken, TimeSpan? timeout = null)
+    {
+        var budget = timeout ?? MetadataRequestTimeout;
+        var effectiveTimeout = client.Timeout == Timeout.InfiniteTimeSpan || client.Timeout > budget
+            ? budget : client.Timeout;
+        return ObserveAsync(logger, resource, async () =>
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
+            deadline.CancelAfter(budget);
+            try
+            {
+                return await action(deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException exception) when (!callerToken.IsCancellationRequested
+                && (deadline.IsCancellationRequested || exception.InnerException is TimeoutException))
+            {
+                throw new HttpRequestException("The metadata request timed out.",
+                    new TimeoutException($"The metadata request exceeded its {effectiveTimeout} time limit.", exception));
+            }
+        }, callerToken, effectiveTimeout);
+    }
 
     public static Task<HttpResponseMessage> GetAsync(HttpClient client, ILogger? logger, string url,
-        HttpCompletionOption completion, CancellationToken token) =>
+        HttpCompletionOption completion, CancellationToken token, CancellationToken? callerCancellation = null) =>
         ObserveAsync(logger, $"MetadataGet:{Host(url)}", async () =>
         {
             var stopwatch = Stopwatch.StartNew();
             var response = await client.GetAsync(url, completion, token).ConfigureAwait(false);
             RecordResponse(response, Host(url), logger, stopwatch.ElapsedMilliseconds);
             return response;
-        }, token, client.Timeout);
+        }, callerCancellation ?? token, client.Timeout);
 
     public static Task<T?> ReadFromJsonAsync<T>(HttpResponseMessage response, ILogger? logger,
         CancellationToken cancellationToken, JsonSerializerOptions? options = null) =>

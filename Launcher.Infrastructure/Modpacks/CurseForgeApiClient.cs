@@ -256,16 +256,11 @@ public sealed class CurseForgeApiClient
         await using var admission = await hostConcurrencyController.AcquireAsync(
             uri,
             limiter.AcquireMetadataSlotAsync,
-            applyColdStartJitter: true,
             cancellationToken).ConfigureAwait(false);
         HttpResponseMessage? response = null;
-        DownloadFailureReason? failureReason = null;
-        HttpStatusCode? statusCode = null;
-        var recordResult = false;
         try
         {
             response = await DownloadHttpDiagnostics.SendAsync(httpClient, request, logger, cancellationToken).ConfigureAwait(false);
-            statusCode = response.StatusCode;
             if (IsTransientMetadataStatus(response.StatusCode))
             {
                 throw new CurseForgeMetadataTransientException(
@@ -273,8 +268,6 @@ public sealed class CurseForgeApiClient
                     ParseRetryAfter(response));
             }
             var result = await readAsync(response, cancellationToken).ConfigureAwait(false);
-            failureReason = response.IsSuccessStatusCode ? null : DownloadFailureReason.HttpStatus;
-            recordResult = true;
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -284,33 +277,16 @@ public sealed class CurseForgeApiClient
         catch (OperationCanceledException exception)
         {
             logger.LogWarning(exception, "Download metadata request failed. Host={Host} StatusCode={StatusCode}", uri.Host, (int?)response?.StatusCode);
-            failureReason = response is null
-                ? DownloadFailureReason.ResponseHeadersTimeout
-                : DownloadFailureReason.BodyInterrupted;
-            statusCode = response?.StatusCode;
-            recordResult = true;
             throw;
         }
         catch (HttpRequestException exception)
         {
             logger.LogWarning(exception, "Download metadata request failed. Host={Host} StatusCode={StatusCode}", uri.Host, (int?)response?.StatusCode);
-            failureReason = response is null
-                ? DownloadFailureReason.Network
-                : response.IsSuccessStatusCode
-                    ? DownloadFailureReason.BodyInterrupted
-                    : DownloadFailureReason.HttpStatus;
-            statusCode = response?.StatusCode;
-            recordResult = true;
             throw;
         }
         catch (IOException exception)
         {
             logger.LogWarning(exception, "Download metadata request failed. Host={Host} StatusCode={StatusCode}", uri.Host, (int?)response?.StatusCode);
-            failureReason = response is null
-                ? DownloadFailureReason.Network
-                : DownloadFailureReason.BodyInterrupted;
-            statusCode = response?.StatusCode;
-            recordResult = true;
             throw;
         }
         catch (Exception exception)
@@ -321,8 +297,6 @@ public sealed class CurseForgeApiClient
         finally
         {
             response?.Dispose();
-            if (recordResult)
-                RecordHostResult(admission.Origin, failureReason, statusCode);
         }
     }
 
@@ -361,24 +335,6 @@ public sealed class CurseForgeApiClient
             return null;
         var delay = date - DateTimeOffset.UtcNow;
         return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
-    }
-
-    private void RecordHostResult(
-        string origin,
-        DownloadFailureReason? failureReason,
-        HttpStatusCode? statusCode)
-    {
-        var adjustment = hostConcurrencyController.RecordResult(origin, failureReason, statusCode);
-        if (adjustment is null)
-            return;
-        logger.LogDebug(
-            "Download host concurrency adjusted. HostOrigin={HostOrigin} PreviousTarget={PreviousTarget} CurrentTarget={CurrentTarget} AdjustmentReason={AdjustmentReason} SuccessCount={SuccessCount} FailureCount={FailureCount}",
-            adjustment.Origin,
-            adjustment.PreviousTarget,
-            adjustment.CurrentTarget,
-            adjustment.Reason,
-            adjustment.Successes,
-            adjustment.Failures);
     }
 
     private static HttpRequestMessage CreateRequest(string requestUri, string apiKey)

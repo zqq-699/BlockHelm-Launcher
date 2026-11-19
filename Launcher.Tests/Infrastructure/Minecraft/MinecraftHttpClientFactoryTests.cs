@@ -22,14 +22,17 @@ public sealed class MinecraftHttpClientFactoryTests
         Assert.False(handler.AllowAutoRedirect);
     }
 
-    [Fact]
-    public async Task TransportAllowsHttp11ResponsesAndPreservesNegotiationAcrossRedirects()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TransportUsesHttp11AcrossRedirectsForOrdinaryAndRangeRequests(bool useRange)
     {
         var calls = 0;
         using var client = new HttpClient(new Handler(request =>
         {
-            Assert.Equal(HttpVersion.Version20, request.Version);
+            Assert.Equal(HttpVersion.Version11, request.Version);
             Assert.Equal(HttpVersionPolicy.RequestVersionOrLower, request.VersionPolicy);
+            Assert.Equal(useRange ? "bytes=0-99" : null, request.Headers.Range?.ToString());
             var response = new HttpResponseMessage(++calls == 1 ? HttpStatusCode.Found : HttpStatusCode.OK)
             {
                 Version = HttpVersion.Version11,
@@ -40,7 +43,10 @@ public sealed class MinecraftHttpClientFactoryTests
             return response;
         }));
         var transport = new MinecraftDownloadTransport(client, new DownloadRetryOptions());
-        await using var response = await transport.SendAsync("https://example.test/file", CancellationToken.None);
+        await using var response = await transport.SendAsync(
+            "https://example.test/file",
+            CancellationToken.None,
+            useRange ? request => request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 99) : null);
         Assert.Equal("cdn.example.test", response.FinalHost);
         Assert.Equal(HttpVersion.Version11, response.Response.Version);
         Assert.Equal("ok", await response.Response.Content.ReadAsStringAsync());

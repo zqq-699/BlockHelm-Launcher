@@ -34,20 +34,21 @@ internal sealed record DownloadRetryOptions
         MaxAttemptsPerSource = 2,
         ResponseHeadersTimeout = TimeSpan.FromSeconds(5),
         FirstByteTimeout = TimeSpan.FromSeconds(5),
-        BodyIdleTimeout = TimeSpan.FromSeconds(8)
+        BodyIdleTimeout = TimeSpan.FromSeconds(8),
+        SlowBodyReadThreshold = null
     };
 
     public int MaxAttemptsPerSource { get; init; } = 4;
     // Deferring a cooling source does not consume an actual file attempt.
     public int MaxFileAttemptsPerSource { get; init; } = 4;
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(300);
-    public TimeSpan ResponseHeadersTimeout { get; init; } = TimeSpan.FromSeconds(30);
-    public TimeSpan FirstByteTimeout { get; init; } = TimeSpan.FromSeconds(30);
-    public TimeSpan BodyIdleTimeout { get; init; } = TimeSpan.FromSeconds(30);
-    // A slow but progressing transfer is not a failure. Keep the watchdog opt-in
-    // for explicit internal policies; production downloads use idle timeouts.
-    public TimeSpan? SlowBodyReadThreshold { get; init; }
-    public long MinimumBodyBytesPerSecond { get; init; } = 1024;
+    public TimeSpan ResponseHeadersTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan FirstByteTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan BodyIdleTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    // Measure throughput over accumulated network read time, excluding time
+    // spent outside reads (such as local writes and bandwidth throttling).
+    public TimeSpan? SlowBodyReadThreshold { get; init; } = TimeSpan.FromSeconds(10);
+    public long MinimumBodyBytesPerSecond { get; init; } = 2048;
     public TimeSpan ThrottleRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan MaximumRetryDelay { get; init; } = TimeSpan.FromMilliseconds(1400);
     public int MaxRedirects { get; init; } = 20;
@@ -111,6 +112,13 @@ internal class DownloadAttemptException : Exception, ISafeDiagnosticException
     public bool IsHostThrottled => StatusCode is HttpStatusCode.TooManyRequests || IsTransientMirrorForbidden;
     public string? FinalHost { get; private set; }
     public string? FinalOrigin { get; private set; }
+    public int? RedirectCount { get; private set; }
+
+    public DownloadAttemptException WithRedirectCount(int redirectCount)
+    {
+        RedirectCount = redirectCount;
+        return this;
+    }
 
     public DownloadAttemptException WithFinalHost(string? finalHost)
     {
@@ -166,7 +174,7 @@ internal sealed class DownloadTimeoutException : DownloadAttemptException
 
 internal sealed class DownloadBodyTooSlowException : DownloadAttemptException
 {
-    public DownloadBodyTooSlowException(int bytesRead, TimeSpan readDuration)
+    public DownloadBodyTooSlowException(long bytesRead, TimeSpan readDuration)
         : base(
             DownloadFailureDisposition.RetryCurrentSource,
             DownloadFailureReason.BodyTooSlow,
@@ -178,11 +186,11 @@ internal sealed class DownloadBodyTooSlowException : DownloadAttemptException
         BytesPerSecond = CalculateBytesPerSecond(bytesRead, readDuration);
     }
 
-    public int BytesRead { get; }
+    public long BytesRead { get; }
     public TimeSpan ReadDuration { get; }
     public double BytesPerSecond { get; }
 
-    private static double CalculateBytesPerSecond(int bytesRead, TimeSpan readDuration) =>
+    private static double CalculateBytesPerSecond(long bytesRead, TimeSpan readDuration) =>
         readDuration.TotalSeconds <= 0 ? double.PositiveInfinity : bytesRead / readDuration.TotalSeconds;
 }
 

@@ -9,6 +9,89 @@ namespace Launcher.Tests.Infrastructure.Modpacks;
 public sealed class ModpackMetadataHostConcurrencyTests
 {
     [Fact]
+    public async Task MetadataDeadlineReportsNetworkTimeout()
+    {
+        using var httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            DownloadHttpDiagnostics.ExecuteMetadataAsync(httpClient, null, "test", async token =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return true;
+            }, CancellationToken.None, TimeSpan.FromMilliseconds(50)));
+        Assert.IsType<TimeoutException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task MetadataDeadlineCoversStreamingResponseBody()
+    {
+        using var httpClient = new HttpClient(new AsyncHandler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StalledContent() })))
+            { Timeout = Timeout.InfiniteTimeSpan };
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            DownloadHttpDiagnostics.ExecuteMetadataAsync(httpClient, null, "test", async token =>
+            {
+                using var response = await httpClient.GetAsync("https://example.test/metadata", HttpCompletionOption.ResponseHeadersRead, token);
+                return await response.Content.ReadAsStringAsync(token);
+            }, CancellationToken.None, TimeSpan.FromMilliseconds(50)));
+        Assert.IsType<TimeoutException>(exception.InnerException);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task MetadataTimeoutIsNetworkFailureAndCurseForgeRetries(bool curseForge, bool stalledBody)
+    {
+        var calls = 0;
+        using var httpClient = new HttpClient(new AsyncHandler(async (_, token) =>
+        {
+            Interlocked.Increment(ref calls);
+            if (!stalledBody)
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StalledContent() };
+        })) { Timeout = TimeSpan.FromMilliseconds(50) };
+        var limiter = new ImportConcurrencyLimiter();
+        Task request = curseForge
+            ? new CurseForgeApiClient(httpClient, limiter, null, CreateController(), static (_, _) => Task.CompletedTask)
+                .GetFingerprintMatchesAsync([42], "test-key", CancellationToken.None)
+            : new ModrinthApiClient(httpClient, limiter, null, CreateController())
+                .GetVersionFileMatchesAsync([new string('a', 40)], CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() => request);
+        Assert.IsType<TimeoutException>(exception.InnerException);
+        Assert.Equal(curseForge ? 3 : 1, calls);
+        Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MetadataCallerCancellationDoesNotRetry(bool curseForge)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        using var httpClient = new HttpClient(new AsyncHandler(async (_, token) =>
+        {
+            Interlocked.Increment(ref calls);
+            started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        })) { Timeout = Timeout.InfiniteTimeSpan };
+        var limiter = new ImportConcurrencyLimiter();
+        using var cancellation = new CancellationTokenSource();
+        Task request = curseForge
+            ? new CurseForgeApiClient(httpClient, limiter, null, CreateController(), static (_, _) => Task.CompletedTask)
+                .GetFingerprintMatchesAsync([42], "test-key", cancellation.Token)
+            : new ModrinthApiClient(httpClient, limiter, null, CreateController())
+                .GetVersionFileMatchesAsync([new string('a', 40)], cancellation.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        Assert.Equal(1, calls);
+        Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
+    }
+
+    [Fact]
     public async Task ModrinthExactMatchIncludesCurrentVersionIdentityAndDate()
     {
         var sha1 = new string('a', 40);
@@ -82,9 +165,11 @@ public sealed class ModpackMetadataHostConcurrencyTests
     }
 
     [Fact]
-    public async Task ModrinthRateLimitReducesOnlyModrinthHostTarget()
+    public async Task ModrinthRateLimitDoesNotReduceConfiguredGlobalConcurrency()
     {
         var controller = CreateController();
+        var limiter = new ImportConcurrencyLimiter();
+        limiter.SetMaximumDownloadConcurrency(128);
         using var httpClient = new HttpClient(new CallbackHandler(request =>
             new HttpResponseMessage(HttpStatusCode.TooManyRequests)
             {
@@ -93,19 +178,15 @@ public sealed class ModpackMetadataHostConcurrencyTests
             }));
         var client = new ModrinthApiClient(
             httpClient,
-            new ImportConcurrencyLimiter(),
+            limiter,
             logger: null,
             controller);
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
             client.GetVersionFileMatchesAsync([new string('a', 40)], CancellationToken.None));
 
-        Assert.Equal(
-            32,
-            controller.GetSnapshot("https://api.modrinth.com:443").CurrentTarget);
-        Assert.Equal(
-            64,
-            controller.GetSnapshot("https://api.curseforge.com:443").CurrentTarget);
+        Assert.Equal(128, limiter.DownloadSnapshot.CurrentTarget);
+        Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
     }
 
     [Fact]
@@ -142,8 +223,6 @@ public sealed class ModpackMetadataHostConcurrencyTests
     }
 
     private static DownloadHostConcurrencyController CreateController() => new(
-        maximumJitter: TimeSpan.Zero,
-        nextJitter: () => 0,
         delayAsync: static (_, _) => ValueTask.CompletedTask);
 
     private sealed class CallbackHandler(Func<HttpRequestMessage, HttpResponseMessage> callback) : HttpMessageHandler
@@ -152,5 +231,22 @@ public sealed class ModpackMetadataHostConcurrencyTests
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             Task.FromResult(callback(request));
+    }
+
+    private sealed class AsyncHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> callback) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            callback(request, cancellationToken);
+    }
+
+    private sealed class StalledContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            Task.Delay(Timeout.InfiniteTimeSpan);
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken) =>
+            Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+
+        protected override bool TryComputeLength(out long length) { length = 0; return false; }
     }
 }

@@ -143,7 +143,7 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
         });
         using var client = new HttpClient(handler);
         var executor = new MinecraftDownloadRequestExecutor(client, automaticSourceSelector: selector,
-            hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero),
+            hostConcurrencyController: new DownloadHostConcurrencyController(),
             minimumSegmentedDownloadSize: 2 * 1024 * 1024);
         const string url = "https://piston-data.mojang.com/v1/objects/example/client.jar";
         if (mode == "metadata")
@@ -173,7 +173,7 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
         using var selector = new AutomaticDownloadSourceSelector(probe);
         using var client = new HttpClient(new Handler((_, _) => Task.FromResult(Response("good"))));
         var executor = new MinecraftDownloadRequestExecutor(client, automaticSourceSelector: selector,
-            hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+            hostConcurrencyController: new DownloadHostConcurrencyController());
         if (localFile)
         {
             Directory.CreateDirectory(TempRoot);
@@ -194,26 +194,34 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
     }
 
     [Fact]
-    public async Task OperationHealthIsStickyAcrossFilesAndKeepsTheDegradedFallback()
+    public async Task EntryHealthExpiresAndKeepsTheDegradedFallback()
     {
         var clock = new Clock();
         using var operation = new MinecraftDownloadOperationContext(TempRoot);
-        var health = new DownloadHostHealthTracker(sticky: true, clock);
+        var health = new DownloadHostHealthTracker(clock);
         const string url = "https://maven.neoforged.net/releases/net/neoforged/test.jar";
         var official = MinecraftDownloadSourceResolver.EnumerateRequests(url, DownloadSourcePreference.Official).First();
         for (var i = 0; i < 3; i++) health.RecordFailure(official.ResolvedSourceKind, "maven.neoforged.net", DownloadFailureReason.ResponseHeadersTimeout);
-        clock.Advance(TimeSpan.FromMinutes(20));
-        health.RecordSuccess(official.ResolvedSourceKind, "maven.neoforged.net");
         Assert.True(health.ShouldAvoid(official.ResolvedSourceKind, "maven.neoforged.net"));
         using var handler = new Handler((request, _) => Task.FromResult(new HttpResponseMessage(
             request.RequestUri!.Host == "bmclapi2.bangbang93.com" ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = new StringContent("good") }));
         using var client = new HttpClient(handler);
         var executor = new MinecraftDownloadRequestExecutor(client, hostHealthTracker: health,
             retryOptions: new DownloadRetryOptions { MaxAttemptsPerSource = 1 },
-            hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+            hostConcurrencyController: new DownloadHostConcurrencyController());
         Assert.Equal("good", await executor.ExecuteAsync(url, DownloadSourcePreference.Official, null,
             (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None));
         Assert.Equal(new[] { "bmclapi2.bangbang93.com", "maven.neoforged.net" }, handler.Requests.Select(u => u.Host));
+        Assert.False(health.ShouldAvoid(official.ResolvedSourceKind, "maven.neoforged.net"));
+        for (var i = 0; i < 3; i++) health.RecordFailure(official.ResolvedSourceKind, "maven.neoforged.net", DownloadFailureReason.Network);
+        clock.Advance(TimeSpan.FromSeconds(46));
+        Assert.False(health.ShouldAvoid(official.ResolvedSourceKind, "maven.neoforged.net"));
+        health.RecordFailure(official.ResolvedSourceKind, "maven.neoforged.net", DownloadFailureReason.Network);
+        Assert.False(health.ShouldAvoid(official.ResolvedSourceKind, "maven.neoforged.net"));
+        clock.Advance(TimeSpan.FromSeconds(46));
+        health.RecordFailure(official.ResolvedSourceKind, "maven.neoforged.net", DownloadFailureReason.Network);
+        health.RecordFailure(official.ResolvedSourceKind, "maven.neoforged.net", DownloadFailureReason.Network);
+        Assert.False(health.ShouldAvoid(official.ResolvedSourceKind, "maven.neoforged.net"));
         for (var i = 0; i < 3; i++) operation.HostHealth.RecordFailure("test", "test", DownloadFailureReason.Network);
         operation.Dispose();
         Assert.False(operation.HostHealth.ShouldAvoid("test", "test"));
@@ -222,9 +230,9 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task RedirectedHostFailuresDeprioritizeTheCandidateAcrossFilesButKeepFallback(bool timeout)
+    public async Task RedirectedHostFailuresDoNotDeprioritizeTheCandidateAcrossFiles(bool timeout)
     {
-        var health = new DownloadHostHealthTracker(sticky: true);
+        var health = new DownloadHostHealthTracker();
         var mirrorFails = false;
         var cdnRecovers = false;
         using var handler = new Handler((request, _) =>
@@ -246,7 +254,7 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
         using var client = new HttpClient(handler);
         var executor = new MinecraftDownloadRequestExecutor(client, hostHealthTracker: health,
             retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 },
-            hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+            hostConcurrencyController: new DownloadHostConcurrencyController());
         var hash = Convert.ToHexString(SHA1.HashData("good"u8));
         async Task Download(int index) => await executor.DownloadFileAsync(
             $"https://maven.neoforged.net/releases/net/neoforged/test/{index}/test.jar",
@@ -254,16 +262,57 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
         for (var i = 0; i < 3; i++) await Download(i);
         var before = handler.Requests.Count;
         await Download(3);
-        Assert.Equal("bmclapi2.bangbang93.com", handler.Requests.Skip(before).First().Host);
-        Assert.Single(handler.Requests.Skip(before));
+        Assert.Equal(new[] { "maven.neoforged.net", "cdn.example.test", "bmclapi2.bangbang93.com" },
+            handler.Requests.Skip(before).Select(uri => uri.Host));
         mirrorFails = true;
         cdnRecovers = true;
         before = handler.Requests.Count;
         await Download(4);
-        Assert.Equal(new[] { "bmclapi2.bangbang93.com", "maven.neoforged.net", "cdn.example.test" },
+        Assert.Equal(new[] { "maven.neoforged.net", "cdn.example.test" },
             handler.Requests.Skip(before).Select(uri => uri.Host));
         Assert.Equal("good", await File.ReadAllTextAsync(Path.Combine(TempRoot, "4.jar")));
-        Assert.True(health.ShouldAvoid("NeoForgeOfficial", "maven.neoforged.net"));
+        Assert.False(health.ShouldAvoid("NeoForgeOfficial", "maven.neoforged.net"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SameHostAndMultiHopRedirectFailuresDoNotDegradeEntry(bool multiHop)
+    {
+        var health = new DownloadHostHealthTracker();
+        using var handler = new Handler((request, _) =>
+        {
+            var uri = request.RequestUri!;
+            if (uri.Host == "maven.neoforged.net" && uri.AbsolutePath.EndsWith("test.jar"))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                { Headers = { Location = new Uri(multiHop ? "https://middle.example/next" : "https://maven.neoforged.net/node") } });
+            if (uri.Host == "middle.example")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                { Headers = { Location = new Uri("https://cdn.example/node") } });
+            if (uri.AbsolutePath == "/node")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+            return Task.FromResult(Response("good"));
+        });
+        using var client = new HttpClient(handler);
+        var executor = new MinecraftDownloadRequestExecutor(client, hostHealthTracker: health,
+            retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 },
+            hostConcurrencyController: new DownloadHostConcurrencyController());
+        for (var i = 0; i < 4; i++)
+            await executor.DownloadFileAsync($"https://maven.neoforged.net/releases/test/{i}/test.jar",
+                DownloadSourcePreference.Official, "NeoForge", Path.Combine(TempRoot, $"hop-{i}.jar"),
+                Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None);
+        Assert.False(health.ShouldAvoid("NeoForgeOfficial", "maven.neoforged.net"));
+        Assert.Equal(4, handler.Requests.Count(uri => uri.Host == "maven.neoforged.net" && uri.AbsolutePath.EndsWith("test.jar")));
+    }
+
+    [Fact]
+    public void ConcurrentEntryFailuresDegradeAndSuccessRestoresHealth()
+    {
+        var health = new DownloadHostHealthTracker();
+        Parallel.For(0, 32, _ => health.RecordFailure("source", "entry", DownloadFailureReason.Network));
+        Assert.True(health.ShouldAvoid("source", "entry"));
+        health.RecordSuccess("source", "entry");
+        Assert.False(health.ShouldAvoid("source", "entry"));
     }
 
     [Fact]

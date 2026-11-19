@@ -47,7 +47,7 @@ internal sealed class MinecraftDownloadOperationContext : IDisposable
     }
 
     public string ManagedRoot { get; }
-    internal DownloadHostHealthTracker HostHealth { get; } = new(sticky: true);
+    internal DownloadHostHealthTracker HostHealth { get; } = new();
 
     public string ResolveManagedRoot(string destinationPath)
     {

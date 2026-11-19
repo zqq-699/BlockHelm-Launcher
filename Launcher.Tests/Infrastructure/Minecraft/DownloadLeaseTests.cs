@@ -66,8 +66,6 @@ public sealed class DownloadRequestExecutorLeaseTests
     }
 
     private static DownloadHostConcurrencyController CreateHostController() => new(
-        maximumJitter: TimeSpan.Zero,
-        nextJitter: () => 0,
         delayAsync: static (_, _) => ValueTask.CompletedTask);
 }
 
@@ -139,8 +137,6 @@ public sealed class DownloadSourceRoutingLeaseTests
     }
 
     private static DownloadHostConcurrencyController CreateHostController() => new(
-        maximumJitter: TimeSpan.Zero,
-        nextJitter: () => 0,
         delayAsync: static (_, _) => ValueTask.CompletedTask);
 
     private sealed class RoutingHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler

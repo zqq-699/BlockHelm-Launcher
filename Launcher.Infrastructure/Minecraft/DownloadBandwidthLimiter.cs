@@ -153,7 +153,8 @@ internal static class DownloadResponseThrottler
         long minimumBodyBytesPerSecond = 0,
         TimeProvider? timeProvider = null,
         Action<long>? reportBodyBytes = null,
-        SpeedMeter? speedMeter = null)
+        SpeedMeter? speedMeter = null,
+        long? expectedContentLength = null)
     {
         if (response.Content is null)
         {
@@ -177,9 +178,10 @@ internal static class DownloadResponseThrottler
                 effectiveIdleTimeout,
                 slowBodyReadThreshold,
                 minimumBodyBytesPerSecond,
-                originalContent.Headers.ContentLength,
+                originalContent.Headers.ContentLength ?? expectedContentLength,
                 cancellationToken,
-                timeProvider ?? TimeProvider.System)
+                timeProvider ?? TimeProvider.System,
+                reportBodyBytes)
             : originalStream;
         if (reportBodyBytes is not null)
         {
@@ -203,13 +205,13 @@ internal static class DownloadResponseThrottler
     }
 
     internal static bool IsBodyReadTooSlow(
-        int bytesRead,
+        long bytesRead,
         TimeSpan readDuration,
         TimeSpan slowReadThreshold,
         long minimumBytesPerSecond)
     {
         if (bytesRead <= 0 || slowReadThreshold < TimeSpan.Zero || minimumBytesPerSecond <= 0
-            || readDuration <= slowReadThreshold || readDuration.TotalSeconds <= 0)
+            || readDuration < slowReadThreshold || readDuration.TotalSeconds <= 0)
         {
             return false;
         }
@@ -399,8 +401,11 @@ internal static class DownloadResponseThrottler
         private readonly long? contentLength;
         private readonly CancellationToken operationCancellationToken;
         private readonly TimeProvider timeProvider;
+        private readonly Action<long>? reportDiscardedBytes;
         private bool hasReadFirstByte;
         private long totalBytesRead;
+        private long windowBytes;
+        private TimeSpan windowReadDuration;
         private DownloadBodyTooSlowException? pendingSlowFailure;
 
         public BodyProgressReadStream(
@@ -411,7 +416,8 @@ internal static class DownloadResponseThrottler
             long minimumBytesPerSecond,
             long? contentLength,
             CancellationToken operationCancellationToken,
-            TimeProvider timeProvider)
+            TimeProvider timeProvider,
+            Action<long>? reportDiscardedBytes)
         {
             this.innerStream = innerStream;
             this.firstByteTimeout = firstByteTimeout;
@@ -421,6 +427,7 @@ internal static class DownloadResponseThrottler
             this.contentLength = contentLength;
             this.operationCancellationToken = operationCancellationToken;
             this.timeProvider = timeProvider;
+            this.reportDiscardedBytes = reportDiscardedBytes;
         }
 
         public override bool CanRead => innerStream.CanRead;
@@ -498,29 +505,48 @@ internal static class DownloadResponseThrottler
         private void ObserveRead(int read, TimeSpan readDuration)
         {
             if (read <= 0)
-                return;
-
-            totalBytesRead += read;
-            if (!hasReadFirstByte)
             {
-                hasReadFirstByte = true;
+                pendingSlowFailure = null;
                 return;
             }
 
-            var completedKnownBody = contentLength is { } length && totalBytesRead >= length;
-            if (!completedKnownBody
-                && slowReadThreshold is { } threshold
-                && IsBodyReadTooSlow(read, readDuration, threshold, minimumBytesPerSecond))
+            if (pendingSlowFailure is { } failure)
+            {
+                // Unknown-length bodies need one more read to distinguish EOF
+                // from a slow transfer. Account for these discarded wire bytes.
+                pendingSlowFailure = null;
+                reportDiscardedBytes?.Invoke(read);
+                throw failure;
+            }
+
+            var firstRead = !hasReadFirstByte;
+            hasReadFirstByte = true;
+            totalBytesRead += read;
+            // The first read includes the wait for the first byte, which is
+            // governed by its own timeout and is not transfer throughput.
+            if (firstRead || slowReadThreshold is not { } threshold)
+                return;
+            windowBytes += read;
+            windowReadDuration += readDuration;
+            if (windowReadDuration < threshold)
+                return;
+
+            var rate = windowReadDuration.TotalSeconds > 0 ? windowBytes / windowReadDuration.TotalSeconds : 0;
+            var remaining = contentLength - totalBytesRead;
+            var finishingSoon = remaining is { } bytes && (bytes <= 0 || rate > 0 && bytes / rate <= threshold.TotalSeconds);
+            if (!finishingSoon && IsBodyReadTooSlow(windowBytes, windowReadDuration, threshold, minimumBytesPerSecond))
             {
                 // Return this chunk first so the file session persists it. The
-                // next read fails before any additional network data is consumed.
-                pendingSlowFailure = new DownloadBodyTooSlowException(read, readDuration);
+                // next read fails, except for the unknown-length EOF check above.
+                pendingSlowFailure = new DownloadBodyTooSlowException(windowBytes, windowReadDuration);
             }
+            windowBytes = 0;
+            windowReadDuration = TimeSpan.Zero;
         }
 
         private void ThrowPendingSlowFailure()
         {
-            if (pendingSlowFailure is not { } failure)
+            if (contentLength is null || pendingSlowFailure is not { } failure)
                 return;
             pendingSlowFailure = null;
             throw failure;

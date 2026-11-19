@@ -213,7 +213,7 @@ public sealed class VanillaVersionMetadataClientTests : TestTempDirectory
             : provideHash ? Json : "{\"id\":\"1.21.1\",\"unverified\":true}")));
         using var client = new HttpClient(handler);
         var weak = await VanillaVersionMetadataClient.DownloadVersionJsonAsync(client, Version, DownloadSourcePreference.Official,
-            hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+            hostConcurrencyController: new DownloadHostConcurrencyController());
         Assert.True(weak["unverified"]!.GetValue<bool>());
         provideHash = true;
         Assert.Null((await Load(client))["unverified"]);
@@ -299,7 +299,7 @@ public sealed class VanillaVersionMetadataClientTests : TestTempDirectory
     private static Task<JsonObject> Load(HttpClient client, VanillaVersionMetadataCache? cache = null, CancellationToken token = default) =>
         VanillaVersionMetadataClient.DownloadVerifiedVersionJsonAsync(client, Version, DownloadSourcePreference.Official,
             cancellationToken: token, cache: cache,
-            hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+            hostConcurrencyController: new DownloadHostConcurrencyController());
     private static bool IsManifest(HttpRequestMessage request) => IsManifest(request.RequestUri!);
     private static bool IsManifest(Uri uri) => uri.AbsolutePath == "/mc/game/version_manifest_v2.json";
     private static HttpResponseMessage Response(string json) => new(HttpStatusCode.OK) { Content = new StringContent(json) };

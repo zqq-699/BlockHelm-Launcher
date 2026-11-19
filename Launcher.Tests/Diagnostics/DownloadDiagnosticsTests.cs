@@ -157,7 +157,7 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             using var operation = DownloadDiagnostics.BeginOperation(logger, "TestInstall");
             var executor = new MinecraftDownloadRequestExecutor(client, logger, retryOptions: new DownloadRetryOptions
             { MaxFileAttemptsPerSource = 1, MaxAttemptsPerSource = 1, RetryDelay = TimeSpan.Zero },
-                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+                hostConcurrencyController: new DownloadHostConcurrencyController());
             var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
                 executor.DownloadFileAsync("https://example.test/signed/path-secret?token=query-secret",
                     DownloadSourcePreference.Official, "ThirdParty", Path.Combine(TempRoot, "artifact.jar"),
@@ -250,7 +250,7 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             var executor = new MinecraftDownloadRequestExecutor(client, logger,
                 retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 2, RetryDelay = TimeSpan.Zero },
                 nextRetryJitter: () => 0,
-                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+                hostConcurrencyController: new DownloadHostConcurrencyController());
             var result = await executor.DownloadFileAsync(url, DownloadSourcePreference.Official, "ThirdParty", path,
                 null, null, CancellationToken.None, reportTransferredBytes: file.ReportTransferredBytes);
             file.Complete(result);
@@ -278,7 +278,7 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             using var context = file.RestoreContext();
             var executor = new MinecraftDownloadRequestExecutor(client, logger,
                 retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 },
-                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+                hostConcurrencyController: new DownloadHostConcurrencyController());
             var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
                 executor.DownloadFileAsync(url, DownloadSourcePreference.Official, "Forge", Path.Combine(TempRoot, "installer.jar"), null, null, CancellationToken.None));
             file.Fail(new ModpackImportException(ModpackImportFailureReason.HashMismatch, "wrapped", exception));
@@ -434,7 +434,7 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             var file = new ForegroundDownloadLogScope(logger, "Test", "file.jar", path, url);
             using var scope = file.RestoreContext();
             var executor = new MinecraftDownloadRequestExecutor(client, logger,
-                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+                hostConcurrencyController: new DownloadHostConcurrencyController());
             var resolution = await executor.DownloadFileAsync(url, DownloadSourcePreference.Official, "ThirdParty",
                 path, null, null, CancellationToken.None, reportTransferredBytes: file.ReportTransferredBytes);
             file.Complete(resolution);

@@ -20,6 +20,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using CmlLib.Core.Files;
 using Launcher.Domain.Models;
@@ -42,7 +43,7 @@ public sealed class MinecraftDownloadRetryTests
     public async Task DegradedOnlySourceStillReceivesARealRequest(string mode)
     {
         const string url = "https://example.test/download.bin";
-        var targetHost = mode == "redirect" ? "cdn.example.test" : "example.test";
+        const string targetHost = "example.test";
         var health = new DownloadHostHealthTracker();
         for (var i = 0; i < 3; i++) health.RecordFailure("ThirdParty", targetHost, DownloadFailureReason.Network);
         Assert.True(health.ShouldAvoid("ThirdParty", targetHost));
@@ -78,6 +79,26 @@ public sealed class MinecraftDownloadRetryTests
             Assert.False(health.ShouldAvoid("ThirdParty", targetHost));
         }
         finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task SuccessfulEntryRedirectRestoresHealthEvenWhenNodeFails()
+    {
+        var health = new DownloadHostHealthTracker();
+        for (var i = 0; i < 3; i++) health.RecordFailure("ThirdParty", "example.test", DownloadFailureReason.Network);
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            var response = CreateResponse(request.RequestUri!.Host == "example.test" ? HttpStatusCode.Found : HttpStatusCode.ServiceUnavailable, "", request);
+            if (response.StatusCode == HttpStatusCode.Found)
+                response.Headers.Location = new Uri("https://cdn.example.test/file");
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, new DownloadRetryOptions { MaxAttemptsPerSource = 1 }, hostHealthTracker: health);
+        await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
+            executor.ExecuteAsync("https://example.test/file", DownloadSourcePreference.Official, null,
+                (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None));
+        Assert.False(health.ShouldAvoid("ThirdParty", "example.test"));
     }
 
     [Theory]
@@ -134,8 +155,7 @@ public sealed class MinecraftDownloadRetryTests
     {
         var clock = new ManualTimeProvider();
         var delays = new List<TimeSpan>();
-        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
-            delayAsync: (delay, _) => { delays.Add(delay); clock.Advance(delay); return ValueTask.CompletedTask; });
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, delayAsync: (delay, _) => { delays.Add(delay); clock.Advance(delay); return ValueTask.CompletedTask; });
         var handler = new CallbackRequestHandler((number, request, _) =>
         {
             var response = CreateResponse(number == 1 ? HttpStatusCode.TooManyRequests : HttpStatusCode.OK, "good", request);
@@ -167,8 +187,7 @@ public sealed class MinecraftDownloadRetryTests
     public async Task ExcessiveRetryAfterFailsPromptlyAndSharedCooldownNeverResends(bool fileDownload, bool distantDate)
     {
         var clock = new ManualTimeProvider();
-        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
-            delayAsync: (_, _) => throw new InvalidOperationException("An excessive cooldown must not be waited out."));
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, delayAsync: (_, _) => throw new InvalidOperationException("An excessive cooldown must not be waited out."));
         var logger = new CollectingLogger();
         var handler = new CallbackRequestHandler((_, request, _) =>
         {
@@ -213,8 +232,7 @@ public sealed class MinecraftDownloadRetryTests
     public async Task InvalidOrPastRetryAfterUsesABoundedNonnegativeFallback(string header)
     {
         var clock = new ManualTimeProvider();
-        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
-            delayAsync: (delay, _) => { Assert.InRange(delay, TimeSpan.Zero, TimeSpan.FromSeconds(2)); clock.Advance(delay); return ValueTask.CompletedTask; });
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, delayAsync: (delay, _) => { Assert.InRange(delay, TimeSpan.Zero, TimeSpan.FromSeconds(2)); clock.Advance(delay); return ValueTask.CompletedTask; });
         var handler = new CallbackRequestHandler((number, request, _) =>
         {
             var response = CreateResponse(number == 1 ? HttpStatusCode.TooManyRequests : HttpStatusCode.OK, "good", request);
@@ -233,8 +251,7 @@ public sealed class MinecraftDownloadRetryTests
     {
         var clock = new ManualTimeProvider();
         var delays = new List<TimeSpan>();
-        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
-            delayAsync: (delay, _) => { delays.Add(delay); clock.Advance(delay); return ValueTask.CompletedTask; });
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, delayAsync: (delay, _) => { delays.Add(delay); clock.Advance(delay); return ValueTask.CompletedTask; });
         var handler = new CallbackRequestHandler((_, request, _) =>
         {
             var limited = request.RequestUri!.Host == "bmclapi2.bangbang93.com";
@@ -253,7 +270,7 @@ public sealed class MinecraftDownloadRetryTests
             Assert.Equal(1, handler.RequestUris.Count(uri => uri.Host == "bmclapi2.bangbang93.com"));
             Assert.Equal(2, handler.RequestUris.Count(uri => uri.Host == "piston-meta.mojang.com"));
             Assert.Empty(delays);
-            Assert.Equal(32, controller.GetSnapshot(DownloadHostConcurrencyController.NormalizeOrigin(new Uri(BmclManifestUrl))).CurrentTarget);
+            Assert.Equal(TimeSpan.FromHours(1), controller.GetRemainingCooldown(new Uri(BmclManifestUrl)));
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
@@ -300,19 +317,277 @@ public sealed class MinecraftDownloadRetryTests
     }
 
     [Fact]
-    public void OrdinaryDownloadsUseThirtySecondTimeoutsWithoutASpeedFloor()
+    public void OrdinaryDownloadsUseTenSecondTimeoutsAndAWindowedSpeedFloor()
     {
         var options = DownloadRetryOptions.Default;
-        Assert.Equal(TimeSpan.FromSeconds(30), options.ResponseHeadersTimeout);
-        Assert.Equal(TimeSpan.FromSeconds(30), options.FirstByteTimeout);
-        Assert.Equal(TimeSpan.FromSeconds(30), options.BodyIdleTimeout);
-        Assert.Null(options.SlowBodyReadThreshold);
+        Assert.Equal(TimeSpan.FromSeconds(10), options.ResponseHeadersTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), options.FirstByteTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), options.BodyIdleTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), options.SlowBodyReadThreshold);
+        Assert.Equal(2048, options.MinimumBodyBytesPerSecond);
+        Assert.Null(DownloadRetryOptions.InteractiveMetadata.SlowBodyReadThreshold);
+    }
+
+    [Fact]
+    public async Task SlowFirstByteDoesNotCauseFastTransferToBeRejected()
+    {
+        var clock = new ManualTimeProvider();
+        var source = new TimedChunkReadStream(clock,
+            ((byte)'a', TimeSpan.FromSeconds(9.5)),
+            ((byte)'b', TimeSpan.FromSeconds(0.5)),
+            ((byte)'c', TimeSpan.FromSeconds(9.5))) { BytesPerChunk = 5 * 1024 };
+        using var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(source) };
+        await DownloadResponseThrottler.ApplyAsync(response, null, CancellationToken.None,
+            slowBodyReadThreshold: TimeSpan.FromSeconds(10), minimumBodyBytesPerSecond: 2048,
+            timeProvider: clock, expectedContentLength: 1024 * 1024);
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var buffer = new byte[40 * 1024];
+        Assert.Equal(5 * 1024, await stream.ReadAsync(buffer));
+        Assert.Equal(5 * 1024, await stream.ReadAsync(buffer));
+        source.BytesPerChunk = 40 * 1024;
+        Assert.Equal(40 * 1024, await stream.ReadAsync(buffer));
+    }
+
+    [Theory]
+    [InlineData(5, 8, false)]
+    [InlineData(15, 12, true)]
+    public async Task FinishingSoonUsesConfiguredWindow(int windowSeconds, int remainingBytes, bool shouldFinish)
+    {
+        var clock = new ManualTimeProvider();
+        var source = new TimedChunkReadStream(clock,
+            ((byte)'a', TimeSpan.Zero), ((byte)'b', TimeSpan.FromSeconds(windowSeconds)),
+            ((byte)'c', TimeSpan.Zero));
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(source)
+        };
+        // The second read's speed is one byte per second.
+        await DownloadResponseThrottler.ApplyAsync(response, null, CancellationToken.None,
+            slowBodyReadThreshold: TimeSpan.FromSeconds(windowSeconds), minimumBodyBytesPerSecond: 2048,
+            timeProvider: clock, expectedContentLength: 1 + windowSeconds + remainingBytes);
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var buffer = new byte[windowSeconds];
+        Assert.Equal(1, await stream.ReadAsync(buffer));
+        source.BytesPerChunk = windowSeconds;
+        Assert.Equal(windowSeconds, await stream.ReadAsync(buffer));
+        if (shouldFinish)
+            Assert.Equal(windowSeconds, await stream.ReadAsync(buffer));
+        else
+            await Assert.ThrowsAsync<DownloadBodyTooSlowException>(() => stream.ReadAsync(buffer.AsMemory()).AsTask());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task SlowBodyWindowCombinesReadsAcrossAllStreamEntryPoints(int readMode)
+    {
+        var clock = new ManualTimeProvider();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new TimedChunkReadStream(clock,
+                ((byte)'s', TimeSpan.Zero), ((byte)'a', TimeSpan.FromSeconds(5)), ((byte)'b', TimeSpan.FromSeconds(5))))
+        };
+        await DownloadResponseThrottler.ApplyAsync(response, null, CancellationToken.None,
+            slowBodyReadThreshold: TimeSpan.FromSeconds(10), minimumBodyBytesPerSecond: 2048,
+            timeProvider: clock, expectedContentLength: 1000);
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var buffer = new byte[1];
+        Assert.Equal(1, await ReadAsync());
+        Assert.Equal(1, await ReadAsync());
+        Assert.Equal(1, await ReadAsync());
+        var failure = await Assert.ThrowsAsync<DownloadBodyTooSlowException>(() => ReadAsync());
+        Assert.Equal(2, failure.BytesRead);
+        Assert.Equal(TimeSpan.FromSeconds(10), failure.ReadDuration);
+
+        Task<int> ReadAsync() => readMode switch
+        {
+            0 => stream.ReadAsync(buffer.AsMemory()).AsTask(),
+            1 => Task.FromResult(stream.Read(buffer, 0, buffer.Length)),
+            _ => Task.FromResult(stream.Read(buffer.AsSpan()))
+        };
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SlowProgressCompletesWithoutRestartingMetadataOrFileDownload(bool fileDownload)
+    public async Task CompletedBodyWithoutContentLengthIsNotRejectedAsSlow(bool knownSize)
+    {
+        var clock = new ManualTimeProvider();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new TimedChunkReadStream(clock,
+                ((byte)'o', TimeSpan.FromSeconds(5)), ((byte)'k', TimeSpan.FromSeconds(5))))
+        };
+        long transferred = 0;
+        await DownloadResponseThrottler.ApplyAsync(response, null, CancellationToken.None,
+            slowBodyReadThreshold: TimeSpan.FromSeconds(10), minimumBodyBytesPerSecond: 2048,
+            timeProvider: clock, reportBodyBytes: bytes => transferred += bytes,
+            expectedContentLength: knownSize ? 2 : null);
+        Assert.Equal("ok", await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, transferred);
+    }
+
+    [Fact]
+    public async Task FinishingSoonUsesExpectedSizeAndCompletesWithItsOriginalHash()
+    {
+        var clock = new ManualTimeProvider();
+        var handler = new CallbackRequestHandler((_, request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StreamContent(new TimedChunkReadStream(clock,
+                ((byte)'s', TimeSpan.FromSeconds(5)), ((byte)'l', TimeSpan.FromSeconds(5)),
+                ((byte)'o', TimeSpan.FromSeconds(5)), ((byte)'w', TimeSpan.FromSeconds(5))))
+        }));
+        using var client = CreateClient(handler);
+        var directory = CreateTempDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "finishing.txt");
+            await CreateExecutor(client, new DownloadRetryOptions(), timeProvider: clock).DownloadFileAsync(
+                "https://example.test/finishing.txt", DownloadSourcePreference.Official, "ThirdParty",
+                destination, Convert.ToHexString(SHA1.HashData("slow"u8)), 4, CancellationToken.None);
+            Assert.Equal("slow", await File.ReadAllTextAsync(destination));
+            Assert.Single(handler.RequestUris);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task WindowExcludesOutsideReadTimeAndResetsAfterFastTransfers()
+    {
+        var clock = new ManualTimeProvider();
+        var source = new TimedChunkReadStream(clock,
+            ((byte)'s', TimeSpan.Zero),
+            ((byte)'a', TimeSpan.FromSeconds(5)), ((byte)'b', TimeSpan.FromSeconds(5)),
+            ((byte)'c', TimeSpan.FromSeconds(5)), ((byte)'d', TimeSpan.FromSeconds(5)),
+            ((byte)'e', TimeSpan.FromSeconds(5)), ((byte)'f', TimeSpan.FromSeconds(5))) { BytesPerChunk = 20 * 1024 };
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(source)
+        };
+        await DownloadResponseThrottler.ApplyAsync(response, null, CancellationToken.None,
+            slowBodyReadThreshold: TimeSpan.FromSeconds(10), minimumBodyBytesPerSecond: 2048,
+            timeProvider: clock, expectedContentLength: 1024 * 1024);
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var buffer = new byte[20 * 1024];
+        for (var index = 0; index < 5; index++)
+        {
+            Assert.Equal(buffer.Length, await stream.ReadAsync(buffer));
+            // Model time spent in the outer bandwidth limiter or file writer.
+            clock.Advance(TimeSpan.FromMinutes(1));
+        }
+        source.BytesPerChunk = 1;
+        Assert.Equal(1, await stream.ReadAsync(buffer));
+        Assert.Equal(1, await stream.ReadAsync(buffer));
+        var failure = await Assert.ThrowsAsync<DownloadBodyTooSlowException>(() => stream.ReadAsync(buffer.AsMemory()).AsTask());
+        Assert.Equal(2, failure.BytesRead);
+        Assert.Equal(TimeSpan.FromSeconds(10), failure.ReadDuration);
+    }
+
+    [Fact]
+    public async Task UnknownLengthSlowBodyCountsBytesConsumedByItsEofCheck()
+    {
+        var clock = new ManualTimeProvider();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new TimedChunkReadStream(clock,
+                ((byte)'s', TimeSpan.Zero), ((byte)'a', TimeSpan.FromSeconds(5)), ((byte)'b', TimeSpan.FromSeconds(5)),
+                ((byte)'c', TimeSpan.FromSeconds(1))))
+        };
+        long transferred = 0;
+        await DownloadResponseThrottler.ApplyAsync(response, null, CancellationToken.None,
+            slowBodyReadThreshold: TimeSpan.FromSeconds(10), minimumBodyBytesPerSecond: 2048,
+            timeProvider: clock, reportBodyBytes: bytes => transferred += bytes);
+        await Assert.ThrowsAsync<DownloadBodyTooSlowException>(() => response.Content.ReadAsStringAsync());
+        Assert.Equal(4, transferred);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SlowFileRetriesRedirectEntryWithinBudgetBeforeTryingAnotherSource(bool fallbackSucceeds)
+    {
+        var clock = new ManualTimeProvider();
+        var payload = Encoding.UTF8.GetBytes(new string('d', 64));
+        var health = new DownloadHostHealthTracker();
+        var handler = new CallbackRequestHandler((number, request, _) =>
+        {
+            if (request.RequestUri!.Host == "bmclapi2.bangbang93.com")
+            {
+                var redirect = CreateResponse(HttpStatusCode.Found, "", request);
+                redirect.Headers.Location = new Uri($"https://node-{number}.example/file");
+                return Task.FromResult(redirect);
+            }
+            if (fallbackSucceeds && request.RequestUri.Host == "piston-meta.mojang.com")
+                return Task.FromResult(CreateResponse(HttpStatusCode.OK, Encoding.UTF8.GetString(payload), request));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StreamContent(new TimedChunkReadStream(clock,
+                    ((byte)'x', TimeSpan.Zero), ((byte)'x', TimeSpan.FromSeconds(5)), ((byte)'x', TimeSpan.FromSeconds(5))))
+            });
+        });
+        using var client = CreateClient(handler);
+        var logger = new CollectingLogger();
+        var executor = CreateExecutor(client, new DownloadRetryOptions { RetryDelay = TimeSpan.Zero },
+            logger, clock, health);
+        var directory = CreateTempDirectory();
+        var destination = Path.Combine(directory, "file.bin");
+        await File.WriteAllTextAsync(destination, "previous");
+        try
+        {
+            var download = executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.BmclApi, "Mojang",
+                destination, Convert.ToHexString(SHA1.HashData(payload)), payload.Length, CancellationToken.None);
+            if (fallbackSucceeds)
+            {
+                await download;
+                Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+            }
+            else
+            {
+                var failure = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() => download);
+                Assert.Equal(8, failure.Failures.Count);
+                Assert.All(failure.Failures, error => Assert.IsType<DownloadBodyTooSlowException>(error));
+                Assert.Equal("previous", await File.ReadAllTextAsync(destination));
+            }
+            Assert.Equal(4, handler.RequestUris.Count(uri => uri.Host == "bmclapi2.bangbang93.com"));
+            Assert.Equal(fallbackSucceeds ? 1 : 4, handler.RequestUris.Count(uri => uri.Host == "piston-meta.mojang.com"));
+            Assert.All(handler.RequestUris.Take(8), uri => Assert.NotEqual("piston-meta.mojang.com", uri.Host));
+            Assert.False(health.ShouldAvoid("BmclApiMojang", "bmclapi2.bangbang93.com"));
+            Assert.Contains(logger.Entries, entry => entry.Message.Contains("SlowReadBytesPerSecond=", StringComparison.Ordinal));
+            Assert.Single(Directory.GetFiles(directory));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RuntimeRequestsKeepWatchdogEnabledThroughTheFinalAttempt()
+    {
+        var clock = new ManualTimeProvider();
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StreamContent(new TimedChunkReadStream(clock,
+                    ((byte)'x', TimeSpan.Zero), ((byte)'x', TimeSpan.FromSeconds(5)), ((byte)'x', TimeSpan.FromSeconds(5))))
+            };
+            response.Content.Headers.ContentLength = 1000;
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var executor = new MinecraftDownloadRequestExecutor(client, category: DownloadConcurrencyCategory.Runtime,
+            retryOptions: new DownloadRetryOptions { RetryDelay = TimeSpan.Zero }, timeProvider: clock);
+        var failure = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
+            executor.ExecuteAsync("https://example.test/runtime", DownloadSourcePreference.Official, "ThirdParty",
+                (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None));
+        Assert.Equal(4, handler.RequestUris.Count);
+        Assert.All(failure.Failures, error => Assert.IsType<DownloadBodyTooSlowException>(error));
+    }
+
+    [Fact]
+    public async Task MetadataReadsDoNotEnableTheOrdinaryFileWatchdog()
     {
         var clock = new ManualTimeProvider();
         var handler = new CallbackRequestHandler((_, request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -323,26 +598,11 @@ public sealed class MinecraftDownloadRetryTests
                 ((byte)'o', TimeSpan.FromSeconds(6)), ((byte)'w', TimeSpan.FromSeconds(6))))
         }));
         using var client = CreateClient(handler);
-        var executor = CreateExecutor(client, new DownloadRetryOptions { RetryDelay = TimeSpan.Zero }, timeProvider: clock);
-        var directory = CreateTempDirectory();
-        try
-        {
-            if (fileDownload)
-            {
-                var destination = Path.Combine(directory, "slow.txt");
-                await executor.DownloadFileAsync("https://example.test/slow.txt", DownloadSourcePreference.Official,
-                    "ThirdParty", destination, Convert.ToHexString(SHA1.HashData("slow"u8)), 4, CancellationToken.None);
-                Assert.Equal("slow", await File.ReadAllTextAsync(destination));
-            }
-            else
-            {
-                var text = await executor.ExecuteAsync("https://example.test/slow.txt", DownloadSourcePreference.Official,
-                    "ThirdParty", (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None);
-                Assert.Equal("slow", text);
-            }
-            Assert.Single(handler.RequestUris);
-        }
-        finally { Directory.Delete(directory, recursive: true); }
+        var executor = CreateExecutor(client, new DownloadRetryOptions(), timeProvider: clock);
+        var text = await executor.ExecuteAsync("https://example.test/slow.txt", DownloadSourcePreference.Official,
+            "ThirdParty", (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None);
+        Assert.Equal("slow", text);
+        Assert.Single(handler.RequestUris);
     }
 
     [Fact]
@@ -672,6 +932,8 @@ public sealed class MinecraftDownloadRetryTests
     public async Task SingleSourceRecoveryRoundResumesWithMatchingValidator()
     {
         var clock = new ManualTimeProvider();
+        var remaining = new string('d', 64);
+        var payload = Encoding.UTF8.GetBytes("part" + remaining);
         var handler = new CallbackRequestHandler((requestNumber, request, _) =>
         {
             if (requestNumber == 1)
@@ -687,7 +949,7 @@ public sealed class MinecraftDownloadRetryTests
                         ((byte)'t', TimeSpan.FromSeconds(6))))
                 };
                 first.Headers.ETag = new EntityTagHeaderValue("\"stable\"");
-                first.Content.Headers.ContentLength = 8;
+                first.Content.Headers.ContentLength = payload.Length;
                 return Task.FromResult(first);
             }
 
@@ -696,11 +958,11 @@ public sealed class MinecraftDownloadRetryTests
             var resumed = new HttpResponseMessage(HttpStatusCode.PartialContent)
             {
                 RequestMessage = request,
-                Content = new ByteArrayContent("data"u8.ToArray())
+                Content = new StringContent(remaining)
             };
             resumed.Headers.ETag = new EntityTagHeaderValue("\"stable\"");
-            resumed.Content.Headers.ContentLength = 4;
-            resumed.Content.Headers.ContentRange = new ContentRangeHeaderValue(4, 7, 8);
+            resumed.Content.Headers.ContentLength = remaining.Length;
+            resumed.Content.Headers.ContentRange = new ContentRangeHeaderValue(4, payload.Length - 1, payload.Length);
             return Task.FromResult(resumed);
         });
         using var client = CreateClient(handler);
@@ -713,7 +975,7 @@ public sealed class MinecraftDownloadRetryTests
             "client.jar",
             destination,
             "https://example.test/client.jar",
-            expectedBytes: 8);
+            expectedBytes: payload.Length);
 
         try
         {
@@ -722,16 +984,16 @@ public sealed class MinecraftDownloadRetryTests
                 DownloadSourcePreference.Official,
                 "ThirdParty",
                 destination,
-                Convert.ToHexString(SHA1.HashData("partdata"u8.ToArray())),
-                8,
+                Convert.ToHexString(SHA1.HashData(payload)),
+                payload.Length,
                 CancellationToken.None,
                 reportAttemptProgress: logScope.BeginSource(),
                 reportTransferredBytes: logScope.ReportTransferredBytes);
 
             Assert.Equal(2, handler.RequestUris.Count);
             Assert.Equal(handler.RequestUris[0], handler.RequestUris[1]);
-            Assert.Equal("partdata", await File.ReadAllTextAsync(destination));
-            Assert.Equal(8, logScope.TransferredBytes);
+            Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+            Assert.Equal(payload.Length, logScope.TransferredBytes);
         }
         finally
         {
@@ -923,8 +1185,6 @@ public sealed class MinecraftDownloadRetryTests
             limiter: new ImportConcurrencyLimiter(),
             logger: logger,
             hostConcurrencyController: hostConcurrencyController ?? new DownloadHostConcurrencyController(
-                maximumJitter: TimeSpan.Zero,
-                nextJitter: () => 0,
                 delayAsync: static (_, _) => ValueTask.CompletedTask),
             nextRetryJitter: () => 0,
             bmclApiRequestRateLimiter: new BmclApiRequestRateLimiter(TimeSpan.Zero),
@@ -1083,6 +1343,8 @@ public sealed class MinecraftDownloadRetryTests
         params (byte Value, TimeSpan Elapsed)[] chunks) : Stream
     {
         private int readIndex;
+        private int chunkOffset;
+        public int BytesPerChunk { get; set; } = 1;
 
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -1090,20 +1352,26 @@ public sealed class MinecraftDownloadRetryTests
         public override long Length => throw new NotSupportedException();
         public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
         public override void Flush() { }
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(Span<byte> buffer)
+        {
+            if (readIndex >= chunks.Length || buffer.IsEmpty)
+                return 0;
+            var chunk = chunks[readIndex];
+            if (chunkOffset == 0) timeProvider.Advance(chunk.Elapsed);
+            var count = Math.Min(buffer.Length, BytesPerChunk - chunkOffset);
+            buffer[..count].Fill(chunk.Value);
+            chunkOffset += count;
+            if (chunkOffset == BytesPerChunk) { readIndex++; chunkOffset = 0; }
+            return count;
+        }
 
         public override ValueTask<int> ReadAsync(
             Memory<byte> buffer,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (readIndex >= chunks.Length)
-                return ValueTask.FromResult(0);
-
-            var chunk = chunks[readIndex++];
-            timeProvider.Advance(chunk.Elapsed);
-            buffer.Span[0] = chunk.Value;
-            return ValueTask.FromResult(1);
+            return ValueTask.FromResult(Read(buffer.Span));
         }
 
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();

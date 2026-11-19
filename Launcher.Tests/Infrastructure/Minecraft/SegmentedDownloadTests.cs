@@ -382,8 +382,6 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
                 MaxRedirects = 10
             },
             hostConcurrencyController: new DownloadHostConcurrencyController(
-                maximumJitter: TimeSpan.Zero,
-                nextJitter: () => 0,
                 delayAsync: static (_, _) => ValueTask.CompletedTask),
             bmclApiRequestRateLimiter: new BmclApiRequestRateLimiter(TimeSpan.Zero),
             nextRetryJitter: () => 0,

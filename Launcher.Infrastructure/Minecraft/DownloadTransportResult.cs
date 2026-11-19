@@ -38,7 +38,6 @@ internal sealed class DownloadTransportResult : IAsyncDisposable
     public TimeSpan ResponseHeadersDuration { get; }
     public int RedirectCount => RedirectChain.Count;
     public string? AdmissionOrigin => admissionLease?.Origin;
-    public DownloadHostConcurrencySnapshot? HostSnapshot => admissionLease?.Snapshot;
 
     public ValueTask DisposeAsync()
     {

@@ -9,7 +9,7 @@ namespace Launcher.Infrastructure.Minecraft;
 /// <summary>
 /// Shares opportunistic segmented workers fairly between all active files.
 /// Baseline workers continue to use the ordinary admission queue; additional
-/// workers are only reserved while both the global and host queues are idle.
+/// workers are only reserved while the global queue is idle.
 /// </summary>
 internal sealed class SegmentedDownloadCoordinator
 {
@@ -22,14 +22,10 @@ internal sealed class SegmentedDownloadCoordinator
     private int peakLiveWorkers;
 
     public Registration Register(
-        string hostOrigin,
         int usefulWorkerCount,
-        Func<SegmentedGlobalConcurrencySnapshot> getGlobalSnapshot,
-        Func<string, DownloadHostConcurrencySnapshot> getHostSnapshot)
+        Func<SegmentedGlobalConcurrencySnapshot> getGlobalSnapshot)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(hostOrigin);
         ArgumentNullException.ThrowIfNull(getGlobalSnapshot);
-        ArgumentNullException.ThrowIfNull(getHostSnapshot);
 
         lock (syncRoot)
         {
@@ -37,10 +33,8 @@ internal sealed class SegmentedDownloadCoordinator
                 peakLiveWorkers = 0;
             var state = new SessionState(
                 ++nextSessionId,
-                hostOrigin,
                 Math.Max(1, usefulWorkerCount),
-                getGlobalSnapshot,
-                getHostSnapshot);
+                getGlobalSnapshot);
             sessions.Add(state);
             UpdatePeakNoLock();
             RecalculateTargetsNoLock();
@@ -176,29 +170,10 @@ internal sealed class SegmentedDownloadCoordinator
                 sessions.Count,
                 global.CurrentTarget - unrelatedGlobalActive);
 
-        var hostCapacities = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var hostAllocated = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var hostGroup in sessions.GroupBy(session => session.HostOrigin, StringComparer.OrdinalIgnoreCase))
-        {
-            var representative = hostGroup.First();
-            var host = representative.GetHostSnapshot(representative.HostOrigin);
-            var hostSessions = hostGroup.ToArray();
-            var hostLiveWorkers = hostSessions.Sum(session => session.LiveWorkers);
-            var unrelatedHostActive = Math.Max(0, host.ActiveCount - hostLiveWorkers);
-            var hostCapacity = ordinaryWorkWaiting || host.WaitingCount > 0
-                ? hostSessions.Length
-                : Math.Max(
-                    hostSessions.Length,
-                    host.CurrentTarget - unrelatedHostActive);
-            hostCapacities[representative.HostOrigin] = hostCapacity;
-            hostAllocated[representative.HostOrigin] = 0;
-        }
-
         foreach (var session in sessions)
         {
             var baseline = Math.Min(1, session.UsefulWorkerCount);
             session.TargetWorkers = baseline;
-            hostAllocated[session.HostOrigin] += baseline;
         }
 
         var allocated = sessions.Sum(session => session.TargetWorkers);
@@ -212,11 +187,8 @@ internal sealed class SegmentedDownloadCoordinator
                     break;
                 if (session.TargetWorkers >= session.UsefulWorkerCount)
                     continue;
-                if (hostAllocated[session.HostOrigin] >= hostCapacities[session.HostOrigin])
-                    continue;
 
                 session.TargetWorkers++;
-                hostAllocated[session.HostOrigin]++;
                 allocated++;
                 madeProgress = true;
             }
@@ -240,7 +212,6 @@ internal sealed class SegmentedDownloadCoordinator
     private SegmentedSchedulingSnapshot CreateSnapshotNoLock(SessionState state)
     {
         var global = state.GetGlobalSnapshot();
-        var host = state.GetHostSnapshot(state.HostOrigin);
         return new SegmentedSchedulingSnapshot(
             state.Id,
             sessions.Count,
@@ -251,8 +222,7 @@ internal sealed class SegmentedDownloadCoordinator
             state.AdditionalWorkersGranted,
             state.AdditionalWorkersReturned,
             fairnessRounds,
-            global,
-            host);
+            global);
     }
 
     internal sealed class Registration : IDisposable
@@ -306,16 +276,12 @@ internal sealed class SegmentedDownloadCoordinator
 
     internal sealed class SessionState(
         long id,
-        string hostOrigin,
         int usefulWorkerCount,
-        Func<SegmentedGlobalConcurrencySnapshot> getGlobalSnapshot,
-        Func<string, DownloadHostConcurrencySnapshot> getHostSnapshot)
+        Func<SegmentedGlobalConcurrencySnapshot> getGlobalSnapshot)
     {
         public long Id { get; } = id;
-        public string HostOrigin { get; } = hostOrigin;
         public int UsefulWorkerCount { get; } = usefulWorkerCount;
         public Func<SegmentedGlobalConcurrencySnapshot> GetGlobalSnapshot { get; } = getGlobalSnapshot;
-        public Func<string, DownloadHostConcurrencySnapshot> GetHostSnapshot { get; } = getHostSnapshot;
         public int LiveWorkers { get; set; } = 1;
         public int TargetWorkers { get; set; } = 1;
         public int LastReportedTarget { get; set; }
@@ -341,5 +307,4 @@ internal readonly record struct SegmentedSchedulingSnapshot(
     int AdditionalWorkersGranted,
     int AdditionalWorkersReturned,
     long FairnessRounds,
-    SegmentedGlobalConcurrencySnapshot Global,
-    DownloadHostConcurrencySnapshot Host);
+    SegmentedGlobalConcurrencySnapshot Global);
