@@ -18,9 +18,80 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 public sealed class SegmentedDownloadTests : TestTempDirectory
 {
     private const string DownloadUrl = "https://downloads.example.test/client.jar";
-    private const int TestSegmentedDownloadSize = 512 * 1024;
+    private const int TestSegmentedDownloadSize = 2 * 1024 * 1024;
     private static readonly byte[] LargePayload = CreatePayload(
         TestSegmentedDownloadSize);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PreferredMirrorIsTriedWithoutRangesBeforeAnyOfficialRequest(bool mirrorFails)
+    {
+        var hosts = new List<string>();
+        var handler = new RecordingRequestHandler((_, request, _) =>
+        {
+            hosts.Add(request.RequestUri!.Host);
+            Assert.Null(request.Headers.Range);
+            return Task.FromResult(mirrorFails && request.RequestUri.Host == "bmclapi2.bangbang93.com"
+                ? new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request }
+                : CreateFullResponse(request, LargePayload));
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "mirror-first.jar");
+        await CreateExecutor(client).DownloadFileAsync("https://piston-data.mojang.com/v1/objects/example/client.jar",
+            DownloadSourcePreference.BmclApi, "Mojang", destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None);
+        Assert.Equal(mirrorFails ? new[] { "bmclapi2.bangbang93.com", "piston-data.mojang.com" } : ["bmclapi2.bangbang93.com"], hosts);
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+        AssertNoPendingFiles(destination);
+    }
+
+    [Fact]
+    public async Task CompletedRangeDoesNotWaitForResponseStreamToEnd()
+    {
+        var handler = new RecordingRequestHandler(async (_, request, _) =>
+        {
+            var response = CreatePartialResponse(request, LargePayload);
+            if (request.Headers.Range!.Ranges.Single().From == 0) return response;
+            var range = response.Content.Headers.ContentRange;
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            response.Content.Dispose();
+            response.Content = new StreamContent(new TailBlockingStream(bytes));
+            response.Content.Headers.ContentLength = bytes.Length;
+            response.Content.Headers.ContentRange = range;
+            return response;
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "tail-blocked.jar");
+        await CreateExecutor(client).DownloadFileAsync(DownloadUrl, DownloadSourcePreference.Official,
+            "ThirdParty", destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(4));
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+        Assert.Contains(handler.Requests, request => request.Range is not null && !request.Range.StartsWith("bytes=0-"));
+        AssertNoPendingFiles(destination);
+    }
+
+    [Fact]
+    public async Task RetryAfterFinalRangeWasWrittenCompletesAndVerifiesFile()
+    {
+        var raised = 0;
+        var handler = new RecordingRequestHandler(async (_, request, token) =>
+        {
+            if (request.Headers.Range!.Ranges.Single().From != 0) await Task.Delay(50, token);
+            return CreatePartialResponse(request, LargePayload);
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "completed-before-retry.jar");
+        await CreateExecutor(client, maxAttempts: 2).DownloadFileAsync(DownloadUrl, DownloadSourcePreference.Official,
+            "ThirdParty", destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None,
+            reportAttemptProgress: (_, downloaded, total) =>
+            {
+                if (downloaded == total && Interlocked.Exchange(ref raised, 1) == 0)
+                    throw new DownloadTimeoutException(DownloadFailureReason.BodyIdleTimeout, "Simulated final-read timeout");
+            });
+        Assert.Equal(1, raised);
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+        AssertNoPendingFiles(destination);
+    }
 
     [Fact]
     public async Task TrustedLargeFileUsesRangesAndPublishesVerifiedPayload()
@@ -263,7 +334,8 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
 
     private static MinecraftDownloadRequestExecutor CreateExecutor(
         HttpClient client,
-        IImportConcurrencyLimiter? limiter = null)
+        IImportConcurrencyLimiter? limiter = null,
+        int maxAttempts = 1)
     {
         var effectiveLimiter = limiter;
         if (effectiveLimiter is null)
@@ -279,8 +351,8 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
             category: DownloadConcurrencyCategory.Runtime,
             retryOptions: new DownloadRetryOptions
             {
-                MaxAttemptsPerSource = 1,
-                MaxFileSourceRounds = 1,
+                MaxAttemptsPerSource = maxAttempts,
+                MaxFileAttemptsPerSource = 1,
                 RetryDelay = TimeSpan.Zero,
                 ResponseHeadersTimeout = TimeSpan.FromSeconds(5),
                 FirstByteTimeout = TimeSpan.FromSeconds(5),
@@ -404,6 +476,15 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     }
 
     private sealed record RequestSnapshot(string? Range, string? IfRange);
+
+    private sealed class TailBlockingStream(byte[] bytes) : MemoryStream(bytes, writable: false)
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Position == Length) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return await base.ReadAsync(buffer, cancellationToken);
+        }
+    }
 
     private sealed class BlockingReadStream : Stream
     {

@@ -346,6 +346,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         {
             Timeout = Timeout.InfiniteTimeSpan
         });
+        VanillaVersionMetadataCache.ForLauncher(parameters.HttpClient, new LauncherPathProvider());
         parameters.VersionLoader = new InstanceAuthoritativeVersionLoader(
             path,
             (versionName, cancellationToken) => VanillaVersionMetadataClient.DownloadVersionJsonAsync(
@@ -361,12 +362,14 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
             runtimeHttpClient,
             logger,
             bandwidthLimiter,
-            category: DownloadConcurrencyCategory.Runtime);
+            category: DownloadConcurrencyCategory.Runtime,
+            hostHealthTracker: operationContext?.HostHealth);
         var assetIndexExecutor = new MinecraftDownloadRequestExecutor(
             runtimeHttpClient,
             logger,
             bandwidthLimiter,
-            category: DownloadConcurrencyCategory.Metadata);
+            category: DownloadConcurrencyCategory.Metadata,
+            hostHealthTracker: operationContext?.HostHealth);
         var gameInstaller = DownloadSpeedTrackingGameInstaller.CreateAsCoreCount(
             parameters.HttpClient,
             runtimeExecutor,

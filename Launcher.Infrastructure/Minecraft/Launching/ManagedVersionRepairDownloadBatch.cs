@@ -125,12 +125,13 @@ internal sealed class ManagedVersionRepairDownloadBatch
                 Path.GetDirectoryName(download.DestinationPath)!,
                 managedRoot,
                 "Managed repair directory");
+            var options = CreateDownloadOptions(download, operationContexts, operationContext);
             var executor = new MinecraftDownloadRequestExecutor(
                 httpClient,
                 logger,
                 bandwidthLimiter ?? DownloadBandwidthLimiter.Create(speedLimitMbPerSecond, downloadSpeedLimitState),
-                category: DownloadConcurrencyCategory.Runtime);
-            var options = CreateDownloadOptions(download, operationContexts, operationContext);
+                category: DownloadConcurrencyCategory.Runtime,
+                hostHealthTracker: options?.OperationContext?.HostHealth);
             var logScope = new ForegroundDownloadLogScope(
                 logger,
                 "MinecraftRepair",
@@ -177,8 +178,9 @@ internal sealed class ManagedVersionRepairDownloadBatch
         catch (Exception exception) when (exception is not OperationCanceledException and not InstanceRepairException)
         {
             var resolution = MinecraftDownloadSourceResolver
-                .EnumerateRequests(download.OriginalUrl, sourcePreference, download.ResourceCategory)
-                .First();
+                .EnumerateRequests(download.OriginalUrl, sourcePreference is DownloadSourcePreference.Auto
+                    ? DownloadSourcePreference.Official : sourcePreference, download.ResourceCategory)
+                .First() with { RequestedSourcePreference = sourcePreference };
             throw CreateDownloadException(download, resolution, statusCode: null, exception);
         }
     }

@@ -3113,6 +3113,7 @@ The current game folder will be backed up first.</value>
   <data name="Settings_DownloadSpeedLimitUnit" xml:space="preserve">
     <value>MB/s</value>
   </data>
+  <data name="Settings_DownloadSourceAuto" xml:space="preserve"><value>Automatic (recommended)</value></data>
   <data name="Settings_DownloadSourceOfficial" xml:space="preserve">
     <value>Prefer Official</value>
   </data>

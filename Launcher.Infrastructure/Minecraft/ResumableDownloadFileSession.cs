@@ -30,7 +30,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
     private readonly string? managedRoot;
     private readonly bool allowUnverifiedSegmentedDownload;
     private readonly bool useHiddenTemporaryFile;
-    private readonly PartFileCapacityManager.CapacityLease? capacityLease;
     private readonly IDisposable? assetLock;
     private string? sourceCandidateKey;
     private string? strongETag;
@@ -51,7 +50,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         string? managedRoot,
         bool allowUnverifiedSegmentedDownload,
         bool useHiddenTemporaryFile,
-        PartFileCapacityManager.CapacityLease? capacityLease,
         IDisposable? assetLock)
     {
         this.destinationPath = destinationPath;
@@ -62,7 +60,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         this.managedRoot = managedRoot;
         this.allowUnverifiedSegmentedDownload = allowUnverifiedSegmentedDownload;
         this.useHiddenTemporaryFile = useHiddenTemporaryFile;
-        this.capacityLease = capacityLease;
         this.assetLock = assetLock;
     }
 
@@ -119,7 +116,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         }
 
         IDisposable? assetLock = null;
-        PartFileCapacityManager.CapacityLease? capacityLease = null;
         try
         {
             if (options.PersistenceMode is DownloadPersistenceMode.LightweightAtomic)
@@ -142,7 +138,7 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
                     return new ResumableDownloadFileSession(
                         normalizedDestination, string.Empty, integrity, options.PersistenceMode,
                         options.OperationContext, managedRoot, options.AllowUnverifiedSegmentedDownload,
-                        options.UseHiddenTemporaryFile, null, assetLock) { IsComplete = true };
+                        options.UseHiddenTemporaryFile, assetLock) { IsComplete = true };
                 }
             }
 
@@ -155,17 +151,14 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
                 ? $".{Path.GetFileName(normalizedDestination)}.bhl-pending-{Guid.NewGuid():N}.tmp"
                 : $"{Path.GetFileName(normalizedDestination)}.bhl-pending-{Guid.NewGuid():N}.tmp";
             var temporaryPath = Path.Combine(destinationDirectory, temporaryFileName);
-            if (options.PersistenceMode is DownloadPersistenceMode.TaskScopedResumable)
-                capacityLease = PartFileCapacityManager.Reserve(integrity.ExpectedSize);
 
             return new ResumableDownloadFileSession(
                 normalizedDestination, temporaryPath, integrity, options.PersistenceMode,
                 options.OperationContext, managedRoot, options.AllowUnverifiedSegmentedDownload,
-                options.UseHiddenTemporaryFile, capacityLease, assetLock);
+                options.UseHiddenTemporaryFile, assetLock);
         }
         catch
         {
-            capacityLease?.Dispose();
             assetLock?.Dispose();
             throw;
         }
@@ -213,7 +206,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         try
         {
             EnsureManagedDestinationIsSafe();
-            capacityLease?.SetExpectedSize(totalLength);
             segmentedDestination = new FileStream(
                 temporaryPath,
                 FileMode.Create,
@@ -281,7 +273,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
                     break;
                 }
 
-                capacityLease?.BeforeWrite(accepted);
                 try
                 {
                     await RandomAccess.WriteAsync(
@@ -433,7 +424,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         var existingLength = resumed ? GetTemporaryLength() : 0;
         var totalLength = ResolveTotalLength(response, existingLength, resumed);
         knownTotalLength = totalLength;
-        capacityLease?.SetExpectedSize(totalLength);
         sourceCandidateKey = candidateKey;
         strongETag = GetStrongETag(response);
         lastModified = GetLastModified(response);
@@ -459,7 +449,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
                     if (read == 0)
                         break;
                     reportTransferredBytes?.Invoke(read);
-                    capacityLease?.BeforeWrite(read);
                     await WriteLocalAsync(destination, buffer, read, cancellationToken).ConfigureAwait(false);
                     foreach (var hasher in hashers.Values)
                         hasher.AppendData(buffer, 0, read);
@@ -497,7 +486,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         segmentedDestination?.Dispose();
         segmentedDestination = null;
         DeleteTemporary();
-        capacityLease?.Dispose();
         assetLock?.Dispose();
         await Task.CompletedTask;
     }
@@ -623,7 +611,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
             if (managedRoot is not null)
                 MinecraftPathGuard.EnsureNoReparsePoints(managedRoot, temporaryPath, "Managed download source switch");
             File.Delete(temporaryPath);
-            capacityLease?.DiscardRetainedBytes();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -684,7 +671,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
             if (managedRoot is not null)
                 MinecraftPathGuard.EnsureNoReparsePoints(managedRoot, temporaryPath, "Managed download cleanup");
             File.Delete(temporaryPath);
-            capacityLease?.DiscardRetainedBytes();
         }
         catch (InvalidDataException) { }
         catch (IOException) { }

@@ -27,16 +27,29 @@ internal sealed record DownloadRetryOptions
 {
     public static DownloadRetryOptions Default { get; } = new();
 
+    // Small install profiles and metadata should release a stalled source
+    // quickly; the lookup scheduler starts alternatives after 1.5 seconds.
+    public static DownloadRetryOptions InteractiveMetadata { get; } = new()
+    {
+        MaxAttemptsPerSource = 2,
+        ResponseHeadersTimeout = TimeSpan.FromSeconds(5),
+        FirstByteTimeout = TimeSpan.FromSeconds(5),
+        BodyIdleTimeout = TimeSpan.FromSeconds(8)
+    };
+
     public int MaxAttemptsPerSource { get; init; } = 4;
-    public int MaxFileSourceRounds { get; init; } = 3;
-    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(1);
-    public TimeSpan ResponseHeadersTimeout { get; init; } = TimeSpan.FromSeconds(10);
-    public TimeSpan FirstByteTimeout { get; init; } = TimeSpan.FromSeconds(10);
-    public TimeSpan BodyIdleTimeout { get; init; } = TimeSpan.FromSeconds(12);
-    public TimeSpan SlowBodyReadThreshold { get; init; } = TimeSpan.FromSeconds(5);
+    // Deferring a cooling source does not consume an actual file attempt.
+    public int MaxFileAttemptsPerSource { get; init; } = 4;
+    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(300);
+    public TimeSpan ResponseHeadersTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan FirstByteTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan BodyIdleTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    // A slow but progressing transfer is not a failure. Keep the watchdog opt-in
+    // for explicit internal policies; production downloads use idle timeouts.
+    public TimeSpan? SlowBodyReadThreshold { get; init; }
     public long MinimumBodyBytesPerSecond { get; init; } = 1024;
-    public TimeSpan MaximumRetryAfter { get; init; } = TimeSpan.FromSeconds(60);
-    public TimeSpan MaximumRetryDelay { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan ThrottleRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan MaximumRetryDelay { get; init; } = TimeSpan.FromMilliseconds(1400);
     public int MaxRedirects { get; init; } = 20;
 }
 
@@ -94,6 +107,8 @@ internal class DownloadAttemptException : Exception, ISafeDiagnosticException
     public DownloadFailureReason Reason { get; }
     public HttpStatusCode? StatusCode { get; }
     public TimeSpan? RetryAfter { get; }
+    public bool IsTransientMirrorForbidden { get; init; }
+    public bool IsHostThrottled => StatusCode is HttpStatusCode.TooManyRequests || IsTransientMirrorForbidden;
     public string? FinalHost { get; private set; }
     public string? FinalOrigin { get; private set; }
 
@@ -113,6 +128,19 @@ internal class DownloadAttemptException : Exception, ISafeDiagnosticException
     {
         Disposition = disposition;
         return this;
+    }
+}
+
+internal sealed class DownloadCooldownWaitException : DownloadAttemptException
+{
+    public DownloadCooldownWaitException(TimeSpan remaining, TimeSpan budget, TimeSpan waited)
+        : base(DownloadFailureDisposition.SwitchSource, DownloadFailureReason.HttpStatus,
+            "The host cooldown exceeds the request's remaining wait budget.",
+            statusCode: HttpStatusCode.TooManyRequests, retryAfter: remaining)
+    {
+        WithDetail("Reason", "HostCooldownWaitBudgetExceeded");
+        WithDetail("CooldownWaitBudgetMs", budget.TotalMilliseconds);
+        WithDetail("CooldownWaitedMs", waited.TotalMilliseconds);
     }
 }
 

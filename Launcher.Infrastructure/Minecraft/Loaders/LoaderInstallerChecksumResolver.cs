@@ -18,6 +18,7 @@
  */
 
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using Launcher.Application.Services;
@@ -38,7 +39,8 @@ internal static class LoaderInstallerChecksumResolver
         DownloadSourcePreference downloadSourcePreference,
         string categoryHint,
         int downloadSpeedLimitMbPerSecond,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DownloadHostConcurrencyController? hostConcurrencyController = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(logger);
@@ -51,21 +53,26 @@ internal static class LoaderInstallerChecksumResolver
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
             category: DownloadConcurrencyCategory.Metadata,
+            hostConcurrencyController: hostConcurrencyController,
             retryOptions: new DownloadRetryOptions
             {
                 MaxAttemptsPerSource = 1,
-                ResponseHeadersTimeout = TimeSpan.FromSeconds(3),
-                FirstByteTimeout = TimeSpan.FromSeconds(3),
-                BodyIdleTimeout = TimeSpan.FromSeconds(3)
+                ResponseHeadersTimeout = TimeSpan.FromSeconds(5),
+                FirstByteTimeout = TimeSpan.FromSeconds(5),
+                BodyIdleTimeout = TimeSpan.FromSeconds(5)
             });
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        // Mirrors may host the installer without its optional checksum sidecar.
+        // Query the upstream checksum first, independently of the JAR preference.
+        logger.LogDebug("Loader installer SHA1 lookup started. Loader={Loader} InstallerSourcePreference={InstallerSourcePreference} ChecksumSourcePreference={ChecksumSourcePreference}",
+            categoryHint, downloadSourcePreference, DownloadSourcePreference.Official);
         try
         {
-            return await executor.ExecuteAsync(
+            var result = await executor.ExecuteStaggeredLookupAsync(
                 checksumUrl,
-                downloadSourcePreference,
+                DownloadSourcePreference.Official,
                 categoryHint,
                 async (context, token) =>
                 {
@@ -78,7 +85,13 @@ internal static class LoaderInstallerChecksumResolver
                     return NormalizeSha1(text)
                         ?? throw SafeExceptionLog.Describe(new DownloadContentValidationException("Loader installer SHA1 metadata has an invalid format."), "DownloadContentValidationException", ("Reason", "Loader installer SHA1 metadata has an invalid format."));
                 },
+                status => status == HttpStatusCode.NotFound,
                 timeout.Token, logExhaustion: false).ConfigureAwait(false);
+            if (result.Found)
+                return result.Value;
+
+            logger.LogInformation("Loader installer SHA1 metadata not provided by available sources; using structural validation. Loader={Loader}", categoryHint);
+            return null;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

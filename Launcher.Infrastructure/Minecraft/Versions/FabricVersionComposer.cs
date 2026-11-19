@@ -157,8 +157,9 @@ internal static class FabricVersionComposer
             httpClient,
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-            category: DownloadConcurrencyCategory.Metadata);
-        return await executor.ExecuteAsync(
+            category: DownloadConcurrencyCategory.Metadata,
+            retryOptions: DownloadRetryOptions.InteractiveMetadata);
+        var result = await executor.ExecuteStaggeredLookupAsync(
             profileUrl,
             downloadSourcePreference,
             categoryHint: "Fabric",
@@ -175,7 +176,9 @@ internal static class FabricVersionComposer
 
                 return profileObject;
             },
+            static _ => false,
             cancellationToken);
+        return result.Value!;
     }
 
 }

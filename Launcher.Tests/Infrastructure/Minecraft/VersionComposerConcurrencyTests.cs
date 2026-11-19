@@ -27,13 +27,19 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 
 public sealed class VersionComposerConcurrencyTests : TestTempDirectory
 {
-    [Fact]
-    public async Task FabricAndQuiltComposersReleaseManifestLeaseBeforeRequestingVersionMetadata()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task FabricAndQuiltComposersReleaseManifestLeaseBeforeRequestingVersionMetadata(bool waitForFallback, bool slowFabric)
     {
         var fabricMinecraftDirectory = Path.Combine(TempRoot, "fabric", ".minecraft");
         var quiltMinecraftDirectory = Path.Combine(TempRoot, "quilt", ".minecraft");
-        var handler = new CoordinatedComposerInstallHandler();
-        using var httpClient = new HttpClient(handler);
+        using var handler = new CoordinatedComposerInstallHandler(waitForFallback, slowFabric);
+        // Independent cold clients exercise admission concurrency; requests on
+        // one client now share a metadata cache and intentionally coalesce.
+        using var httpClient = new HttpClient(handler, disposeHandler: false);
+        using var otherHttpClient = new HttpClient(handler, disposeHandler: false);
 
         var fabricTask = FabricVersionComposer.CreateFinalVersionAsync(
             httpClient,
@@ -41,16 +47,20 @@ public sealed class VersionComposerConcurrencyTests : TestTempDirectory
             "0.19.3",
             "1.20.2-fabric-0.19.3",
             fabricMinecraftDirectory,
-            LauncherDefaults.DefaultDownloadSourcePreference);
+            DownloadSourcePreference.Official);
         var quiltTask = QuiltVersionComposer.CreateFinalVersionAsync(
-            httpClient,
+            otherHttpClient,
             "1.20.2",
             "0.29.2",
             "1.20.2-quilt-0.29.2",
             quiltMinecraftDirectory,
-            LauncherDefaults.DefaultDownloadSourcePreference);
+            DownloadSourcePreference.Official);
 
         await Task.WhenAll(fabricTask, quiltTask).WaitAsync(TimeSpan.FromSeconds(5));
+        if (waitForFallback)
+            Assert.True(handler.FallbackManifestObserved.Task.IsCompletedSuccessfully);
+        if (slowFabric)
+            await handler.FabricCanceled.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.True(File.Exists(Path.Combine(
             fabricMinecraftDirectory,
@@ -74,14 +84,37 @@ public sealed class VersionComposerConcurrencyTests : TestTempDirectory
             "1.20.2-quilt-0.29.2.jar")));
     }
 
-    private sealed class CoordinatedComposerInstallHandler : HttpMessageHandler
+    private sealed class CoordinatedComposerInstallHandler(bool waitForFallback, bool slowFabric) : HttpMessageHandler
     {
         private readonly TaskCompletionSource bothManifestRequestsArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int manifestRequestCount;
+        private readonly TaskCompletionSource fabricStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FallbackManifestObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FabricCanceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var absoluteUri = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            if (slowFabric && request.RequestUri!.Host == "meta.fabricmc.net")
+            {
+                fabricStarted.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+                catch (OperationCanceledException) { FabricCanceled.TrySetResult(); throw; }
+            }
+            if (absoluteUri == "https://bmclapi2.bangbang93.com/fabric-meta/v2/versions/loader/1.20.2/0.19.3/profile/json")
+            {
+                if (slowFabric) await fabricStarted.Task.WaitAsync(cancellationToken);
+                absoluteUri = "https://meta.fabricmc.net/v2/versions/loader/1.20.2/0.19.3/profile/json";
+            }
+            // A scheduled mirror lookup is valid even when upstream eventually
+            // succeeds. These fixtures deliberately exist only on upstream.
+            if (absoluteUri is "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json"
+                or "https://bmclapi2.bangbang93.com/mojang/1.20.2.json")
+            {
+                if (request.RequestUri!.AbsolutePath == "/mc/game/version_manifest_v2.json")
+                    FallbackManifestObserved.TrySetResult();
+                return new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request };
+            }
             if (string.Equals(
                 absoluteUri,
                 "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
@@ -91,6 +124,8 @@ public sealed class VersionComposerConcurrencyTests : TestTempDirectory
                     bothManifestRequestsArrived.TrySetResult();
 
                 await bothManifestRequestsArrived.Task.WaitAsync(cancellationToken);
+                if (waitForFallback)
+                    await FallbackManifestObserved.Task.WaitAsync(cancellationToken);
             }
 
             var content = absoluteUri switch

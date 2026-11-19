@@ -35,6 +35,369 @@ public sealed class MinecraftDownloadRetryTests
     private const string BmclManifestUrl = "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json";
 
     [Theory]
+    [InlineData("metadata")]
+    [InlineData("staggered")]
+    [InlineData("file")]
+    [InlineData("redirect")]
+    public async Task DegradedOnlySourceStillReceivesARealRequest(string mode)
+    {
+        const string url = "https://example.test/download.bin";
+        var targetHost = mode == "redirect" ? "cdn.example.test" : "example.test";
+        var health = new DownloadHostHealthTracker();
+        for (var i = 0; i < 3; i++) health.RecordFailure("ThirdParty", targetHost, DownloadFailureReason.Network);
+        Assert.True(health.ShouldAvoid("ThirdParty", targetHost));
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            var response = CreateResponse(HttpStatusCode.OK, "good", request);
+            if (mode == "redirect" && request.RequestUri!.Host == "example.test")
+            {
+                response.StatusCode = HttpStatusCode.Found;
+                response.Headers.Location = new Uri("https://cdn.example.test/download.bin");
+            }
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, new DownloadRetryOptions { MaxAttemptsPerSource = 1, MaxFileAttemptsPerSource = 1 }, hostHealthTracker: health);
+        var directory = CreateTempDirectory();
+        try
+        {
+            if (mode == "file")
+            {
+                var destination = Path.Combine(directory, "file.bin");
+                await executor.DownloadFileAsync(url, DownloadSourcePreference.Official, null, destination,
+                    Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None);
+                Assert.Equal("good", await File.ReadAllTextAsync(destination));
+            }
+            else if (mode == "staggered")
+                Assert.Equal("good", (await executor.ExecuteStaggeredLookupAsync(url, DownloadSourcePreference.Official, null,
+                    (context, token) => context.Response.Content.ReadAsStringAsync(token), _ => false, CancellationToken.None)).Value);
+            else
+                Assert.Equal("good", await executor.ExecuteAsync(url, DownloadSourcePreference.Official, null,
+                    (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None));
+            Assert.Contains(handler.RequestUris, uri => uri.Host == targetHost);
+            Assert.False(health.ShouldAvoid("ThirdParty", targetHost));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HealthyMirrorIsTriedFirstButDegradedOfficialRemainsAFallback(bool mirrorFails)
+    {
+        var health = new DownloadHostHealthTracker();
+        var source = MinecraftDownloadSourceResolver.EnumerateRequests(ManifestUrl, DownloadSourcePreference.Official).First();
+        for (var i = 0; i < 3; i++) health.RecordFailure(source.ResolvedSourceKind, "piston-meta.mojang.com", DownloadFailureReason.Network);
+        var handler = new CallbackRequestHandler((_, request, _) => Task.FromResult(CreateResponse(
+            mirrorFails && request.RequestUri!.Host == "bmclapi2.bangbang93.com" ? HttpStatusCode.NotFound : HttpStatusCode.OK, "good", request)));
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, hostHealthTracker: health);
+        Assert.Equal("good", await executor.ExecuteAsync(ManifestUrl, DownloadSourcePreference.Official, null,
+            (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None));
+        Assert.Equal(mirrorFails ? new[] { "bmclapi2.bangbang93.com", "piston-meta.mojang.com" } : new[] { "bmclapi2.bangbang93.com" },
+            handler.RequestUris.Select(uri => uri.Host));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MirrorForbiddenHasOneExtraAttemptAndPreservesDestinationOnFailure(bool mirrorRecovers)
+    {
+        var mirrorAttempts = 0;
+        var handler = new CallbackRequestHandler((_, request, _) => Task.FromResult(CreateResponse(
+            request.RequestUri!.Host == "bmclapi2.bangbang93.com"
+                ? ++mirrorAttempts == 2 && mirrorRecovers ? HttpStatusCode.OK : HttpStatusCode.Forbidden
+                : HttpStatusCode.NotFound, "good", request)));
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, new DownloadRetryOptions { RetryDelay = TimeSpan.Zero, ThrottleRetryDelay = TimeSpan.Zero });
+        var directory = CreateTempDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "library.jar");
+            await File.WriteAllTextAsync(destination, "previous");
+            var download = executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.BmclApi, "Mojang", destination,
+                Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None);
+            if (mirrorRecovers) await download;
+            else await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() => download);
+            Assert.Equal(2, mirrorAttempts);
+            Assert.Equal(3, handler.RequestUris.Count);
+            Assert.Equal(mirrorRecovers ? "good" : "previous", await File.ReadAllTextAsync(destination));
+            Assert.Single(Directory.GetFiles(directory));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SingleSourceRetryAfterWaitsForTheFullServerDelay(bool fileDownload)
+    {
+        var clock = new ManualTimeProvider();
+        var delays = new List<TimeSpan>();
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
+            delayAsync: (delay, _) => { delays.Add(delay); clock.Advance(delay); return ValueTask.CompletedTask; });
+        var handler = new CallbackRequestHandler((number, request, _) =>
+        {
+            var response = CreateResponse(number == 1 ? HttpStatusCode.TooManyRequests : HttpStatusCode.OK, "good", request);
+            if (number == 1) response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromMinutes(2));
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, hostConcurrencyController: controller);
+        var directory = CreateTempDirectory();
+        try
+        {
+            if (fileDownload)
+                await executor.DownloadFileAsync("https://example.test/file.jar", DownloadSourcePreference.Official, "ThirdParty",
+                    Path.Combine(directory, "file.jar"), Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None);
+            else
+                Assert.Equal("good", await executor.ExecuteAsync("https://example.test/file.json", DownloadSourcePreference.Official,
+                    "ThirdParty", (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None));
+            Assert.Equal([TimeSpan.FromMinutes(2)], delays);
+            Assert.Equal(2, handler.RequestUris.Count);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ExcessiveRetryAfterFailsPromptlyAndSharedCooldownNeverResends(bool fileDownload, bool distantDate)
+    {
+        var clock = new ManualTimeProvider();
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
+            delayAsync: (_, _) => throw new InvalidOperationException("An excessive cooldown must not be waited out."));
+        var logger = new CollectingLogger();
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            var response = CreateResponse(HttpStatusCode.TooManyRequests, "limited", request);
+            response.Headers.RetryAfter = distantDate
+                ? new RetryConditionHeaderValue(DateTimeOffset.MaxValue)
+                : new RetryConditionHeaderValue(TimeSpan.FromHours(1));
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var directory = CreateTempDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "file.jar");
+            await File.WriteAllTextAsync(destination, "previous");
+            for (var i = 0; i < 2; i++)
+            {
+                var executor = CreateExecutor(client, logger: logger, hostConcurrencyController: controller);
+                Task operation = fileDownload
+                    ? executor.DownloadFileAsync("https://example.test/file.jar", DownloadSourcePreference.Official, null, destination,
+                        Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None)
+                    : executor.ExecuteAsync("https://example.test/file.json", DownloadSourcePreference.Official, null,
+                        (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None);
+                var failure = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(
+                    () => operation.WaitAsync(TimeSpan.FromSeconds(2)));
+                Assert.Contains(failure.Failures, item => item is DownloadAttemptException attempt
+                    && attempt.StatusCode == HttpStatusCode.TooManyRequests && attempt.Disposition == DownloadFailureDisposition.SwitchSource);
+            }
+            Assert.Single(handler.RequestUris);
+            Assert.True(controller.GetRemainingCooldown(new Uri("https://example.test")) >= TimeSpan.FromHours(1));
+            Assert.Equal("previous", await File.ReadAllTextAsync(destination));
+            Assert.Single(Directory.GetFiles(directory));
+            Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Warning && entry.Message.Contains("wait budget", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("-10")]
+    [InlineData("99999999999999999999999999999999")]
+    [InlineData("Wed, 01 Jan 2020 00:00:00 GMT")]
+    public async Task InvalidOrPastRetryAfterUsesABoundedNonnegativeFallback(string header)
+    {
+        var clock = new ManualTimeProvider();
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
+            delayAsync: (delay, _) => { Assert.InRange(delay, TimeSpan.Zero, TimeSpan.FromSeconds(2)); clock.Advance(delay); return ValueTask.CompletedTask; });
+        var handler = new CallbackRequestHandler((number, request, _) =>
+        {
+            var response = CreateResponse(number == 1 ? HttpStatusCode.TooManyRequests : HttpStatusCode.OK, "good", request);
+            if (number == 1) response.Headers.TryAddWithoutValidation("Retry-After", header);
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        Assert.Equal("good", await CreateExecutor(client, hostConcurrencyController: controller).ExecuteAsync(
+            "https://example.test/file.json", DownloadSourcePreference.Official, null,
+            (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None));
+        Assert.Equal(2, handler.RequestUris.Count);
+    }
+
+    [Fact]
+    public async Task ThrottledMirrorDoesNotBlockFallbackOrOtherExecutorsSharingTheController()
+    {
+        var clock = new ManualTimeProvider();
+        var delays = new List<TimeSpan>();
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
+            delayAsync: (delay, _) => { delays.Add(delay); clock.Advance(delay); return ValueTask.CompletedTask; });
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            var limited = request.RequestUri!.Host == "bmclapi2.bangbang93.com";
+            var response = CreateResponse(limited ? HttpStatusCode.TooManyRequests : HttpStatusCode.OK, "good", request);
+            if (limited) response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromHours(1));
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var directory = CreateTempDirectory();
+        try
+        {
+            for (var index = 0; index < 2; index++)
+                await CreateExecutor(client, hostConcurrencyController: controller).DownloadFileAsync(ManifestUrl,
+                    DownloadSourcePreference.BmclApi, "Mojang", Path.Combine(directory, $"file-{index}.jar"),
+                    Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None);
+            Assert.Equal(1, handler.RequestUris.Count(uri => uri.Host == "bmclapi2.bangbang93.com"));
+            Assert.Equal(2, handler.RequestUris.Count(uri => uri.Host == "piston-meta.mojang.com"));
+            Assert.Empty(delays);
+            Assert.Equal(32, controller.GetSnapshot(DownloadHostConcurrencyController.NormalizeOrigin(new Uri(BmclManifestUrl))).CurrentTarget);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(1, 3L * 1024 * 1024 * 1024)]
+    [InlineData(2, 1280L * 1024 * 1024)]
+    public async Task LargeDeclaredDownloadsReachNetworkWithoutATwoGiBBudgetAndCancelCleanly(int files, long size)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requests = 0;
+        var handler = new CallbackRequestHandler(async (_, request, token) =>
+        {
+            if (Interlocked.Increment(ref requests) == files) started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return CreateResponse(HttpStatusCode.OK, "unused", request);
+        });
+        using var client = CreateClient(handler);
+        using var cancellation = new CancellationTokenSource();
+        var directory = CreateTempDirectory();
+        var downloads = new List<Task>();
+        try
+        {
+            for (var index = 0; index < files; index++)
+            {
+                var destination = Path.Combine(directory, $"large-{index}.jar");
+                await File.WriteAllTextAsync(destination, "previous");
+                downloads.Add(CreateExecutor(client, new DownloadRetryOptions { ResponseHeadersTimeout = TimeSpan.FromSeconds(30) })
+                    .DownloadFileAsync($"https://example.test/{index}.jar", DownloadSourcePreference.Official,
+                    "ThirdParty", destination, Convert.ToHexString(SHA1.HashData("good"u8)), size, cancellation.Token));
+            }
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.WhenAll(downloads));
+            Assert.Equal(files, Directory.GetFiles(directory).Length);
+            foreach (var path in Directory.GetFiles(directory)) Assert.Equal("previous", await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await Task.WhenAll(downloads); } catch (Exception) { }
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void OrdinaryDownloadsUseThirtySecondTimeoutsWithoutASpeedFloor()
+    {
+        var options = DownloadRetryOptions.Default;
+        Assert.Equal(TimeSpan.FromSeconds(30), options.ResponseHeadersTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.FirstByteTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.BodyIdleTimeout);
+        Assert.Null(options.SlowBodyReadThreshold);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SlowProgressCompletesWithoutRestartingMetadataOrFileDownload(bool fileDownload)
+    {
+        var clock = new ManualTimeProvider();
+        var handler = new CallbackRequestHandler((_, request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StreamContent(new TimedChunkReadStream(clock,
+                ((byte)'s', TimeSpan.Zero), ((byte)'l', TimeSpan.FromSeconds(6)),
+                ((byte)'o', TimeSpan.FromSeconds(6)), ((byte)'w', TimeSpan.FromSeconds(6))))
+        }));
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, new DownloadRetryOptions { RetryDelay = TimeSpan.Zero }, timeProvider: clock);
+        var directory = CreateTempDirectory();
+        try
+        {
+            if (fileDownload)
+            {
+                var destination = Path.Combine(directory, "slow.txt");
+                await executor.DownloadFileAsync("https://example.test/slow.txt", DownloadSourcePreference.Official,
+                    "ThirdParty", destination, Convert.ToHexString(SHA1.HashData("slow"u8)), 4, CancellationToken.None);
+                Assert.Equal("slow", await File.ReadAllTextAsync(destination));
+            }
+            else
+            {
+                var text = await executor.ExecuteAsync("https://example.test/slow.txt", DownloadSourcePreference.Official,
+                    "ThirdParty", (context, token) => context.Response.Content.ReadAsStringAsync(token), CancellationToken.None);
+                Assert.Equal("slow", text);
+            }
+            Assert.Single(handler.RequestUris);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task FourthFileSourceRoundRecoversAfterThreeTransientlyFailedRounds()
+    {
+        var handler = new CallbackRequestHandler((number, request, _) => Task.FromResult(CreateResponse(
+            number <= 6 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK, number <= 6 ? "" : "good", request)));
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, new DownloadRetryOptions { RetryDelay = TimeSpan.Zero });
+        var directory = CreateTempDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "library.jar");
+            await executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.Official, "Mojang", destination,
+                Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None);
+            Assert.Equal("good", await File.ReadAllTextAsync(destination));
+            Assert.Equal(7, handler.RequestUris.Count);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StalledBodyStillTimesOutAndPreservesExistingFile(bool receivedFirstByte)
+    {
+        var handler = new CallbackRequestHandler((_, request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StreamContent(new FaultingReadStream(receivedFirstByte ? [(byte)'p'] : [], stall: true))
+        }));
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, new DownloadRetryOptions
+        {
+            MaxFileAttemptsPerSource = 1,
+            FirstByteTimeout = TimeSpan.FromMilliseconds(50),
+            BodyIdleTimeout = TimeSpan.FromMilliseconds(50)
+        });
+        var directory = CreateTempDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "client.jar");
+            await File.WriteAllTextAsync(destination, "previous");
+            var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
+                executor.DownloadFileAsync("https://example.test/client.jar", DownloadSourcePreference.Official, "ThirdParty",
+                    destination, Convert.ToHexString(SHA1.HashData("good"u8)), 4, CancellationToken.None));
+            Assert.Equal(receivedFirstByte ? DownloadFailureReason.BodyIdleTimeout : DownloadFailureReason.FirstByteTimeout,
+                Assert.IsType<DownloadTimeoutException>(Assert.Single(exception.Failures)).Reason);
+            Assert.Equal("previous", await File.ReadAllTextAsync(destination));
+            Assert.Single(Directory.GetFiles(directory));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
     [InlineData("Mojang", ManifestUrl, BmclManifestUrl)]
     [InlineData(
         "NeoForge",
@@ -100,7 +463,7 @@ public sealed class MinecraftDownloadRetryTests
 
         var result = await executor.ExecuteAsync(
             ManifestUrl,
-            LauncherDefaults.DefaultDownloadSourcePreference,
+            DownloadSourcePreference.Official,
             categoryHint: "Mojang",
             async (context, token) => await context.Response.Content.ReadAsStringAsync(token),
             CancellationToken.None);
@@ -159,7 +522,6 @@ public sealed class MinecraftDownloadRetryTests
         using var httpClient = CreateClient(handler);
         var executor = CreateExecutor(httpClient, new DownloadRetryOptions
         {
-            MaxFileSourceRounds = 1,
             RetryDelay = TimeSpan.Zero
         }, logger);
         var directory = CreateTempDirectory();
@@ -206,7 +568,7 @@ public sealed class MinecraftDownloadRetryTests
         {
             await executor.DownloadFileAsync(
                 ManifestUrl,
-                LauncherDefaults.DefaultDownloadSourcePreference,
+                DownloadSourcePreference.Official,
                 categoryHint: "Mojang",
                 destination,
                 expectedSha1,
@@ -553,13 +915,14 @@ public sealed class MinecraftDownloadRetryTests
         DownloadRetryOptions? options = null,
         ILogger? logger = null,
         TimeProvider? timeProvider = null,
-        DownloadHostHealthTracker? hostHealthTracker = null)
+        DownloadHostHealthTracker? hostHealthTracker = null,
+        DownloadHostConcurrencyController? hostConcurrencyController = null)
     {
         return new MinecraftDownloadRequestExecutor(
             httpClient,
             limiter: new ImportConcurrencyLimiter(),
             logger: logger,
-            hostConcurrencyController: new DownloadHostConcurrencyController(
+            hostConcurrencyController: hostConcurrencyController ?? new DownloadHostConcurrencyController(
                 maximumJitter: TimeSpan.Zero,
                 nextJitter: () => 0,
                 delayAsync: static (_, _) => ValueTask.CompletedTask),
@@ -666,7 +1029,7 @@ public sealed class MinecraftDownloadRetryTests
 
     private sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
 
-    private sealed class FaultingReadStream(byte[] firstChunk) : Stream
+    private sealed class FaultingReadStream(byte[] firstChunk, bool stall = false) : Stream
     {
         private bool returnedFirstChunk;
 
@@ -682,12 +1045,20 @@ public sealed class MinecraftDownloadRetryTests
             Memory<byte> buffer,
             CancellationToken cancellationToken = default)
         {
+            if (stall && (returnedFirstChunk || firstChunk.Length == 0))
+                return new ValueTask<int>(WaitForCancellationAsync(cancellationToken));
             if (returnedFirstChunk)
                 return ValueTask.FromException<int>(new IOException("The network stream ended."));
 
             returnedFirstChunk = true;
             firstChunk.AsSpan().CopyTo(buffer.Span);
             return ValueTask.FromResult(firstChunk.Length);
+        }
+
+        private static async Task<int> WaitForCancellationAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
         }
 
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
@@ -698,7 +1069,9 @@ public sealed class MinecraftDownloadRetryTests
     private sealed class ManualTimeProvider : TimeProvider
     {
         private long timestamp;
+        private readonly DateTimeOffset initialUtc = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
+        public override DateTimeOffset GetUtcNow() => initialUtc + TimeSpan.FromTicks(Interlocked.Read(ref timestamp));
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() => Interlocked.Read(ref timestamp);
 

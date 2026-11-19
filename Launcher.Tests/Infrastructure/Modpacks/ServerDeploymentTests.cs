@@ -20,6 +20,51 @@ namespace Launcher.Tests.Infrastructure.Modpacks;
 public sealed class ServerDeploymentTests : TestTempDirectory
 {
     [Fact]
+    public async Task FabricServerProfileUsesMirrorAndCancelsSlowOfficialLookup()
+    {
+        var bytes = "server"u8.ToArray();
+        using var handler = new ProfileServerRuntimeHandler(new ServerRuntimeHandler(bytes, Convert.ToHexString(SHA1.HashData(bytes))));
+        using var client = new HttpClient(handler);
+        var installer = new ServerRuntimeInstaller(client, new FixedSettingsService());
+        var target = Path.Combine(TempRoot, "fabric-server");
+        await installer.InstallAsync(new PreparedModpack
+        {
+            Environment = ModpackInstallEnvironment.Server,
+            MinecraftVersion = "1.20.1",
+            Loader = LoaderKind.Fabric,
+            LoaderVersion = "0.19.3"
+        }, target).WaitAsync(TimeSpan.FromSeconds(10));
+        await handler.Canceled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(File.Exists(Path.Combine(target, "fabric-server-launch.jar")));
+        Assert.True(File.Exists(Path.Combine(target, "fabric-server-launcher.properties")));
+    }
+
+    private sealed class ProfileServerRuntimeHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        private readonly TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            if (!request.RequestUri!.AbsolutePath.EndsWith("/server/json", StringComparison.Ordinal))
+                return await base.SendAsync(request, token);
+            if (request.RequestUri.Host == "meta.fabricmc.net")
+            {
+                started.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                catch (OperationCanceledException) { Canceled.TrySetResult(); throw; }
+            }
+            Assert.Equal("bmclapi2.bangbang93.com", request.RequestUri.Host);
+            await started.Task.WaitAsync(token);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StringContent("{\"mainClass\":\"net.fabricmc.loader.impl.launch.knot.KnotServer\",\"libraries\":[]}")
+            };
+        }
+    }
+
+    [Fact]
     public async Task TransactionCommitsAtomicallyAndRejectsExistingDirectory()
     {
         var parent = Path.Combine(TempRoot, "parent");
@@ -264,6 +309,8 @@ public sealed class ServerDeploymentTests : TestTempDirectory
             CancellationToken cancellationToken)
         {
             var url = request.RequestUri!.AbsoluteUri;
+            if (IsMissingMirrorMetadata(request.RequestUri))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request });
             HttpContent content = url switch
             {
                 "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json" => new StringContent(
@@ -363,6 +410,8 @@ public sealed class ServerDeploymentTests : TestTempDirectory
         {
             var url = request.RequestUri!.AbsoluteUri;
             RequestedUrls.Add(url);
+            if (IsMissingMirrorMetadata(request.RequestUri))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request });
             if (checksumUnavailable
                 && url.EndsWith("-installer.jar.sha1", StringComparison.Ordinal))
             {
@@ -406,4 +455,8 @@ public sealed class ServerDeploymentTests : TestTempDirectory
             });
         }
     }
+
+    private static bool IsMissingMirrorMetadata(Uri uri) => uri.Host == "bmclapi2.bangbang93.com"
+        && (uri.AbsolutePath == "/mc/game/version_manifest_v2.json"
+            || uri.AbsolutePath.StartsWith("/v1/packages/test/", StringComparison.Ordinal));
 }

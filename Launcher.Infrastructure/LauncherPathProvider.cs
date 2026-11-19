@@ -44,6 +44,9 @@ public sealed class LauncherPathProvider
     public string DefaultDataDirectory =>
         Path.Combine(applicationBaseDirectory, ApplicationId);
 
+    public string MinecraftMetadataCacheDirectory =>
+        Path.Combine(DefaultDataDirectory, "cache", "minecraft-metadata");
+
     public string DefaultAccountDataDirectory =>
         Path.Combine(roamingApplicationDataDirectory, ApplicationId, "accounts");
 

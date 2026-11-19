@@ -19,6 +19,7 @@ internal sealed class DownloadHostConcurrencyController
     internal const int MinimumHostConcurrency = 4;
     internal const int InitialHostConcurrency = 64;
     internal const int MaximumHostConcurrency = 64;
+    internal static readonly TimeSpan MaximumCooldownWait = TimeSpan.FromSeconds(120);
 
     private static readonly TimeSpan DefaultAdjustmentWindow = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DefaultIdleLifetime = TimeSpan.FromMinutes(5);
@@ -28,6 +29,7 @@ internal sealed class DownloadHostConcurrencyController
 
     private readonly ConcurrentDictionary<string, AdaptiveHostScheduler> hosts =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> cooldowns = new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeProvider timeProvider;
     private readonly TimeSpan adjustmentWindow;
     private readonly TimeSpan idleLifetime;
@@ -64,10 +66,11 @@ internal sealed class DownloadHostConcurrencyController
         var now = timeProvider.GetUtcNow();
         PruneExpired(now);
         var origin = NormalizeOrigin(uri);
+        var cooldownWaited = TimeSpan.Zero;
 
-        AdaptiveHostScheduler.HostLease hostLease;
         while (true)
         {
+            cooldownWaited += await WaitForCooldownAsync(origin, cooldownWaited, cancellationToken).ConfigureAwait(false);
             var scheduler = hosts.GetOrAdd(
                 origin,
                 _ => new AdaptiveHostScheduler(
@@ -77,33 +80,76 @@ internal sealed class DownloadHostConcurrencyController
                     MaximumHostConcurrency,
                     timeProvider,
                     adjustmentWindow));
-            if (scheduler.TryAcquireAsync(cancellationToken, out var pendingLease))
+            if (!scheduler.TryAcquireAsync(cancellationToken, out var pendingLease))
             {
-                hostLease = await pendingLease.ConfigureAwait(false);
-                break;
+                hosts.TryRemove(origin, out _);
+                continue;
             }
-
-            hosts.TryRemove(origin, out _);
-        }
-
-        try
-        {
-            if (applyColdStartJitter && !hostLease.SkipJitter && maximumJitter > TimeSpan.Zero)
+            var hostLease = await pendingLease.ConfigureAwait(false);
+            try
             {
-                var factor = Math.Clamp(nextJitter(), 0, 1);
-                var delay = TimeSpan.FromTicks((long)(maximumJitter.Ticks * factor));
-                if (delay > TimeSpan.Zero)
-                    await delayAsync(delay, cancellationToken).ConfigureAwait(false);
-            }
+                if (GetRemainingCooldown(origin) > TimeSpan.Zero)
+                {
+                    hostLease.Dispose();
+                    continue;
+                }
+                if (applyColdStartJitter && !hostLease.SkipJitter && maximumJitter > TimeSpan.Zero)
+                {
+                    var factor = Math.Clamp(nextJitter(), 0, 1);
+                    var delay = TimeSpan.FromTicks((long)(maximumJitter.Ticks * factor));
+                    if (delay > TimeSpan.Zero)
+                        await delayAsync(delay, cancellationToken).ConfigureAwait(false);
+                }
 
-            var globalLease = await acquireGlobalAsync(cancellationToken).ConfigureAwait(false);
-            return new DownloadAdmissionLease(this, origin, hostLease, globalLease);
+                var globalLease = await acquireGlobalAsync(cancellationToken).ConfigureAwait(false);
+                // A request queued for a slot may have been throttled in the meantime.
+                if (GetRemainingCooldown(origin) > TimeSpan.Zero)
+                {
+                    globalLease.Dispose();
+                    hostLease.Dispose();
+                    continue;
+                }
+                return new DownloadAdmissionLease(this, origin, hostLease, globalLease);
+            }
+            catch
+            {
+                await hostLease.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
         }
-        catch
+    }
+
+    public void DeferRequests(string origin, TimeSpan delay)
+    {
+        if (delay <= TimeSpan.Zero) return;
+        var now = timeProvider.GetUtcNow();
+        var until = delay >= DateTimeOffset.MaxValue - now ? DateTimeOffset.MaxValue : now + delay;
+        cooldowns.AddOrUpdate(origin, until, (_, current) => current > until ? current : until);
+    }
+
+    public TimeSpan GetRemainingCooldown(Uri uri) => GetRemainingCooldown(NormalizeOrigin(uri));
+
+    public TimeSpan GetRemainingCooldown(string origin)
+    {
+        var now = timeProvider.GetUtcNow();
+        return cooldowns.TryGetValue(origin, out var until) && until > now ? until - now : TimeSpan.Zero;
+    }
+
+    private async ValueTask<TimeSpan> WaitForCooldownAsync(string origin, TimeSpan alreadyWaited, CancellationToken token)
+    {
+        var started = timeProvider.GetTimestamp();
+        while (GetRemainingCooldown(origin) is var remaining && remaining > TimeSpan.Zero)
         {
-            await hostLease.DisposeAsync().ConfigureAwait(false);
-            throw;
+            token.ThrowIfCancellationRequested();
+            var waited = alreadyWaited + timeProvider.GetElapsedTime(started);
+            // Keep the server's cooldown intact, but do not keep a foreground
+            // request waiting for hours or repeatedly extend its wait budget.
+            if (remaining > MaximumCooldownWait - waited)
+                throw new DownloadCooldownWaitException(remaining, MaximumCooldownWait, waited)
+                    .WithFinalOrigin(origin).WithFinalHost(new Uri(origin).Host);
+            await delayAsync(remaining, token).ConfigureAwait(false);
         }
+        return timeProvider.GetElapsedTime(started);
     }
 
     public DownloadHostAdjustment? RecordResult(
@@ -140,6 +186,7 @@ internal sealed class DownloadHostConcurrencyController
         var now = timeProvider.GetUtcNow();
         PruneExpired(now);
         var origin = NormalizeOrigin(uri);
+        if (GetRemainingCooldown(origin) > TimeSpan.Zero) return null;
         var scheduler = hosts.GetOrAdd(
             origin,
             _ => new AdaptiveHostScheduler(
@@ -157,6 +204,12 @@ internal sealed class DownloadHostConcurrencyController
             var globalLease = tryAcquireGlobal();
             if (globalLease is null)
             {
+                hostLease.Dispose();
+                return null;
+            }
+            if (GetRemainingCooldown(origin) > TimeSpan.Zero)
+            {
+                globalLease.Dispose();
                 hostLease.Dispose();
                 return null;
             }
@@ -218,6 +271,9 @@ internal sealed class DownloadHostConcurrencyController
 
     private void PruneExpired(DateTimeOffset now)
     {
+        foreach (var entry in cooldowns)
+            if (entry.Value <= now)
+                ((ICollection<KeyValuePair<string, DateTimeOffset>>)cooldowns).Remove(entry);
         foreach (var (origin, scheduler) in hosts)
         {
             if (scheduler.TryRetire(now, idleLifetime))

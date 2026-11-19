@@ -138,8 +138,9 @@ internal static class QuiltVersionComposer
             httpClient,
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-            category: DownloadConcurrencyCategory.Metadata);
-        return await executor.ExecuteAsync(
+            category: DownloadConcurrencyCategory.Metadata,
+            retryOptions: DownloadRetryOptions.InteractiveMetadata);
+        var result = await executor.ExecuteStaggeredLookupAsync(
             profileUrl,
             downloadSourcePreference,
             categoryHint: "Quilt",
@@ -156,7 +157,9 @@ internal static class QuiltVersionComposer
 
                 return profileObject;
             },
+            static _ => false,
             cancellationToken);
+        return result.Value!;
     }
 
 }

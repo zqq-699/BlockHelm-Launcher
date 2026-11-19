@@ -437,6 +437,7 @@ public static class Strings
     public static string DownloadSpeed_KilobytesPerSecondFormat => Get(nameof(DownloadSpeed_KilobytesPerSecondFormat));
     public static string DownloadSpeed_MegabytesPerSecondFormat => Get(nameof(DownloadSpeed_MegabytesPerSecondFormat));
     public static string Settings_DownloadSourceOfficial => Get(nameof(Settings_DownloadSourceOfficial));
+    public static string Settings_DownloadSourceAuto => Get(nameof(Settings_DownloadSourceAuto));
     public static string Settings_DownloadSourceBmclApi => Get(nameof(Settings_DownloadSourceBmclApi));
     public static string Settings_LanguageSection => Get(nameof(Settings_LanguageSection));
     public static string Settings_LauncherLanguageLabel => Get(nameof(Settings_LauncherLanguageLabel));

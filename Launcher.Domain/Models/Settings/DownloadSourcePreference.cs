@@ -22,5 +22,6 @@ namespace Launcher.Domain.Models;
 public enum DownloadSourcePreference
 {
     Official = 1,
-    BmclApi = 2
+    BmclApi = 2,
+    Auto = 3
 }

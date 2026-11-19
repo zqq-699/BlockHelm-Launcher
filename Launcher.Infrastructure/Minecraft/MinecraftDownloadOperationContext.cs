@@ -47,6 +47,7 @@ internal sealed class MinecraftDownloadOperationContext : IDisposable
     }
 
     public string ManagedRoot { get; }
+    internal DownloadHostHealthTracker HostHealth { get; } = new(sticky: true);
 
     public string ResolveManagedRoot(string destinationPath)
     {
@@ -63,6 +64,7 @@ internal sealed class MinecraftDownloadOperationContext : IDisposable
 
     public void Dispose()
     {
+        HostHealth.Clear();
     }
 
     public void RegisterAsset(string destinationPath, string sha1, long? size)

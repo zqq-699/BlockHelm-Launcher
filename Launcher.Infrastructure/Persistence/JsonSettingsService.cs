@@ -229,16 +229,42 @@ public sealed partial class JsonSettingsService : ISettingsService
             return defaultSettings;
         }
 
-        await using var stream = new FileStream(
+        LauncherSettings loaded;
+        bool migrateSource;
+        await using (var stream = new FileStream(
             settingsPath,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
             bufferSize: 16 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var loaded = await JsonSerializer.DeserializeAsync<LauncherSettings>(stream, JsonOptions, cancellationToken)
-            .ConfigureAwait(false);
-        return Normalize(loaded ?? new LauncherSettings());
+            FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            loaded = document.RootElement.Deserialize<LauncherSettings>(JsonOptions) ?? new LauncherSettings();
+            migrateSource = !document.RootElement.TryGetProperty(nameof(LauncherSettings.DownloadSourceSelectionVersion), out var version)
+                || version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var number) || number < 1;
+        }
+        loaded = Normalize(loaded);
+        if (migrateSource)
+        {
+            loaded.DownloadSourcePreference = DownloadSourcePreference.Auto;
+            loaded.DownloadSourceSelectionVersion = 1;
+            var persistedRevision = loaded.Revision;
+            loaded.Revision = checked(loaded.Revision + 1);
+            try
+            {
+                await SaveCoreAsync(loaded, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                loaded.Revision = persistedRevision;
+                logger.LogWarning(exception,
+                    "Download source settings migration could not be persisted; using automatic selection in memory and retrying on the next load. MigrationVersion=1");
+                return loaded;
+            }
+            logger.LogInformation("Download source settings migrated to automatic selection. MigrationVersion=1");
+        }
+        return loaded;
     }
 
     private async Task<FileStream> AcquireCrossProcessLockAsync(CancellationToken cancellationToken)
@@ -423,7 +449,8 @@ public sealed partial class JsonSettingsService : ISettingsService
         }
 
         if (settings.DownloadSourcePreference is not DownloadSourcePreference.Official
-            && settings.DownloadSourcePreference is not DownloadSourcePreference.BmclApi)
+            && settings.DownloadSourcePreference is not DownloadSourcePreference.BmclApi
+            && settings.DownloadSourcePreference is not DownloadSourcePreference.Auto)
         {
             settings.DownloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference;
         }

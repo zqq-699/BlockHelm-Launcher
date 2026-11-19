@@ -40,6 +40,7 @@ public sealed class GameVersionService : IGameVersionService
     private readonly HttpClient httpClient;
     private readonly IDownloadSpeedLimitState? downloadSpeedLimitState;
     private readonly ILogger<GameVersionService> logger;
+    private readonly DownloadHostConcurrencyController hostConcurrencyController = DownloadHostConcurrencyController.Shared;
 
     public GameVersionService(
         HttpClient? httpClient = null,
@@ -50,6 +51,12 @@ public sealed class GameVersionService : IGameVersionService
             httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger<GameVersionService>.Instance;
+    }
+
+    internal GameVersionService(DownloadHostConcurrencyController hostConcurrencyController, HttpClient httpClient)
+        : this(httpClient)
+    {
+        this.hostConcurrencyController = hostConcurrencyController;
     }
 
     public async Task<IReadOnlyList<MinecraftVersionInfo>> GetVersionsAsync(
@@ -63,7 +70,8 @@ public sealed class GameVersionService : IGameVersionService
             logger,
             bandwidthLimiter,
             category: DownloadConcurrencyCategory.Metadata,
-            retryOptions: VersionCatalogRetryOptions);
+            retryOptions: VersionCatalogRetryOptions,
+            hostConcurrencyController: hostConcurrencyController);
         var lookup = await executor.ExecuteStaggeredLookupAsync(
             "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
             downloadSourcePreference,

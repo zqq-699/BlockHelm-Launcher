@@ -56,7 +56,7 @@ internal sealed class ForegroundDownloadLogScope
         this.position = position;
         this.total = total;
 
-        this.logger.LogInformation(
+        this.logger.LogDebug(
             "Foreground file download started. Operation={Operation} FileName={FileName} DestinationPath={DestinationPath} SourceUrl={SourceUrl} ExpectedBytes={ExpectedBytes} Position={Position} Total={Total}",
             operation,
             this.fileName,

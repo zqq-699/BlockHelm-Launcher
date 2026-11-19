@@ -1061,6 +1061,7 @@
   <data name="Settings_MaximumDownloadThreadsLabel" xml:space="preserve"><value>最大下载线程</value></data>
   <data name="Settings_DownloadSpeedLimitLabel" xml:space="preserve"><value>限制下载速度</value></data>
   <data name="Settings_DownloadSpeedLimitUnit" xml:space="preserve"><value>MB/s</value></data>
+  <data name="Settings_DownloadSourceAuto" xml:space="preserve"><value>自动选择（推荐）</value></data>
   <data name="Settings_DownloadSourceOfficial" xml:space="preserve"><value>官方源优先</value></data>
   <data name="Settings_DownloadSourceBmclApi" xml:space="preserve"><value>BMCLAPI 优先</value></data>
   <data name="Settings_LanguageSection" xml:space="preserve"><value>启动器语言</value></data>

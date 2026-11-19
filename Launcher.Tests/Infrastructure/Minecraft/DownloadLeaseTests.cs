@@ -73,6 +73,39 @@ public sealed class DownloadRequestExecutorLeaseTests
 
 public sealed class DownloadSourceRoutingLeaseTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SlowPreferredMetadataUsesValidatedFallbackAndCancelsOtherRequest(bool invalidMirror)
+    {
+        var fallbackArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var httpClient = new HttpClient(new DownloadSourceRoutingHttpMessageHandler(
+            DownloadSourcePreference.Official, DownloadConcurrencyCategory.Metadata,
+            new RoutingHandler(async (request, token) =>
+            {
+                if (request.RequestUri!.Host == "meta.fabricmc.net")
+                {
+                    try
+                    {
+                        if (!invalidMirror) await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                        else await fallbackArrived.Task.WaitAsync(token);
+                    }
+                    catch (OperationCanceledException) { canceled.TrySetResult(); throw; }
+                }
+                else fallbackArrived.TrySetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent(invalidMirror && request.RequestUri.Host != "meta.fabricmc.net" ? "not-json" : "{\"ok\":true}")
+                };
+            }), hostConcurrencyController: CreateHostController()));
+        var result = await httpClient.GetStringAsync("https://meta.fabricmc.net/v2/test.json").WaitAsync(TimeSpan.FromSeconds(4));
+        Assert.Equal("{\"ok\":true}", result);
+        Assert.True(fallbackArrived.Task.IsCompletedSuccessfully);
+        if (!invalidMirror) await canceled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
     [Fact]
     public async Task DownloadSourceRoutingCancellationReleasesRuntimeSlots()
     {
@@ -109,6 +142,11 @@ public sealed class DownloadSourceRoutingLeaseTests
         maximumJitter: TimeSpan.Zero,
         nextJitter: () => 0,
         delayAsync: static (_, _) => ValueTask.CompletedTask);
+
+    private sealed class RoutingHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => respond(request, token);
+    }
 }
 
 internal sealed class BlockingRequestHandler(int expectedRequestCount) : HttpMessageHandler

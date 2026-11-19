@@ -3113,6 +3113,7 @@
   <data name="Settings_DownloadSpeedLimitUnit" xml:space="preserve">
     <value>MB/s</value>
   </data>
+  <data name="Settings_DownloadSourceAuto" xml:space="preserve"><value>自動選択（推奨）</value></data>
   <data name="Settings_DownloadSourceOfficial" xml:space="preserve">
     <value>公式ソース優先</value>
   </data>

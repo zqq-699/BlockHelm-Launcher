@@ -97,19 +97,17 @@ public sealed class DownloadHostConcurrencyControllerTests
         }
     }
 
-    [Fact]
-    public void RetryDelayAddsUpToTwoSecondsButPreservesRetryAfter()
+    [Theory]
+    [InlineData(0, 300, 1200)]
+    [InlineData(1, 600, 1400)]
+    public void RetryDelayIsShortAndBoundedButPreservesRetryAfter(double jitter, int firstDelayMs, int thirdDelayMs)
     {
-        var options = new DownloadRetryOptions
-        {
-            RetryDelay = TimeSpan.FromSeconds(1),
-            MaximumRetryDelay = TimeSpan.FromSeconds(30)
-        };
+        var options = DownloadRetryOptions.Default;
         using var httpClient = new HttpClient(new SuccessHandler());
         var executor = new MinecraftDownloadRequestExecutor(
             httpClient,
             retryOptions: options,
-            nextRetryJitter: () => 0.5);
+            nextRetryJitter: () => jitter);
         var transient = new DownloadAttemptException(
             DownloadFailureDisposition.RetryCurrentSource,
             DownloadFailureReason.Network,
@@ -121,9 +119,107 @@ public sealed class DownloadHostConcurrencyControllerTests
             statusCode: HttpStatusCode.TooManyRequests,
             retryAfter: TimeSpan.FromSeconds(7));
 
-        Assert.Equal(TimeSpan.FromSeconds(2), executor.GetRetryDelay(transient, attempt: 1));
-        Assert.Equal(TimeSpan.FromSeconds(5), executor.GetRetryDelay(transient, attempt: 3));
+        Assert.Equal(TimeSpan.FromMilliseconds(firstDelayMs), executor.GetRetryDelay(transient, attempt: 1));
+        Assert.Equal(TimeSpan.FromMilliseconds(thirdDelayMs), executor.GetRetryDelay(transient, attempt: 3));
+        Assert.Equal(TimeSpan.FromMilliseconds(1400), executor.GetRetryDelay(transient, attempt: 10));
         Assert.Equal(TimeSpan.FromSeconds(7), executor.GetRetryDelay(rateLimited, attempt: 1));
+        var longRateLimit = new DownloadAttemptException(DownloadFailureDisposition.RetryCurrentSource,
+            DownloadFailureReason.HttpStatus, "rate limited", statusCode: HttpStatusCode.TooManyRequests,
+            retryAfter: TimeSpan.FromMinutes(2));
+        Assert.Equal(TimeSpan.FromMinutes(2), executor.GetRetryDelay(longRateLimit, attempt: 1));
+    }
+
+    [Fact]
+    public async Task CooldownBlocksOnlyAffectedHostWithoutHoldingSlotsAndCanBeCanceled()
+    {
+        var clock = new TestTimeProvider();
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var globalAcquires = 0;
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
+            delayAsync: (delay, token) =>
+            {
+                Assert.Equal(TimeSpan.FromMinutes(2), delay);
+                waiting.TrySetResult();
+                return new ValueTask(Task.Delay(Timeout.InfiniteTimeSpan, token));
+            });
+        controller.DeferRequests(Origin(CurseForgeUri), TimeSpan.FromMinutes(2));
+        controller.DeferRequests(Origin(CurseForgeUri), TimeSpan.FromSeconds(10));
+        using var cancellation = new CancellationTokenSource();
+        var pending = controller.AcquireAsync(CurseForgeUri, AcquireGlobal, false, cancellation.Token).AsTask();
+        await waiting.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(0, globalAcquires);
+        Assert.Equal(0, controller.GetSnapshot(Origin(CurseForgeUri)).ActiveCount);
+        Assert.Null(controller.TryAcquireAvailable(CurseForgeUri, () => new NoopLease()));
+        await using (await controller.AcquireAsync(MojangUri, AcquireGlobal, false, CancellationToken.None))
+            Assert.Equal(1, globalAcquires);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Equal(0, controller.GetSnapshot(Origin(CurseForgeUri)).ActiveCount);
+
+        ValueTask<IImportConcurrencyLease> AcquireGlobal(CancellationToken token)
+        {
+            Interlocked.Increment(ref globalAcquires);
+            return AcquireNoopGlobalAsync(token);
+        }
+    }
+
+    [Fact]
+    public async Task CooldownAppliedWhileGlobalAdmissionIsQueuedReleasesAndReacquiresSlots()
+    {
+        var clock = new TestTimeProvider();
+        var queued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var acquired = 0;
+        var disposed = 0;
+        var controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
+            delayAsync: (delay, _) => { clock.Advance(delay); return ValueTask.CompletedTask; });
+        var pending = controller.AcquireAsync(CurseForgeUri, AcquireGlobal, false, CancellationToken.None).AsTask();
+        await queued.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        controller.DeferRequests(Origin(CurseForgeUri), TimeSpan.FromMinutes(2));
+        release.TrySetResult();
+        await using (await pending.WaitAsync(TimeSpan.FromSeconds(2)))
+        {
+            Assert.Equal(2, acquired);
+            Assert.Equal(1, disposed);
+            Assert.Equal(TimeSpan.Zero, controller.GetRemainingCooldown(CurseForgeUri));
+        }
+        Assert.Equal(2, disposed);
+
+        async ValueTask<IImportConcurrencyLease> AcquireGlobal(CancellationToken token)
+        {
+            if (++acquired == 1) { queued.TrySetResult(); await release.Task.WaitAsync(token); }
+            return new CountingLease(() => disposed++);
+        }
+    }
+
+    [Fact]
+    public async Task ExtendingCooldownCannotRestartTheWaitBudget()
+    {
+        var clock = new TestTimeProvider();
+        var waited = TimeSpan.Zero;
+        DownloadHostConcurrencyController? controller = null;
+        controller = new DownloadHostConcurrencyController(timeProvider: clock, maximumJitter: TimeSpan.Zero,
+            delayAsync: (delay, _) =>
+            {
+                waited += delay;
+                clock.Advance(delay);
+                controller!.DeferRequests(Origin(CurseForgeUri), TimeSpan.FromSeconds(80));
+                return ValueTask.CompletedTask;
+            });
+        controller.DeferRequests(Origin(CurseForgeUri), TimeSpan.FromSeconds(80));
+        var failure = await Assert.ThrowsAsync<DownloadCooldownWaitException>(() => controller.AcquireAsync(
+            CurseForgeUri, _ => throw new InvalidOperationException("Cooldown must not occupy a global slot."),
+            false, CancellationToken.None).AsTask());
+        Assert.Equal(TimeSpan.FromSeconds(80), waited);
+        Assert.Equal(TimeSpan.FromSeconds(80), failure.RetryAfter);
+        Assert.Equal(DownloadFailureDisposition.SwitchSource, failure.Disposition);
+        Assert.Equal(0, controller.GetSnapshot(Origin(CurseForgeUri)).ActiveCount);
+    }
+
+    private sealed class CountingLease(Action onDispose) : IImportConcurrencyLease
+    {
+        public void Dispose() => onDispose();
+        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
     }
 
     [Fact]
@@ -175,6 +271,8 @@ public sealed class DownloadHostConcurrencyControllerTests
     {
         private DateTimeOffset utcNow = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         public override DateTimeOffset GetUtcNow() => utcNow;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => utcNow.UtcTicks;
         public void Advance(TimeSpan duration) => utcNow += duration;
     }
 

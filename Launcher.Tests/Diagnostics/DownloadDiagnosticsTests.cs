@@ -156,7 +156,8 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             var logger = factory.CreateLogger("DownloadTest");
             using var operation = DownloadDiagnostics.BeginOperation(logger, "TestInstall");
             var executor = new MinecraftDownloadRequestExecutor(client, logger, retryOptions: new DownloadRetryOptions
-            { MaxFileSourceRounds = 1, MaxAttemptsPerSource = 1, RetryDelay = TimeSpan.Zero });
+            { MaxFileAttemptsPerSource = 1, MaxAttemptsPerSource = 1, RetryDelay = TimeSpan.Zero },
+                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
             var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
                 executor.DownloadFileAsync("https://example.test/signed/path-secret?token=query-secret",
                     DownloadSourcePreference.Official, "ThirdParty", Path.Combine(TempRoot, "artifact.jar"),
@@ -215,7 +216,7 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             Interlocked.Increment(ref count) == 1 ? HttpStatusCode.Forbidden : HttpStatusCode.OK)
             { RequestMessage = request, Content = new StringContent("artifact") }));
         var executor = new MinecraftDownloadRequestExecutor(client, factory.CreateLogger("RecoveryTest"),
-            retryOptions: new DownloadRetryOptions { MaxFileSourceRounds = 1 });
+            retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 });
         var resolution = await executor.DownloadFileAsync(
             "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-installer.jar",
             DownloadSourcePreference.Official, "Forge", Path.Combine(TempRoot, "artifact.jar"), null, null, CancellationToken.None);
@@ -236,7 +237,8 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             var file = new ForegroundDownloadLogScope(logger, "Test", "installer.jar", Path.Combine(TempRoot, "installer.jar"), url);
             using var context = file.RestoreContext();
             var executor = new MinecraftDownloadRequestExecutor(client, logger,
-                retryOptions: new DownloadRetryOptions { MaxFileSourceRounds = 1 });
+                retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 },
+                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
             var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
                 executor.DownloadFileAsync(url, DownloadSourcePreference.Official, "Forge", Path.Combine(TempRoot, "installer.jar"), null, null, CancellationToken.None));
             file.Fail(new ModpackImportException(ModpackImportFailureReason.HashMismatch, "wrapped", exception));
@@ -256,7 +258,7 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
         {
             var logger = factory.CreateLogger("LengthTest");
             var executor = new MinecraftDownloadRequestExecutor(client, logger,
-                retryOptions: new DownloadRetryOptions { MaxFileSourceRounds = 1 });
+                retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 });
             var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
                 executor.DownloadFileAsync("https://example.test/file", DownloadSourcePreference.Official, "ThirdParty",
                     Path.Combine(TempRoot, "truncated.jar"), null, 999, CancellationToken.None));
@@ -281,7 +283,7 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
             var logger = factory.CreateLogger("BodyTimeoutTest");
             var executor = new MinecraftDownloadRequestExecutor(client, logger, retryOptions: new DownloadRetryOptions
             {
-                MaxFileSourceRounds = 1, FirstByteTimeout = TimeSpan.FromMilliseconds(30),
+                MaxFileAttemptsPerSource = 1, FirstByteTimeout = TimeSpan.FromMilliseconds(30),
                 BodyIdleTimeout = TimeSpan.FromMilliseconds(30)
             });
             var exception = await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() =>
@@ -292,6 +294,9 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
         var output = ReadLogs();
         Assert.Contains(expected, output);
         Assert.Contains(firstByte ? "DownloadedBytes=1" : "DownloadedBytes=0", output);
+        Assert.Contains("StatusCode=200", output);
+        Assert.Contains("ResponseHeadersDuration=", output);
+        Assert.Contains("ResponseBodyDuration=", output);
     }
 
     [Theory]
@@ -364,10 +369,60 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
         var output = ReadLogs();
         Assert.Contains("DiagnosticCode=LoaderInstallerExit", output);
         Assert.Contains("ExitCode=7", output);
-        Assert.Contains("diagnostic-field-truncated", output);
+        Assert.Contains("tail truncated", output);
         Assert.Contains("stderr-summary", output);
         Assert.Contains("DiagnosticProjectionErrorType=System.InvalidOperationException", output);
         Assert.DoesNotContain("unlabelled-projection-secret", output);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NormalAndDiagnosticLevelsKeepTerminalEvidenceButFilterRoutineDetails(bool diagnostic)
+    {
+        using (var sink = LauncherLogConfiguration.CreateLogger(
+            new LoggingLevelSwitch(diagnostic ? LogEventLevel.Verbose : LogEventLevel.Information),
+            new LoggingLevelSwitch(LogEventLevel.Warning), TempRoot))
+        using (var factory = LoggerFactory.Create(builder => builder.AddSerilog(sink, false)))
+        using (var client = new HttpClient(new Handler(request => new HttpResponseMessage(HttpStatusCode.OK)
+            { RequestMessage = request, Content = new StringContent("content") })))
+        {
+            var logger = factory.CreateLogger("LogLevels");
+            var path = Path.Combine(TempRoot, "file.jar");
+            const string url = "https://example.test/file.jar";
+            var file = new ForegroundDownloadLogScope(logger, "Test", "file.jar", path, url);
+            using var scope = file.RestoreContext();
+            var executor = new MinecraftDownloadRequestExecutor(client, logger,
+                hostConcurrencyController: new DownloadHostConcurrencyController(maximumJitter: TimeSpan.Zero));
+            var resolution = await executor.DownloadFileAsync(url, DownloadSourcePreference.Official, "ThirdParty",
+                path, null, null, CancellationToken.None, reportTransferredBytes: file.ReportTransferredBytes);
+            file.Complete(resolution);
+            var capture = new InstallerProcessOutput(logger, 42);
+            using var stream = new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes("installer line\n")));
+            Assert.Equal("installer line", await capture.PumpAsync(stream, "stdout"));
+        }
+        var output = ReadLogs();
+        Assert.Contains("Foreground file download completed.", output);
+        foreach (var message in new[] { "Foreground file download started.", "Download HTTP request started.",
+                     "Download HTTP sending.", "Download HTTP headers received.", "Loader installer output." })
+            Assert.Equal(diagnostic, output.Contains(message, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void InstallerTailKeepsLastEvidenceWithinSerializedLimitAfterRedaction()
+    {
+        var output = string.Concat(Enumerable.Repeat("escaped\"文本\\\n", 3000)) + "\npassword=private-tail-secret\nlast-evidence";
+        var failure = new InstallerProcessException(7, false, output, "stderr-evidence");
+        var tail = Assert.IsType<string>(failure.DiagnosticFields["StdoutTail"]);
+        Assert.True(Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(tail)) <= 12 * 1024);
+        Assert.Contains("tail truncated", tail);
+        Assert.Contains("last-evidence", tail);
+        Assert.DoesNotContain("private-tail-secret", tail);
+        var formatted = SafeExceptionLog.Format(failure);
+        Assert.Contains("ExitCode=7", formatted);
+        Assert.Contains("last-evidence", formatted);
+        Assert.Contains("stderr-evidence", formatted);
+        Assert.DoesNotContain("private-tail-secret", formatted);
     }
 
     [Theory]

@@ -35,6 +35,7 @@ public sealed partial class DownloadSettingsViewModel : SettingsSectionViewModel
         CustomFileDownload = customFileDownload;
         DownloadSourceOptions =
         [
+            new(DownloadSourcePreference.Auto, Strings.Settings_DownloadSourceAuto),
             new(DownloadSourcePreference.Official, Strings.Settings_DownloadSourceOfficial),
             new(DownloadSourcePreference.BmclApi, Strings.Settings_DownloadSourceBmclApi)
         ];

@@ -17,26 +17,34 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using System.Net;
 using System.Net.Http;
 
 namespace Launcher.Infrastructure.Minecraft;
 
 internal static class MinecraftHttpClientFactory
 {
-    public static HttpClient CreateTransportClient()
+    public static HttpClient CreateTransportClient(LauncherPathProvider? pathProvider = null)
     {
-        return LauncherHttpUserAgent.Apply(new HttpClient(CreateTransportHandler())
+        var client = LauncherHttpUserAgent.Apply(new HttpClient(CreateTransportHandler())
         {
-            Timeout = Timeout.InfiniteTimeSpan
+            Timeout = Timeout.InfiniteTimeSpan,
+            DefaultRequestVersion = HttpVersion.Version20,
+            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
         });
+        VanillaVersionMetadataCache.ForLauncher(client, pathProvider ?? new LauncherPathProvider());
+        return client;
     }
 
     public static HttpMessageHandler CreateTransportHandler()
     {
-        return new HttpClientHandler
+        return new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
-            UseProxy = true
+            UseProxy = true,
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2)
         };
     }
 }

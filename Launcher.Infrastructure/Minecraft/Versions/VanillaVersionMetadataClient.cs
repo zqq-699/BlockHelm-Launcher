@@ -21,6 +21,7 @@ using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -38,7 +39,9 @@ internal static class VanillaVersionMetadataClient
         int downloadSpeedLimitMbPerSecond = 0,
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         ILogger? logger = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        VanillaVersionMetadataCache? cache = null,
+        DownloadHostConcurrencyController? hostConcurrencyController = null)
     {
         return await DownloadVersionJsonAsync(
                 httpClient,
@@ -48,7 +51,7 @@ internal static class VanillaVersionMetadataClient
                 downloadSpeedLimitMbPerSecond,
                 downloadSpeedLimitState,
                 logger,
-                cancellationToken)
+                cancellationToken, cache, hostConcurrencyController)
             .ConfigureAwait(false);
     }
 
@@ -59,7 +62,9 @@ internal static class VanillaVersionMetadataClient
         int downloadSpeedLimitMbPerSecond = 0,
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         ILogger? logger = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        VanillaVersionMetadataCache? cache = null,
+        DownloadHostConcurrencyController? hostConcurrencyController = null)
     {
         return await DownloadVersionJsonAsync(
                 httpClient,
@@ -69,7 +74,7 @@ internal static class VanillaVersionMetadataClient
                 downloadSpeedLimitMbPerSecond,
                 downloadSpeedLimitState,
                 logger,
-                cancellationToken)
+                cancellationToken, cache, hostConcurrencyController)
             .ConfigureAwait(false);
     }
 
@@ -81,84 +86,109 @@ internal static class VanillaVersionMetadataClient
         int downloadSpeedLimitMbPerSecond,
         IDownloadSpeedLimitState? downloadSpeedLimitState,
         ILogger? logger,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        VanillaVersionMetadataCache? cache,
+        DownloadHostConcurrencyController? hostConcurrencyController)
     {
-        var executor = new MinecraftDownloadRequestExecutor(
-            httpClient,
-            logger,
-            DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-            category: DownloadConcurrencyCategory.Metadata);
-        var versionMetadata = await executor.ExecuteAsync(
-            VersionManifestUrl,
-            downloadSourcePreference,
-            categoryHint: "Mojang",
-            async (context, token) =>
+        cache ??= VanillaVersionMetadataCache.ForClient(httpClient);
+        await cache.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var executor = new MinecraftDownloadRequestExecutor(
+                httpClient,
+                logger,
+                DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
+                category: DownloadConcurrencyCategory.Metadata,
+                retryOptions: GameVersionService.VersionCatalogRetryOptions,
+                hostConcurrencyController: hostConcurrencyController);
+            var manifestKey = $"manifest-{downloadSourcePreference}.json";
+            var manifestBytes = await cache.ReadAsync(manifestKey, VanillaVersionMetadataCache.ManifestLifetime, logger, cancellationToken).ConfigureAwait(false);
+            VersionMetadataLocation? versionMetadata = null;
+            if (manifestBytes is not null)
             {
-                await using var manifestStream = await context.Response.Content.ReadAsStreamAsync(token);
-                var manifestNode = await JsonNode.ParseAsync(manifestStream, cancellationToken: token);
-                if (manifestNode is not JsonObject manifestObject
-                    || manifestObject["versions"] is not JsonArray versionEntries)
+                try { versionMetadata = ParseManifest(manifestBytes, minecraftVersion, requireManifestSha1); }
+                catch (Exception exception) when (exception is DownloadContentValidationException or JsonException)
                 {
-                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest is missing a versions array."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest is missing a versions array."));
+                    cache.Forget(manifestKey);
+                    logger?.LogInformation("Cached Minecraft manifest cannot resolve the requested version; refreshing. MinecraftVersion={MinecraftVersion}", minecraftVersion);
                 }
-
-                if (versionEntries.Any(entry => !IsValidManifestEntry(entry)))
-                {
-                    throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest contains an invalid version entry."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest contains an invalid version entry."));
-                }
-
-                var resolvedVersionMetadata = FindVersionMetadata(versionEntries, minecraftVersion);
-                if (resolvedVersionMetadata is null)
-                {
-                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
-                        $"Minecraft version manifest does not contain {minecraftVersion}."), "VersionManifestEntryMissing", ("MinecraftVersion", minecraftVersion));
-                }
-                if (requireManifestSha1 && !IsSha1(resolvedVersionMetadata.Sha1))
-                {
-                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
-                        $"Minecraft version manifest does not contain a valid SHA1 for {minecraftVersion}."), "VersionManifestHashInvalid", ("MinecraftVersion", minecraftVersion), ("Field", "sha1"));
-                }
-
-                return resolvedVersionMetadata;
-            },
-            cancellationToken);
-
-        return await executor.ExecuteAsync(
-            versionMetadata.Url,
-            downloadSourcePreference,
-            categoryHint: "Mojang",
-            async (context, token) =>
+            }
+            if (versionMetadata is null)
             {
-                var versionBytes = await context.Response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
-                if (requireManifestSha1)
-                {
-                    var actualSha1 = Convert.ToHexString(SHA1.HashData(versionBytes));
-                    if (!string.Equals(actualSha1, versionMetadata.Sha1, StringComparison.OrdinalIgnoreCase))
+                var manifest = await executor.ExecuteStaggeredLookupAsync(VersionManifestUrl, downloadSourcePreference, "Mojang",
+                    async (context, token) =>
                     {
-                        throw SafeExceptionLog.Describe(new DownloadContentValidationException(
-                            $"Minecraft version metadata SHA1 does not match the official manifest: {minecraftVersion}"), "VersionMetadataHashMismatch", ("MinecraftVersion", minecraftVersion),
-                            ("HashAlgorithm", "SHA1"), ("ExpectedHash", versionMetadata.Sha1), ("ActualHash", actualSha1));
+                        var bytes = await context.Response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+                        return (Bytes: bytes, Metadata: ParseManifest(bytes, minecraftVersion, requireManifestSha1));
+                    }, static _ => false, cancellationToken).ConfigureAwait(false);
+                versionMetadata = manifest.Value.Metadata;
+                await cache.WriteAsync(manifestKey, manifest.Value.Bytes, logger, cancellationToken).ConfigureAwait(false);
+            }
+
+            var hasHash = IsSha1(versionMetadata.Sha1);
+            var versionKey = hasHash ? $"version-{versionMetadata.Sha1!.ToLowerInvariant()}.json" : null;
+            if (versionKey is not null)
+            {
+                var cachedVersion = await cache.ReadAsync(versionKey, null, logger, cancellationToken).ConfigureAwait(false);
+                if (cachedVersion is not null)
+                {
+                    try { return ParseVersion(cachedVersion, minecraftVersion, versionMetadata.Sha1, requireIdentity: true); }
+                    catch (Exception exception) when (exception is DownloadContentValidationException or JsonException)
+                    {
+                        cache.Forget(versionKey);
+                        logger?.LogWarning("Cached Minecraft version metadata is invalid; downloading again. MinecraftVersion={MinecraftVersion}", minecraftVersion);
                     }
                 }
+            }
 
-                var versionNode = JsonNode.Parse(versionBytes);
-                if (versionNode is not JsonObject versionObject)
+            var downloaded = await executor.ExecuteStaggeredLookupAsync(versionMetadata.Url, downloadSourcePreference, "Mojang",
+                async (context, token) =>
                 {
-                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
-                        $"Minecraft version metadata is not a JSON object: {minecraftVersion}"), "VersionMetadataRootInvalid", ("MinecraftVersion", minecraftVersion), ("ExpectedFormat", "JSON object"));
-                }
-                if (requireManifestSha1
-                    && (versionObject["id"] is not JsonValue idValue
-                        || !idValue.TryGetValue<string>(out var id)
-                        || !string.Equals(id, minecraftVersion, StringComparison.Ordinal)))
-                {
-                    throw SafeExceptionLog.Describe(new DownloadContentValidationException(
-                        $"Minecraft version metadata id does not match the requested version: {minecraftVersion}"), "VersionMetadataIdMismatch", ("MinecraftVersion", minecraftVersion), ("Field", "id"));
-                }
+                    var bytes = await context.Response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+                    var json = ParseVersion(bytes, minecraftVersion, hasHash ? versionMetadata.Sha1 : null, requireManifestSha1 || hasHash);
+                    return (Bytes: bytes, Json: json);
+                }, static _ => false, cancellationToken).ConfigureAwait(false);
+            // Never promote legacy/hashless responses into a trusted version cache.
+            if (versionKey is not null)
+                await cache.WriteAsync(versionKey, downloaded.Value.Bytes, logger, cancellationToken).ConfigureAwait(false);
+            return downloaded.Value.Json;
+        }
+        finally { cache.Gate.Release(); }
+    }
 
-                return versionObject;
-            },
-            cancellationToken);
+    private static VersionMetadataLocation ParseManifest(byte[] bytes, string minecraftVersion, bool requireHash)
+    {
+        if (JsonNode.Parse(bytes) is not JsonObject manifest || manifest["versions"] is not JsonArray versions)
+            throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest is missing a versions array."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest is missing a versions array."));
+        if (versions.Any(entry => !IsValidManifestEntry(entry)))
+            throw SafeExceptionLog.Describe(new DownloadContentValidationException("Minecraft version manifest contains an invalid version entry."), "DownloadContentValidationException", ("Reason", "Minecraft version manifest contains an invalid version entry."));
+        var metadata = FindVersionMetadata(versions, minecraftVersion)
+            ?? throw SafeExceptionLog.Describe(new DownloadContentValidationException($"Minecraft version manifest does not contain {minecraftVersion}."),
+                "VersionManifestEntryMissing", ("MinecraftVersion", minecraftVersion));
+        if (requireHash && !IsSha1(metadata.Sha1))
+            throw SafeExceptionLog.Describe(new DownloadContentValidationException($"Minecraft version manifest does not contain a valid SHA1 for {minecraftVersion}."),
+                "VersionManifestHashInvalid", ("MinecraftVersion", minecraftVersion), ("Field", "sha1"));
+        return metadata;
+    }
+
+    private static JsonObject ParseVersion(byte[] bytes, string minecraftVersion, string? expectedSha1, bool requireIdentity)
+    {
+        if (expectedSha1 is not null)
+        {
+            var actualSha1 = Convert.ToHexString(SHA1.HashData(bytes));
+            if (!string.Equals(actualSha1, expectedSha1, StringComparison.OrdinalIgnoreCase))
+                throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                    $"Minecraft version metadata SHA1 does not match the official manifest: {minecraftVersion}"), "VersionMetadataHashMismatch", ("MinecraftVersion", minecraftVersion),
+                    ("HashAlgorithm", "SHA1"), ("ExpectedHash", expectedSha1), ("ActualHash", actualSha1));
+        }
+        var versionObject = JsonNode.Parse(bytes) as JsonObject
+            ?? throw SafeExceptionLog.Describe(new DownloadContentValidationException($"Minecraft version metadata is not a JSON object: {minecraftVersion}"),
+                "VersionMetadataRootInvalid", ("MinecraftVersion", minecraftVersion), ("ExpectedFormat", "JSON object"));
+        if (requireIdentity
+            && (versionObject["id"] is not JsonValue idValue || !idValue.TryGetValue<string>(out var id) || id != minecraftVersion))
+            throw SafeExceptionLog.Describe(new DownloadContentValidationException(
+                $"Minecraft version metadata id does not match the requested version: {minecraftVersion}"), "VersionMetadataIdMismatch", ("MinecraftVersion", minecraftVersion), ("Field", "id"));
+        return versionObject;
     }
 
     public static string? GetClientJarUrl(JsonObject versionJson)
@@ -209,7 +239,8 @@ internal static class VanillaVersionMetadataClient
             && !string.IsNullOrWhiteSpace(id)
             && versionObject["url"] is JsonValue urlValue
             && urlValue.TryGetValue<string>(out var url)
-            && !string.IsNullOrWhiteSpace(url);
+            && Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https";
     }
 
     public static string? GetClientJarSha1(JsonObject versionJson)

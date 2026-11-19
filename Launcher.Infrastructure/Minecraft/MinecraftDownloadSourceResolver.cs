@@ -39,6 +39,8 @@ internal static class MinecraftDownloadSourceResolver
         DownloadSourcePreference preference,
         string? categoryHint = null)
     {
+        if (preference is DownloadSourcePreference.Auto)
+            throw new ArgumentException("Automatic preference must be resolved before URL conversion.", nameof(preference));
         var useBmclApiFirst = preference is DownloadSourcePreference.BmclApi;
         var primary = ResolveRequest(originalUrl, preference, useBmclApi: useBmclApiFirst, categoryHint);
         yield return primary;
@@ -56,6 +58,8 @@ internal static class MinecraftDownloadSourceResolver
         bool useBmclApi,
         string? categoryHint = null)
     {
+        if (preference is DownloadSourcePreference.Auto)
+            throw new ArgumentException("Automatic preference must be resolved before URL conversion.", nameof(preference));
         if (!Uri.TryCreate(originalUrl, UriKind.Absolute, out var originalUri))
             throw new InvalidOperationException($"Invalid download URL: {originalUrl}");
 

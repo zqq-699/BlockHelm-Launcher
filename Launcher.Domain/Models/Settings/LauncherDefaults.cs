@@ -35,7 +35,7 @@ public static class LauncherDefaults
     public const int MinimumDownloadConcurrency = 1;
     public const int DefaultMaximumDownloadConcurrency = 64;
     public const int MaximumDownloadConcurrency = 128;
-    public const DownloadSourcePreference DefaultDownloadSourcePreference = DownloadSourcePreference.Official;
+    public const DownloadSourcePreference DefaultDownloadSourcePreference = DownloadSourcePreference.Auto;
     public const int DefaultMemoryMb = 4096;
     public const LauncherUpdateChannel DefaultUpdateChannel = LauncherUpdateChannel.Release;
 }

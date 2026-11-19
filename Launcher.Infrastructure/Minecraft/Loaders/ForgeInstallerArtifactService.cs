@@ -252,6 +252,7 @@ internal sealed partial class LoaderInstallerArtifactService
         SpeedMeter? speedMeter)
     {
         var archiveEntries = new Dictionary<string, ZipArchiveEntry>(StringComparer.OrdinalIgnoreCase);
+        var hostHealth = operationContext?.HostHealth ?? new DownloadHostHealthTracker(sticky: true);
         await using (var stream = new FileStream(installerJarPath, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024,
                          FileOptions.Asynchronous | FileOptions.SequentialScan))
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false))
@@ -301,7 +302,8 @@ internal sealed partial class LoaderInstallerArtifactService
 
                 var executor = new MinecraftDownloadRequestExecutor(httpClient, logger,
                     DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-                    category: DownloadConcurrencyCategory.Runtime);
+                    category: DownloadConcurrencyCategory.Runtime,
+                    hostHealthTracker: hostHealth);
                 var logScope = new ForegroundDownloadLogScope(
                     logger,
                     "ForgeInstall",

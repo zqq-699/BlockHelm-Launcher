@@ -61,7 +61,7 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
             bandwidthLimiter,
             limiter,
             category,
-            retryOptions,
+            retryOptions ?? DownloadRetryOptions.InteractiveMetadata,
             hostConcurrencyController: hostConcurrencyController);
     }
 
@@ -82,7 +82,7 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
             throw new InvalidDataException(
                 $"CmlLib attempted an unmanaged binary download through the metadata handler: {request.RequestUri!.GetLeftPart(UriPartial.Path)}");
         }
-        var buffered = await executor.ExecuteAsync(
+        var result = await executor.ExecuteStaggeredLookupAsync(
             originalUrl,
             preference,
             categoryHint: null,
@@ -94,9 +94,10 @@ internal sealed class DownloadSourceRoutingHttpMessageHandler : DelegatingHandle
                 ValidateBufferedMetadata(originalUrl, bytes);
                 return BufferedResponse.Capture(context.Response, bytes);
             },
+            static _ => false,
             cancellationToken).ConfigureAwait(false);
 
-        return buffered.CreateResponse(request);
+        return result.Value!.CreateResponse(request);
     }
 
     private static bool IsAllowedMetadataRequest(Uri uri)

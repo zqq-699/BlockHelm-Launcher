@@ -7,6 +7,7 @@
 
 using System.Net;
 using System.Net.Http;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -48,7 +49,7 @@ public sealed class ManagedVersionRepairIntegrityTests : TestTempDirectory
         Assert.Equal(expected.Index, await File.ReadAllTextAsync(Path.Combine(minecraftDirectory, "assets", "indexes", "5.json")));
         Assert.Equal(expected.Logging, await File.ReadAllTextAsync(Path.Combine(minecraftDirectory, "assets", "log_configs", "client.xml")));
         Assert.Equal(expected.Asset, await File.ReadAllTextAsync(expected.AssetPath(minecraftDirectory)));
-        Assert.Equal(5, handler.RequestCount);
+        Assert.Equal(expected.Downloads.Keys.Order(StringComparer.Ordinal), handler.Requests.Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -321,14 +322,15 @@ public sealed class ManagedVersionRepairIntegrityTests : TestTempDirectory
 
     private sealed class ContentHandler(IReadOnlyDictionary<string, string> content) : HttpMessageHandler
     {
-        public int RequestCount { get; private set; }
+        public ConcurrentQueue<string> Requests { get; } = new();
+        public int RequestCount => Requests.Count;
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            RequestCount++;
             var url = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            Requests.Enqueue(url);
             if (!content.TryGetValue(url, out var responseContent))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request });
 

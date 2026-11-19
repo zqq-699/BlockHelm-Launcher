@@ -7,6 +7,7 @@
 using System.IO;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using Launcher.Application.Services;
 using Microsoft.Extensions.Logging;
 
@@ -20,8 +21,30 @@ internal sealed class InstallerProcessException(int exitCode, bool unsupportedIn
     public IReadOnlyDictionary<string, object?> DiagnosticFields => new Dictionary<string, object?>
     {
         ["ExitCode"] = exitCode, ["UnsupportedInstallClient"] = UnsupportedInstallClient,
-        ["StdoutTail"] = stdout, ["StderrTail"] = stderr
+        ["StdoutTail"] = BoundTail(stdout), ["StderrTail"] = BoundTail(stderr)
     };
+
+    private static string BoundTail(string value)
+    {
+        const int maxSerializedBytes = 12 * 1024;
+        const string marker = "[tail truncated] ";
+        // Spaces remain visible after JSON escaping and keep the final log
+        // redactor from treating the next line as part of a credential value.
+        var safe = SensitiveLogText.Redact(value).Replace("\r\n", " \n ").Replace("\r", " \n ").Replace("\n", " \n ");
+        if (Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(safe)) <= maxSerializedBytes) return safe;
+        var low = 0;
+        var high = safe.Length;
+        while (low < high)
+        {
+            var length = low + (high - low + 1) / 2;
+            var candidate = marker + safe[^length..];
+            if (Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(candidate)) <= maxSerializedBytes) low = length;
+            else high = length - 1;
+        }
+        var start = safe.Length - low;
+        if (start < safe.Length && char.IsLowSurrogate(safe[start])) start++;
+        return marker + safe[start..];
+    }
 }
 
 /// <summary>Bounded, streaming capture. Each pipe owns its redaction state.</summary>
@@ -84,7 +107,7 @@ internal sealed class InstallerProcessOutput(ILogger? logger, int processId, IRe
             }
             var safe = redactor.RedactLine(raw);
             Volatile.Write(ref lastOutput, Stopwatch.GetTimestamp());
-            logger?.LogInformation("Loader installer output. ProcessId={ProcessId} Stream={Stream} OutputSequence={OutputSequence} Output={Output}", processId, stream, Interlocked.Increment(ref sequence), safe);
+            logger?.LogDebug("Loader installer output. ProcessId={ProcessId} Stream={Stream} OutputSequence={OutputSequence} Output={Output}", processId, stream, Interlocked.Increment(ref sequence), safe);
             tail.Enqueue(safe);
             while (tail.Count > 100) tail.Dequeue();
             line.Clear();

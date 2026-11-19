@@ -83,6 +83,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         var speedLimit = settings.DownloadSpeedLimitMbPerSecond;
         Directory.CreateDirectory(targetDirectory);
         MinecraftPathGuard.EnsureNoReparsePoints(targetDirectory, targetDirectory, "Server runtime directory");
+        using var downloadOperation = new MinecraftDownloadOperationContext(targetDirectory);
 
         progress?.Report(new LauncherProgress(ImportProgressStages.InstallingMinecraftBase, string.Empty));
         var versionJson = await VanillaVersionMetadataClient.DownloadVersionJsonAsync(
@@ -101,7 +102,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
             preference,
             speedLimit,
             progress,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken, downloadOperation).ConfigureAwait(false);
 
         var launchJar = serverJarName;
         switch (modpack.Loader)
@@ -117,7 +118,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                     preference,
                     speedLimit,
                     progress,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken, downloadOperation).ConfigureAwait(false);
                 break;
             case LoaderKind.Quilt:
                 launchJar = await InstallProfileLoaderAsync(
@@ -128,7 +129,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                     preference,
                     speedLimit,
                     progress,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken, downloadOperation).ConfigureAwait(false);
                 break;
             case LoaderKind.Forge:
             case LoaderKind.NeoForge:
@@ -138,7 +139,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                     preference,
                     speedLimit,
                     progress,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken, downloadOperation).ConfigureAwait(false);
                 launchJar = ResolveForgeLikeLaunchJar(targetDirectory, serverJarName);
                 break;
             default:
@@ -158,7 +159,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         DownloadSourcePreference preference,
         int speedLimit,
         IProgress<LauncherProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MinecraftDownloadOperationContext downloadOperation)
     {
         var url = VanillaVersionMetadataClient.GetServerJarUrl(versionJson);
         if (string.IsNullOrWhiteSpace(url))
@@ -177,7 +179,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
             preference,
             speedLimit,
             progress,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken, downloadOperation: downloadOperation).ConfigureAwait(false);
     }
 
     private async Task<string> InstallProfileLoaderAsync(
@@ -188,7 +190,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         DownloadSourcePreference preference,
         int speedLimit,
         IProgress<LauncherProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MinecraftDownloadOperationContext downloadOperation)
     {
         if (string.IsNullOrWhiteSpace(modpack.LoaderVersion))
         {
@@ -200,8 +203,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         var profileUrl = isQuilt
             ? $"https://meta.quiltmc.org/v3/versions/loader/{modpack.MinecraftVersion}/{modpack.LoaderVersion}/server/json"
             : $"https://meta.fabricmc.net/v2/versions/loader/{modpack.MinecraftVersion}/{modpack.LoaderVersion}/server/json";
-        var executor = CreateExecutor(speedLimit, DownloadConcurrencyCategory.Metadata);
-        var profile = await executor.ExecuteAsync(
+        var executor = CreateExecutor(speedLimit, DownloadConcurrencyCategory.Metadata, downloadOperation);
+        var result = await executor.ExecuteStaggeredLookupAsync(
             profileUrl,
             preference,
             isQuilt ? "Quilt" : "Fabric",
@@ -212,7 +215,9 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 return node as JsonObject
                     ?? throw SafeExceptionLog.Describe(new DownloadContentValidationException("Server loader profile is not a JSON object."), "DownloadContentValidationException", ("Reason", "Server loader profile is not a JSON object."));
             },
+            static _ => false,
             cancellationToken).ConfigureAwait(false);
+        var profile = result.Value!;
 
         var artifacts = ResolveProfileLibraries(profile).ToArray();
         var librariesRoot = Path.Combine(targetDirectory, "libraries");
@@ -235,7 +240,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                     preference,
                     speedLimit,
                     progress,
-                    token).ConfigureAwait(false);
+                    token, downloadOperation: downloadOperation).ConfigureAwait(false);
             }).ConfigureAwait(false);
 
         var launchJarName = isQuilt ? QuiltLauncherJar : FabricLauncherJar;
@@ -298,7 +303,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         DownloadSourcePreference preference,
         int speedLimit,
         IProgress<LauncherProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MinecraftDownloadOperationContext downloadOperation)
     {
         if (string.IsNullOrWhiteSpace(modpack.LoaderVersion))
         {
@@ -333,7 +339,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 speedLimit,
                 progress,
                 cancellationToken,
-                (path, token) => LoaderInstallerFallbackValidator.ValidateAsync(path, modpack.MinecraftVersion, token)).ConfigureAwait(false);
+                (path, token) => LoaderInstallerFallbackValidator.ValidateAsync(path, modpack.MinecraftVersion, token), downloadOperation).ConfigureAwait(false);
 
             var artifactService = new LoaderInstallerArtifactService(
                 httpClient,
@@ -350,6 +356,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 preference,
                 speedLimit,
                 cancellationToken,
+                operationContext: downloadOperation,
                 speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
 
             progress?.Report(new LauncherProgress(InstallProgressStages.CheckingJava, string.Empty));
@@ -379,6 +386,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 preference,
                 speedLimit,
                 cancellationToken,
+                operationContext: downloadOperation,
                 speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
             await DownloadDiagnostics.RunStageAsync(logger, "ServerArtifactValidation", () => artifactService.ValidatePublishedArtifactsAsync(
                 targetDirectory,
@@ -403,12 +411,13 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         int speedLimit,
         IProgress<LauncherProgress>? progress,
         CancellationToken cancellationToken,
-        Func<string, CancellationToken, Task>? validateUnverifiedFile = null)
+        Func<string, CancellationToken, Task>? validateUnverifiedFile = null,
+        MinecraftDownloadOperationContext? downloadOperation = null)
     {
         var parent = Path.GetDirectoryName(destination);
         if (!string.IsNullOrWhiteSpace(parent))
             Directory.CreateDirectory(parent);
-        var executor = CreateExecutor(speedLimit, DownloadConcurrencyCategory.Runtime);
+        var executor = CreateExecutor(speedLimit, DownloadConcurrencyCategory.Runtime, downloadOperation);
         await executor.DownloadFileAsync(
             url,
             preference,
@@ -425,12 +434,15 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
             speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
     }
 
-    private MinecraftDownloadRequestExecutor CreateExecutor(int speedLimit, DownloadConcurrencyCategory category) =>
+    private MinecraftDownloadRequestExecutor CreateExecutor(int speedLimit, DownloadConcurrencyCategory category,
+        MinecraftDownloadOperationContext? downloadOperation = null) =>
         new(
             httpClient,
             logger,
             DownloadBandwidthLimiter.Create(speedLimit, downloadSpeedLimitState),
-            category: category);
+            category: category,
+            hostHealthTracker: downloadOperation?.HostHealth,
+            retryOptions: category is DownloadConcurrencyCategory.Metadata ? DownloadRetryOptions.InteractiveMetadata : null);
 
     internal static ForgeLikeServerInstallerArtifact ResolveForgeLikeInstallerArtifact(PreparedModpack modpack)
     {
