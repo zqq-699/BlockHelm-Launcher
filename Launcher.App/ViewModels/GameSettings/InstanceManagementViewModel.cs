@@ -343,7 +343,16 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
             await backupService.RecoverPendingRestoresAsync(requestedMinecraftDirectory);
         }
 
-        return await instanceService.GetInstancesAsync();
+        var previousDefault = settings.DefaultInstanceDirectory;
+        var instances = await instanceService.GetInstancesAsync();
+        var latestSettings = await settingsService.LoadAsync();
+        if (PathsEqual(requestedMinecraftDirectory, settings.MinecraftDirectory)
+            && PathsEqual(requestedMinecraftDirectory, latestSettings.MinecraftDirectory)
+            && string.Equals(previousDefault, settings.DefaultInstanceDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            settings.DefaultInstanceDirectory = latestSettings.DefaultInstanceDirectory;
+        }
+        return instances;
     }
 
     private void ApplyInstanceSnapshot(
@@ -355,14 +364,6 @@ public sealed partial class InstanceManagementViewModel : ObservableObject
         ReconcileInstances(loadedInstances);
         lastRefreshedMinecraftDirectory = requestedMinecraftDirectory;
         SelectedInstance = ResolveSelectedInstance(settings.DefaultInstanceDirectory, previousSelectedId);
-        if (!string.IsNullOrWhiteSpace(settings.DefaultInstanceDirectory)
-            && Instances.All(instance => !string.Equals(
-                instance.InstanceDirectory,
-                settings.DefaultInstanceDirectory,
-                StringComparison.OrdinalIgnoreCase)))
-        {
-            settings.DefaultInstanceDirectory = SelectedInstance?.InstanceDirectory ?? string.Empty;
-        }
         hasLoadedInstances = markAsFullyLoaded;
         UpdateCatalogSnapshotAndRevision(forceChanged: true);
         logger.LogDebug(

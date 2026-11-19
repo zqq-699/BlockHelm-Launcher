@@ -135,36 +135,62 @@ public sealed class JsonGameInstanceRepository : IGameInstanceRepository
         try
         {
             await using var mutationLock = await AcquireVersionMutationLockAsync(minecraftDirectory, cancellationToken).ConfigureAwait(false);
-            var instances = await LoadInstancesCoreAsync(minecraftDirectory, cancellationToken).ConfigureAwait(false);
+            var unavailableDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var instances = await LoadInstancesCoreAsync(minecraftDirectory, cancellationToken, unavailableDirectories).ConfigureAwait(false);
             var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
             var defaultDirectory = MinecraftDirectoryPath.Equals(settings.MinecraftDirectory, minecraftDirectory)
                 ? settings.DefaultInstanceDirectory : null;
-            var installedVersions = await metadataReader.DiscoverAsync(minecraftDirectory, cancellationToken).ConfigureAwait(false);
-
-            // External tools do not use our mutation lock. Reject a detected mixed read
-            // instead of treating a disappearing/replaced directory as a normal removal.
+            var installedVersions = await metadataReader.DiscoverAsync(minecraftDirectory, cancellationToken, unavailableDirectories).ConfigureAwait(false);
+            // External tools can change individual directories between the two scans.
+            // Exclude inconsistent entries from both halves of the snapshot.
+            var validatedInstances = new List<GameInstance>();
             foreach (var instance in instances)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                InstanceDirectoryOwnership.EnsureCurrent(instance);
+                var directory = MinecraftDirectoryPath.Normalize(instance.InstanceDirectory);
+                if (unavailableDirectories.Contains(directory))
+                    continue;
+                try
+                {
+                    InstanceDirectoryOwnership.EnsureCurrent(instance);
+                    validatedInstances.Add(instance);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or GameInstanceMutationConflictException)
+                {
+                    unavailableDirectories.Add(directory);
+                    logger.LogWarning(exception, "Unable to validate instance directory during catalog refresh. InstanceDirectory={InstanceDirectory}", directory);
+                }
             }
-            var observedDirectories = instances.Select(instance => MinecraftDirectoryPath.Normalize(instance.InstanceDirectory))
+            var observedDirectories = validatedInstances.Select(instance => MinecraftDirectoryPath.Normalize(instance.InstanceDirectory))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var version in installedVersions)
-                if (!observedDirectories.Contains(MinecraftDirectoryPath.Normalize(version.Directory)))
-                    throw new GameInstanceMutationConflictException(version.Directory, version.VersionName);
+            {
+                var directory = MinecraftDirectoryPath.Normalize(version.Directory);
+                if (!observedDirectories.Contains(directory) && unavailableDirectories.Add(directory))
+                    logger.LogWarning("Instance appeared during catalog refresh. InstanceDirectory={InstanceDirectory}", directory);
+            }
+            var validatedVersions = installedVersions
+                .Where(version => !unavailableDirectories.Contains(MinecraftDirectoryPath.Normalize(version.Directory)))
+                .ToArray();
 
-            return new InstanceCatalogSnapshot(instances, installedVersions, defaultDirectory);
+            return new InstanceCatalogSnapshot(validatedInstances, validatedVersions, defaultDirectory, unavailableDirectories.ToArray());
         }
         finally { ioLock.Release(); }
     }
 
-    private async Task<IReadOnlyList<GameInstance>> LoadInstancesCoreAsync(string minecraftDirectory, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<GameInstance>> LoadInstancesCoreAsync(
+        string minecraftDirectory, CancellationToken cancellationToken, ISet<string>? unavailableDirectories = null)
     {
         if (settingsService is JsonSettingsService jsonSettings)
-            await jsonSettings.MigrateInstanceSelectionAsync(minecraftDirectory, cancellationToken).ConfigureAwait(false);
+        {
+            try { await jsonSettings.MigrateInstanceSelectionAsync(minecraftDirectory, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(exception, "Instance selection migration deferred. MinecraftDirectory={MinecraftDirectory}", minecraftDirectory);
+            }
+        }
         var settings = await settingsService.LoadAsync(cancellationToken).ConfigureAwait(false);
-        return await instanceSettingsStore.LoadAsync(minecraftDirectory, settings.DefaultMemoryMb, cancellationToken).ConfigureAwait(false);
+        return await instanceSettingsStore.LoadAsync(minecraftDirectory, settings.DefaultMemoryMb, cancellationToken, unavailableDirectories).ConfigureAwait(false);
     }
 
     /// <summary>

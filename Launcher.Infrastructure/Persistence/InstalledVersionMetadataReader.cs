@@ -49,34 +49,45 @@ internal sealed class InstalledVersionMetadataReader(ILogger logger)
     /// </summary>
     public Task<IReadOnlyList<InstalledGameVersion>> DiscoverAsync(
         string minecraftDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ISet<string>? unavailableDirectories = null)
     {
         var versionsDirectory = Path.Combine(minecraftDirectory, "versions");
         var installedVersions = new List<InstalledGameVersion>();
         foreach (var versionDirectory in EnumerateDirectories(versionsDirectory))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (ShouldIgnoreDirectory(versionDirectory))
+            if (unavailableDirectories?.Contains(MinecraftDirectoryPath.Normalize(versionDirectory)) == true)
                 continue;
-            var versionName = Path.GetFileName(versionDirectory);
-            if (string.IsNullOrWhiteSpace(versionName))
-                continue;
-            var metadata = TryReadVersionMetadata(versionDirectory, versionName, logger);
-            if (metadata is null)
-                continue;
-            var loader = ResolveLoader(metadata);
-            var minecraftVersion = ResolveMinecraftVersion(
-                metadata,
-                minecraftDirectory,
-                new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-            installedVersions.Add(new InstalledGameVersion(
-                metadata.VersionName,
-                minecraftVersion,
-                ResolveVersionType(metadata, minecraftDirectory, minecraftVersion),
-                loader.Kind,
-                loader.Version,
-                versionDirectory,
-                ResolveDiscoveredAt(versionDirectory)));
+            try
+            {
+                if (ShouldIgnoreDirectory(versionDirectory))
+                    continue;
+                var versionName = Path.GetFileName(versionDirectory);
+                if (string.IsNullOrWhiteSpace(versionName))
+                    continue;
+                var metadata = TryReadVersionMetadata(versionDirectory, versionName, logger);
+                if (metadata is null)
+                    continue;
+                var loader = ResolveLoader(metadata);
+                var minecraftVersion = ResolveMinecraftVersion(
+                    metadata,
+                    minecraftDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                installedVersions.Add(new InstalledGameVersion(
+                    metadata.VersionName,
+                    minecraftVersion,
+                    ResolveVersionType(metadata, minecraftDirectory, minecraftVersion),
+                    loader.Kind,
+                    loader.Version,
+                    versionDirectory,
+                    ResolveDiscoveredAt(versionDirectory)));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                unavailableDirectories?.Add(MinecraftDirectoryPath.Normalize(versionDirectory));
+                logger.LogWarning(exception, "Unable to read version metadata. InstanceDirectory={InstanceDirectory}", versionDirectory);
+            }
         }
 
         logger.LogDebug(

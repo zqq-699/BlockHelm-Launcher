@@ -11,4 +11,5 @@ namespace Launcher.Application.Repositories;
 public sealed record InstanceCatalogSnapshot(
     IReadOnlyList<GameInstance> Instances,
     IReadOnlyList<InstalledGameVersion> InstalledVersions,
-    string? DefaultInstanceDirectory);
+    string? DefaultInstanceDirectory,
+    IReadOnlyCollection<string>? UnavailableDirectories = null);

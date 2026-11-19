@@ -398,18 +398,6 @@ public sealed class InstanceDirectoryIdentityTests : TestTempDirectory
     }
 
     [Fact]
-    public async Task UnreadableVersionMetadataFailsRefreshWithoutResettingDefault()
-    {
-        var (settings, _, service) = CreateService();
-        var directory = WriteVersion(settings.MinecraftDirectory, "A");
-        settings.DefaultInstanceDirectory = directory;
-        Assert.Single(await service.GetInstancesAsync());
-        using var locked = new FileStream(Path.Combine(directory, "A.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        await Assert.ThrowsAnyAsync<IOException>(() => service.GetInstancesAsync());
-        Assert.Equal(directory, settings.DefaultInstanceDirectory);
-    }
-
-    [Fact]
     public async Task BulkSaveCannotRedirectAnObservedSnapshotByChangingItsVersionName()
     {
         var (settings, repository, service) = CreateService();
@@ -822,6 +810,115 @@ public sealed class InstanceDirectoryIdentityTests : TestTempDirectory
         File.WriteAllText(path, json.ToJsonString());
         var instance = new GameInstance { InstanceDirectory = directory, VersionName = "B", MinecraftVersion = "1.20.1" };
         Assert.Equal(21, JavaRuntimeSelectionService.ResolveRequiredMajorVersion(instance, new LauncherSettings { MinecraftDirectory = root }));
+    }
+
+    [Theory]
+    [InlineData("manifest")]
+    [InlineData("renamed-manifest")]
+    [InlineData("settings")]
+    public async Task UnreadableInstanceDoesNotBlockOthersOrResetDefault(string lockedFile)
+    {
+        var (settings, repository, service) = CreateService();
+        var blocked = WriteVersion(settings.MinecraftDirectory, "A");
+        WriteVersion(settings.MinecraftDirectory, "B");
+        settings.DefaultInstanceDirectory = blocked;
+        var path = Path.Combine(blocked, "A.json");
+        if (lockedFile == "renamed-manifest")
+        {
+            var renamed = Path.Combine(settings.MinecraftDirectory, "versions", "Renamed");
+            Directory.Move(blocked, renamed);
+            blocked = renamed;
+            settings.DefaultInstanceDirectory = blocked;
+            path = Path.Combine(blocked, "A.json");
+        }
+        else if (lockedFile == "settings")
+        {
+            path = InstanceDirectoryOwnership.SettingsPath(blocked);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, "{}");
+        }
+
+        using (var held = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            var catalog = await repository.ReadCatalogAsync(settings.MinecraftDirectory);
+            Assert.Contains(catalog.UnavailableDirectories!, item => MinecraftDirectoryPath.Equals(item, blocked));
+            Assert.Equal("B", Assert.Single(await service.GetInstancesAsync()).Name);
+            Assert.Equal(blocked, settings.DefaultInstanceDirectory);
+        }
+
+        var recovered = await service.GetInstancesAsync();
+        Assert.Equal(2, recovered.Count);
+        Assert.Contains(recovered, instance => MinecraftDirectoryPath.Equals(instance.InstanceDirectory, blocked));
+        Assert.Equal(blocked, settings.DefaultInstanceDirectory);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CatalogRefreshIsolatesDirectoriesChangedBetweenScans(bool replaceDirectory)
+    {
+        var settings = new LauncherSettings { MinecraftDirectory = Path.Combine(TempRoot, "game") };
+        var directory = WriteVersion(settings.MinecraftDirectory, "A");
+        WriteVersion(settings.MinecraftDirectory, "B");
+        settings.DefaultInstanceDirectory = directory;
+        var settingsService = new TestSettingsService(settings);
+        var repository = new JsonGameInstanceRepository(settingsService);
+        var service = new GameInstanceService(settingsService, repository, []);
+        var loadCount = 0;
+        settingsService.BeforeLoad = () =>
+        {
+            if (++loadCount != 3) return;
+            if (replaceDirectory)
+            {
+                Directory.Move(directory, Path.Combine(TempRoot, "old-A"));
+                WriteVersion(settings.MinecraftDirectory, "A");
+            }
+            else
+            {
+                var path = InstanceDirectoryOwnership.SettingsPath(directory);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, "{\"Description\":\"changed\"}");
+            }
+            WriteVersion(settings.MinecraftDirectory, "C");
+        };
+
+        var instances = await service.GetInstancesAsync();
+        Assert.Equal("B", Assert.Single(instances).Name);
+        Assert.Equal(directory, settings.DefaultInstanceDirectory);
+        settingsService.BeforeLoad = null;
+        Assert.Equal(3, (await service.GetInstancesAsync()).Count);
+        Assert.Equal(directory, settings.DefaultInstanceDirectory);
+    }
+
+    [Fact]
+    public async Task LegacyDefaultMigrationWaitsForUnreadableManifest()
+    {
+        var root = Path.Combine(TempRoot, "game");
+        var data = Path.Combine(TempRoot, "data");
+        Directory.CreateDirectory(data);
+        var blocked = WriteVersion(root, "A");
+        WriteVersion(root, "B");
+        var instanceSettings = InstanceDirectoryOwnership.SettingsPath(blocked);
+        Directory.CreateDirectory(Path.GetDirectoryName(instanceSettings)!);
+        await File.WriteAllTextAsync(instanceSettings, "{\"Id\":\"old-id\"}");
+        var launcherSettings = Path.Combine(data, "settings.json");
+        await File.WriteAllTextAsync(launcherSettings, JsonSerializer.Serialize(new
+            { MinecraftDirectory = root, DefaultInstanceId = "old-id" }));
+        var settingsService = new JsonSettingsService(data);
+        var repository = new JsonGameInstanceRepository(settingsService);
+        var service = new GameInstanceService(settingsService, repository, []);
+
+        using (var held = new FileStream(Path.Combine(blocked, "A.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.Equal("B", Assert.Single(await service.GetInstancesAsync()).Name);
+            using var settingsBefore = JsonDocument.Parse(await File.ReadAllTextAsync(launcherSettings));
+            Assert.Equal("old-id", settingsBefore.RootElement.GetProperty("DefaultInstanceId").GetString());
+            using var instanceBefore = JsonDocument.Parse(await File.ReadAllTextAsync(instanceSettings));
+            Assert.True(instanceBefore.RootElement.TryGetProperty("Id", out _));
+        }
+
+        Assert.Equal(2, (await service.GetInstancesAsync()).Count);
+        Assert.Equal(blocked, (await settingsService.LoadAsync()).DefaultInstanceDirectory);
     }
 
     private (LauncherSettings Settings, JsonGameInstanceRepository Repository, GameInstanceService Service) CreateService()

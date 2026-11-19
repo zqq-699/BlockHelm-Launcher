@@ -76,12 +76,13 @@ public sealed class GameInstanceServiceTests : TestTempDirectory
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task DirectoryChangeDuringDiscoveryRejectsTheMixedSnapshot(bool replace)
+    public async Task DirectoryChangeDuringDiscoveryExcludesTheMixedInstance(bool replace)
     {
         var settings = CreateSettings("selected");
         var settingsService = new TestSettingsService(settings);
         var directory = Path.Combine(settings.MinecraftDirectory, "versions", "selected");
         await CreateVersionAsync(settings.MinecraftDirectory, "selected", type: "release");
+        await CreateVersionAsync(settings.MinecraftDirectory, "other", type: "release");
         var changed = false;
         var logger = new DiscoveryCallbackLogger(() =>
         {
@@ -97,9 +98,10 @@ public sealed class GameInstanceServiceTests : TestTempDirectory
         });
         var service = new GameInstanceService(settingsService, new JsonGameInstanceRepository(settingsService, logger), []);
 
-        await Assert.ThrowsAsync<GameInstanceMutationConflictException>(() => service.GetInstancesAsync());
+        var instances = await service.GetInstancesAsync();
 
         Assert.True(changed);
+        Assert.Equal("other", Assert.Single(instances).VersionName);
         Assert.Equal(directory, settings.DefaultInstanceDirectory);
         Assert.Equal(replace, Directory.Exists(directory));
         if (replace) Assert.Equal("replacement", await File.ReadAllTextAsync(Path.Combine(directory, "keep.txt")));

@@ -205,6 +205,28 @@ public sealed class InstanceManagementViewModelTests : TestTempDirectory
         Assert.Equal([existing.InstanceDirectory, installed.InstanceDirectory], viewModel.Instances.Select(instance => instance.InstanceDirectory));
     }
 
+    [Fact]
+    public async Task MissingDefaultRemainsSelectedInSettingsUntilItCanBeReadAgain()
+    {
+        var missing = CreateInstance("instance-a", "Instance A");
+        var available = CreateInstance("instance-b", "Instance B");
+        var settings = new LauncherSettings
+        {
+            MinecraftDirectory = Path.Combine(TempRoot, "root"),
+            DefaultInstanceDirectory = missing.InstanceDirectory
+        };
+        var service = new SequenceInstanceService([available], [missing, available]);
+        var viewModel = new InstanceManagementViewModel(new TestSettingsService(settings), service, new NullStatusService());
+
+        await viewModel.InitializeAsync(settings);
+        Assert.Equal(missing.InstanceDirectory, settings.DefaultInstanceDirectory);
+        Assert.Equal(available.InstanceDirectory, viewModel.SelectedInstance?.InstanceDirectory);
+
+        await viewModel.RefreshInstancesAsync();
+        Assert.Equal(missing.InstanceDirectory, settings.DefaultInstanceDirectory);
+        Assert.Equal(missing.InstanceDirectory, viewModel.SelectedInstance?.InstanceDirectory);
+    }
+
     private static GameInstance CreateInstance(string id, string name)
     {
         return new GameInstance

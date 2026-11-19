@@ -42,39 +42,48 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
     public async Task<IReadOnlyList<GameInstance>> LoadAsync(
         string minecraftDirectory,
         int defaultMemoryMb,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ISet<string>? unavailableDirectories = null)
     {
         var versionsDirectory = Path.Combine(minecraftDirectory, "versions");
         var storedInstances = new List<GameInstance>();
         foreach (var versionDirectory in EnumerateDirectories(versionsDirectory))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (ShouldIgnoreDirectory(versionDirectory))
-                continue;
-
-            var settingsPath = GetSettingsPath(versionDirectory);
-            var versionName = Path.GetFileName(versionDirectory);
-            if (!File.Exists(settingsPath) && InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) is null)
-                continue;
-            using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(versionDirectory);
-            var proof = InstanceDirectoryOwnership.Capture(versionDirectory);
-            var digest = InstanceDirectoryOwnership.Digest(versionDirectory);
-            var instance = File.Exists(settingsPath)
-                ? await TryLoadAsync(settingsPath, cancellationToken).ConfigureAwait(false)
-                : null;
-            if (instance is null)
+            try
             {
-                var createdAt = new DateTimeOffset(Directory.GetCreationTimeUtc(versionDirectory));
-                instance = new GameInstance { CreatedAt = createdAt, UpdatedAt = createdAt, MemoryMb = defaultMemoryMb };
+                if (ShouldIgnoreDirectory(versionDirectory))
+                    continue;
+
+                var settingsPath = GetSettingsPath(versionDirectory);
+                var versionName = Path.GetFileName(versionDirectory);
+                if (!File.Exists(settingsPath) && InstanceVersionFiles.TryResolveVersionJsonPath(versionDirectory, versionName) is null)
+                    continue;
+                using var directoryLease = WindowsDirectoryHandleMover.AcquireReadLease(versionDirectory);
+                var proof = InstanceDirectoryOwnership.Capture(versionDirectory);
+                var digest = InstanceDirectoryOwnership.Digest(versionDirectory);
+                var instance = File.Exists(settingsPath)
+                    ? await TryLoadAsync(settingsPath, cancellationToken).ConfigureAwait(false)
+                    : null;
+                if (instance is null)
+                {
+                    var createdAt = new DateTimeOffset(Directory.GetCreationTimeUtc(versionDirectory));
+                    instance = new GameInstance { CreatedAt = createdAt, UpdatedAt = createdAt, MemoryMb = defaultMemoryMb };
+                }
+                instance.IconSource = InstanceIconPaths.Resolve(instance.IconSource, instance.InstanceDirectory, versionDirectory);
+                instance.Name = versionName;
+                instance.VersionName = versionName;
+                instance.InstanceDirectory = MinecraftDirectoryPath.Normalize(versionDirectory);
+                if (digest != InstanceDirectoryOwnership.Digest(versionDirectory))
+                    throw new GameInstanceMutationConflictException(versionDirectory, versionName);
+                InstanceDirectoryOwnership.Observe(instance, proof, digest);
+                storedInstances.Add(instance);
             }
-            instance.IconSource = InstanceIconPaths.Resolve(instance.IconSource, instance.InstanceDirectory, versionDirectory);
-            instance.Name = versionName;
-            instance.VersionName = versionName;
-            instance.InstanceDirectory = MinecraftDirectoryPath.Normalize(versionDirectory);
-            if (digest != InstanceDirectoryOwnership.Digest(versionDirectory))
-                throw new GameInstanceMutationConflictException(versionDirectory, versionName);
-            InstanceDirectoryOwnership.Observe(instance, proof, digest);
-            storedInstances.Add(instance);
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or GameInstanceMutationConflictException)
+            {
+                unavailableDirectories?.Add(MinecraftDirectoryPath.Normalize(versionDirectory));
+                logger.LogWarning(exception, "Unable to read instance directory. InstanceDirectory={InstanceDirectory}", versionDirectory);
+            }
         }
 
         return storedInstances;
@@ -258,16 +267,6 @@ internal sealed class GameInstanceSettingsStore(ILogger logger)
         catch (JsonException exception)
         {
             logger.LogWarning(exception, "Ignored invalid game instance settings. SettingsPath={SettingsPath}", settingsPath);
-            return null;
-        }
-        catch (IOException exception)
-        {
-            logger.LogWarning(exception, "Failed to read game instance settings. SettingsPath={SettingsPath}", settingsPath);
-            return null;
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            logger.LogWarning(exception, "Access denied while reading game instance settings. SettingsPath={SettingsPath}", settingsPath);
             return null;
         }
     }

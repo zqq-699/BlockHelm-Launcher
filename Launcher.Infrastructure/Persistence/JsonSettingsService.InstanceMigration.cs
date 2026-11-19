@@ -38,10 +38,11 @@ public sealed partial class JsonSettingsService
             // but its legacy ownership credentials must remain available to recovery.
             var hasPendingTransactions = InstanceDirectoryClassifier.HasPendingTransactions(allDirectories);
             var validDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var unavailableDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (raw.ContainsKey("DefaultInstanceId") && string.IsNullOrWhiteSpace(current.DefaultInstanceDirectory))
             {
                 var installedVersions = await new InstalledVersionMetadataReader(logger)
-                    .DiscoverAsync(minecraftDirectory, cancellationToken).ConfigureAwait(false);
+                    .DiscoverAsync(minecraftDirectory, cancellationToken, unavailableDirectories).ConfigureAwait(false);
                 validDirectories.UnionWith(installedVersions.Select(version => MinecraftDirectoryPath.Normalize(version.Directory)));
             }
             var legacyId = raw["DefaultInstanceId"] is JsonValue legacyValue && legacyValue.TryGetValue<string>(out var legacyText) ? legacyText : null;
@@ -59,7 +60,16 @@ public sealed partial class JsonSettingsService
                     if (!string.IsNullOrWhiteSpace(legacyId) && string.Equals(id, legacyId, StringComparison.OrdinalIgnoreCase))
                         candidates.Add(MinecraftDirectoryPath.Normalize(directory));
                 }
-                catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) { logger.LogWarning(e, "Could not read legacy instance selection candidate. Directory={Directory}", directory); }
+                catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+                {
+                    unavailableDirectories.Add(MinecraftDirectoryPath.Normalize(directory));
+                    logger.LogWarning(e, "Could not read legacy instance selection candidate. Directory={Directory}", directory);
+                }
+            }
+            if (unavailableDirectories.Count > 0)
+            {
+                logger.LogWarning("Instance selection migration deferred because instance directories could not be read. Count={Count}", unavailableDirectories.Count);
+                return;
             }
             if (raw.ContainsKey("DefaultInstanceId"))
             {

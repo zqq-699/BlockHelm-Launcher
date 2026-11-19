@@ -118,6 +118,7 @@ public sealed partial class GameInstanceService : IGameInstanceService
         var defaultChanged = false;
         var previousDefaultInstanceDirectory = settings.DefaultInstanceDirectory;
         if (!string.IsNullOrWhiteSpace(settings.DefaultInstanceDirectory)
+            && catalog.UnavailableDirectories?.Any(directory => MinecraftDirectoryPath.Equals(directory, settings.DefaultInstanceDirectory)) != true
             && syncedInstances.All(instance => !MinecraftDirectoryPath.Equals(instance.InstanceDirectory, settings.DefaultInstanceDirectory)))
         {
             settings.DefaultInstanceDirectory = syncedInstances.FirstOrDefault()?.InstanceDirectory ?? string.Empty;
