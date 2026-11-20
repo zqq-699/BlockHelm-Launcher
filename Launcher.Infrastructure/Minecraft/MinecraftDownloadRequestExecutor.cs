@@ -415,7 +415,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 sensitiveHeaders: sensitiveHeaders,
                 speedMeter: speedMeter,
                 executionMode: DownloadExecutionMode.FileSourceRounds,
-                fileCandidates: fileCandidates,
+                fileCandidates: PrioritizeSequentialCandidate(fileCandidates, segmented.SequentialFirst),
                 cancellationToken: cancellationToken, expectedFileSize: expectedSize).ConfigureAwait(false);
             return result.Value! with { NetworkAttempts = network.Sends, RetryCount = network.Retries, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
         }
@@ -513,7 +513,7 @@ internal sealed class MinecraftDownloadRequestExecutor
                 sensitiveHeaders,
                 speedMeter: speedMeter,
                 executionMode: DownloadExecutionMode.FileSourceRounds,
-                fileCandidates: fileCandidates,
+                fileCandidates: PrioritizeSequentialCandidate(fileCandidates, segmented.SequentialFirst),
                 cancellationToken: cancellationToken, expectedFileSize: integrity.ExpectedSize).ConfigureAwait(false);
             return result.Value! with { NetworkAttempts = network.Sends, RetryCount = network.Retries, FallbackUsed = result.Value!.ActualUrl != fileCandidates[0].ActualUrl };
         }
@@ -558,7 +558,8 @@ internal sealed class MinecraftDownloadRequestExecutor
 
         var attemptCount = 0;
         var failures = new List<DownloadAttemptException>();
-        foreach (var resolution in candidates.Where(IsSegmentableCandidate))
+        ResolvedDownloadRequest? sequentialFirst = null;
+        foreach (var resolution in candidates)
         {
             attemptCount++;
             session.ResetSegmentedDownload();
@@ -598,21 +599,34 @@ internal sealed class MinecraftDownloadRequestExecutor
                     failure.FinalHost);
                 if (failure.Disposition is DownloadFailureDisposition.Abort)
                     throw failure;
+                // A server that cannot serve this range may still be the best
+                // sequential source. Preserve source preference before trying
+                // segmented downloads from a different candidate.
+                if (failure is SegmentedDownloadNotSupportedException
+                    || failure.StatusCode is HttpStatusCode.RequestedRangeNotSatisfiable)
+                {
+                    sequentialFirst = resolution;
+                    break;
+                }
             }
         }
 
         if (attemptCount > 0)
         {
             logger.LogInformation(
-                "Segmented download exhausted all compatible candidates and will use the existing single-stream path. CandidateCount={CandidateCount} FailureReasons={FailureReasons} FinalFailureReason={FinalFailureReason} FinalStatusCode={FinalStatusCode} FinalHost={FinalHost}",
-                candidates.Count(IsSegmentableCandidate),
+                "Segmented download will use the existing single-stream path. CandidateCount={CandidateCount} FailureReasons={FailureReasons} FinalFailureReason={FinalFailureReason} FinalStatusCode={FinalStatusCode} FinalHost={FinalHost}",
+                attemptCount,
                 failures.Select(failure => failure.Reason).Distinct().Order().ToArray(),
                 failures.LastOrDefault()?.Reason,
                 failures.LastOrDefault()?.StatusCode is { } status ? (int)status : null,
                 failures.LastOrDefault()?.FinalHost);
         }
-        return new SegmentedDownloadAttemptResult(attemptCount, null);
+        return new SegmentedDownloadAttemptResult(attemptCount, null, sequentialFirst);
     }
+
+    private static IReadOnlyList<ResolvedDownloadRequest> PrioritizeSequentialCandidate(
+        IReadOnlyList<ResolvedDownloadRequest> candidates, ResolvedDownloadRequest? preferred) =>
+        preferred is null ? candidates : candidates.OrderBy(candidate => ReferenceEquals(candidate, preferred) ? 0 : 1).ToArray();
 
     private async Task<bool> TryDownloadSegmentedSourceAsync(
         ResolvedDownloadRequest resolution,
@@ -1268,9 +1282,7 @@ internal sealed class MinecraftDownloadRequestExecutor
             return false;
         if (GetGlobalConcurrencySnapshot().CurrentTarget < 2)
             return false;
-        // Do not skip a preferred single-stream mirror to probe a later source.
-        return candidates.Count > 0 && IsSegmentableCandidate(candidates[0])
-            && GetCandidateCooldown(candidates[0]) <= TimeSpan.Zero && !IsCandidateDegraded(candidates[0]);
+        return candidates.Count > 0;
     }
 
     private static int CalculateUsefulSegmentedWorkers(long remainingLength) =>
@@ -1359,14 +1371,6 @@ internal sealed class MinecraftDownloadRequestExecutor
         return entityTag is not null && !entityTag.IsWeak ? entityTag.ToString() : null;
     }
 
-    private static bool IsSegmentableCandidate(ResolvedDownloadRequest resolution)
-    {
-        if (!Uri.TryCreate(resolution.ActualUrl, UriKind.Absolute, out var uri))
-            return false;
-        return !uri.Host.Equals("bmclapi2.bangbang93.com", StringComparison.OrdinalIgnoreCase)
-            && !resolution.ResolvedSourceKind.StartsWith("BmclApi", StringComparison.Ordinal);
-    }
-
     private static ResolvedDownloadRequest PinFinalHttpsResolution(
         ResolvedDownloadRequest resolution,
         Uri? finalUri)
@@ -1424,7 +1428,8 @@ internal sealed class MinecraftDownloadRequestExecutor
     }
     private readonly record struct SegmentedDownloadAttemptResult(
         int AttemptCount,
-        ResolvedDownloadRequest? Resolution);
+        ResolvedDownloadRequest? Resolution,
+        ResolvedDownloadRequest? SequentialFirst = null);
     private sealed class SegmentedDownloadNotSupportedException(string message)
         : DownloadAttemptException(
             DownloadFailureDisposition.SwitchSource,

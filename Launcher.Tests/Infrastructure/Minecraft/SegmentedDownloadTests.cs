@@ -25,13 +25,12 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task PreferredMirrorIsTriedWithoutRangesBeforeAnyOfficialRequest(bool mirrorFails)
+    public async Task PreferredMirrorIsTriedBeforeOfficialRequest(bool mirrorFails)
     {
         var hosts = new List<string>();
         var handler = new RecordingRequestHandler((_, request, _) =>
         {
             hosts.Add(request.RequestUri!.Host);
-            Assert.Null(request.Headers.Range);
             return Task.FromResult(mirrorFails && request.RequestUri.Host == "bmclapi2.bangbang93.com"
                 ? new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request }
                 : CreateFullResponse(request, LargePayload));
@@ -43,6 +42,99 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
         Assert.Equal(mirrorFails ? new[] { "bmclapi2.bangbang93.com", "piston-data.mojang.com" } : ["bmclapi2.bangbang93.com"], hosts);
         Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
         AssertNoPendingFiles(destination);
+    }
+
+    [Theory]
+    [InlineData("supported")]
+    [InlineData("ignored")]
+    [InlineData("invalid")]
+    [InlineData("unsatisfiable")]
+    [InlineData("changes-after-probe")]
+    public async Task RedirectedMirrorUsesRangeOnlyWhenActualResponsesSupportIt(string behavior)
+    {
+        var requests = new ConcurrentQueue<(string Host, string? Range)>();
+        var handler = new RecordingRequestHandler((_, request, _) =>
+        {
+            var host = request.RequestUri!.Host;
+            var range = request.Headers.Range;
+            requests.Enqueue((host, range?.ToString()));
+            if (host == "bmclapi2.bangbang93.com")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    RequestMessage = request,
+                    Headers = { Location = new Uri("https://cdn.example.test/mirror-file") }
+                });
+            if (host != "cdn.example.test")
+                return Task.FromResult(CreateFullResponse(request, LargePayload));
+            if (range is null || behavior == "ignored"
+                || behavior == "changes-after-probe" && range.Ranges.Single().From != 0)
+                return Task.FromResult(CreateFullResponse(request, LargePayload));
+            if (behavior == "unsatisfiable")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.RequestedRangeNotSatisfiable) { RequestMessage = request });
+            var response = CreatePartialResponse(request, LargePayload);
+            if (behavior == "invalid")
+                response.Content.Headers.ContentRange = new ContentRangeHeaderValue(1, 2, LargePayload.Length);
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, $"mirror-{behavior}.jar");
+        await CreateExecutor(client).DownloadFileAsync("https://piston-data.mojang.com/v1/objects/example/client.jar",
+            DownloadSourcePreference.BmclApi, "Mojang", destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None);
+
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+        Assert.Equal("bmclapi2.bangbang93.com", requests.First().Host);
+        Assert.DoesNotContain(requests, item => item.Host == "piston-data.mojang.com");
+        Assert.Contains(requests, item => item.Host == "cdn.example.test" && item.Range is not null);
+        if (behavior == "supported")
+            Assert.Contains(requests, item => item.Host == "cdn.example.test" && item.Range is not null && !item.Range.StartsWith("bytes=0-"));
+        else if (behavior == "ignored")
+            Assert.Single(requests.Where(item => item.Host == "cdn.example.test"));
+        else
+            Assert.Contains(requests, item => item.Host == "cdn.example.test" && item.Range is null);
+        AssertNoPendingFiles(destination);
+    }
+
+    [Fact]
+    public async Task DegradedOnlySourceCanStillUseRanges()
+    {
+        var health = new DownloadHostHealthTracker();
+        var candidate = MinecraftDownloadSourceResolver.EnumerateRequests(DownloadUrl, DownloadSourcePreference.Official).First();
+        for (var i = 0; i < 3; i++)
+            health.RecordFailure(candidate.ResolvedSourceKind, "downloads.example.test", DownloadFailureReason.Network);
+        Assert.True(health.ShouldAvoid(candidate.ResolvedSourceKind, "downloads.example.test"));
+        var handler = new RecordingRequestHandler((_, request, _) => Task.FromResult(CreatePartialResponse(request, LargePayload)));
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "degraded.jar");
+        await CreateExecutor(client, health: health).DownloadFileAsync(DownloadUrl, DownloadSourcePreference.Official,
+            "ThirdParty", destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None);
+        Assert.Contains(handler.RangeHeaders, range => range is not null && !range.StartsWith("bytes=0-"));
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Fact]
+    public async Task UnsupportedSecondSourceIsRetriedSequentiallyBeforeTheFirstSource()
+    {
+        var requests = new ConcurrentQueue<(string Host, string? Range)>();
+        var handler = new RecordingRequestHandler((_, request, _) =>
+        {
+            var host = request.RequestUri!.Host;
+            requests.Enqueue((host, request.Headers.Range?.ToString()));
+            if (host == "bmclapi2.bangbang93.com")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request });
+            if (request.Headers.Range is null)
+                return Task.FromResult(CreateFullResponse(request, LargePayload));
+            var response = CreatePartialResponse(request, LargePayload);
+            response.Content.Headers.ContentRange = new ContentRangeHeaderValue(1, 2, LargePayload.Length);
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "second-source.jar");
+        var result = await CreateExecutor(client).DownloadFileAsync("https://piston-data.mojang.com/v1/objects/example/client.jar",
+            DownloadSourcePreference.BmclApi, "Mojang", destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None);
+        Assert.Equal(new[] { "bmclapi2.bangbang93.com", "piston-data.mojang.com", "piston-data.mojang.com" }, requests.Select(item => item.Host));
+        Assert.Null(requests.Last().Range);
+        Assert.True(result.FallbackUsed);
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
     }
 
     [Fact]
@@ -357,7 +449,8 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     private static MinecraftDownloadRequestExecutor CreateExecutor(
         HttpClient client,
         IImportConcurrencyLimiter? limiter = null,
-        int maxAttempts = 1)
+        int maxAttempts = 1,
+        DownloadHostHealthTracker? health = null)
     {
         var effectiveLimiter = limiter;
         if (effectiveLimiter is null)
@@ -385,6 +478,7 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
                 delayAsync: static (_, _) => ValueTask.CompletedTask),
             bmclApiRequestRateLimiter: new BmclApiRequestRateLimiter(TimeSpan.Zero),
             nextRetryJitter: () => 0,
+            hostHealthTracker: health,
             segmentedDownloadCoordinator: new SegmentedDownloadCoordinator(),
             minimumSegmentedDownloadSize: TestSegmentedDownloadSize);
     }

@@ -138,7 +138,10 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
         using var handler = new Handler((request, _) =>
         {
             Assert.Equal("bmclapi2.bangbang93.com", request.RequestUri!.Host);
-            Assert.Null(request.Headers.Range);
+            if (mode == "file")
+                Assert.Equal("bytes=0-", request.Headers.Range?.ToString());
+            else
+                Assert.Null(request.Headers.Range);
             return Task.FromResult(Response("good"));
         });
         using var client = new HttpClient(handler);
@@ -154,7 +157,7 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
                 (context, token) => context.Response.Content.ReadAsStringAsync(token), _ => false, CancellationToken.None)).Value);
         else
         {
-            // Unknown size remains eligible for segmentation; preferred mirror must prevent the probe.
+            // A verified file of unknown size may probe the selected mirror.
             var result = await executor.DownloadFileAsync(url, DownloadSourcePreference.Auto, null,
                 Path.Combine(TempRoot, "download.jar"), mode == "unverified" ? null : Convert.ToHexString(SHA1.HashData("good"u8)),
                 null, CancellationToken.None);
