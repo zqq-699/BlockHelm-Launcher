@@ -23,6 +23,8 @@ public static class InstallProgressStages
 {
     public const string Queue = "Install.Queue";
     public const string Preparing = "Install.Preparing";
+    public const string DownloadingGameFiles = "Install.DownloadingGameFiles";
+    public const string InstallingGame = "Install.InstallingGame";
     public const string DownloadingLoaderInstaller = "Install.DownloadingLoaderInstaller";
     public const string CheckingJava = "Install.CheckingJava";
     public const string DownloadingJava = "Install.DownloadingJava";

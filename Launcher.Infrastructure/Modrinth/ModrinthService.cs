@@ -328,7 +328,10 @@ public sealed class ModrinthService : IModrinthService
             DownloadConcurrencyCategory.Modpack,
             retryOptions: retryOptions);
 
-        progress?.Report(new LauncherProgress(ModProgressStages.DownloadingFile, $"{projectTitle} {version.VersionNumber}"));
+        var downloadProgress = new LauncherProgress(ModProgressStages.DownloadingFile, $"{projectTitle} {version.VersionNumber}");
+        progress?.Report(downloadProgress);
+        var lastPercent = 0;
+        var progressLock = new object();
         var logScope = new ForegroundDownloadLogScope(
             logger,
             "ResourceInstall",
@@ -346,7 +349,19 @@ public sealed class ModrinthService : IModrinthService
                 target,
                 integrity,
                 cancellationToken,
-                reportAttemptProgress: logScope.BeginSource(),
+                reportAttemptProgress: logScope.BeginSource((_, bytes, total) =>
+                {
+                    if (progress is null || total is not > 0)
+                        return;
+                    var percent = (int)Math.Clamp(100d * bytes / total.Value, 0, 99);
+                    lock (progressLock)
+                    {
+                        if (percent <= lastPercent)
+                            return;
+                        lastPercent = percent;
+                        progress.Report(downloadProgress with { Percent = percent });
+                    }
+                }),
                 options: new DownloadFileOptions(
                     DownloadPersistenceMode.TaskScopedResumable,
                     OperationContext: null,

@@ -80,6 +80,11 @@ internal sealed class DownloadIntegrityExpectation
             return false;
         }
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return await VerifyStreamAsync(stream, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<bool> VerifyStreamAsync(Stream stream, CancellationToken cancellationToken)
+    {
         var hashers = CreateHashers();
         var buffer = new byte[81920];
         try

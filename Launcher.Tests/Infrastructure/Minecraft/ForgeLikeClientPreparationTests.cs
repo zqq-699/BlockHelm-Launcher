@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
@@ -68,7 +69,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
     [InlineData(LoaderKind.NeoForge, true)]
     public async Task JavaCanFinishBeforeAssetsButTheInstanceCannotPublish(LoaderKind loader, bool assetsFail)
     {
-        using var fixture = new Installation(TempRoot, loader, false, false)
+        using var fixture = new Installation(TempRoot, loader, false, false, useUnifiedCard: true)
         {
             SupportsSplitBaseContent = true, FailAssets = assetsFail
         };
@@ -84,6 +85,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
             Assert.False(fixture.JavaStarted);
             fixture.FinishDependency.TrySetResult();
             await fixture.JavaCompletedSignal.Task.WaitAsync(TestTimeout);
+            await fixture.WaitingForAssetsProgress.Task.WaitAsync(TestTimeout);
             Assert.False(task.IsCompleted);
             Assert.False(Directory.Exists(fixture.FinalDirectory));
             fixture.FinishAssets.TrySetResult();
@@ -100,6 +102,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
                 Assert.True(Directory.Exists(fixture.FinalDirectory));
             }
             Assert.Equal(1, fixture.ClientRequests);
+            Assert.All(fixture.ProgressUpdates, progress => Assert.InRange(progress.Percent!.Value, 0, 99));
         }
         finally
         {
@@ -112,7 +115,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
     [InlineData(true)]
     public async Task FailureOrCancellationWaitsForJavaBeforeRemovingTheSandbox(bool userCancels)
     {
-        using var fixture = new Installation(TempRoot, LoaderKind.NeoForge, false, false)
+        using var fixture = new Installation(TempRoot, LoaderKind.NeoForge, false, false, useUnifiedCard: true)
         {
             SupportsSplitBaseContent = true, FailAssets = !userCancels, HoldJava = true, HoldCanceledBranch = true
         };
@@ -139,6 +142,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
                 Assert.Same(fixture.BaseFailure, Assert.IsType<MinecraftAssetInstallationException>(failure).InnerException);
             Assert.Empty(Directory.GetDirectories(fixture.InstallerRoot));
             Assert.False(Directory.Exists(fixture.FinalDirectory));
+            Assert.All(fixture.ProgressUpdates, progress => Assert.InRange(progress.Percent!.Value, 0, 99));
         }
         finally
         {
@@ -272,6 +276,8 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
         private int mappingsRequests;
         public int ClientRequests => Volatile.Read(ref clientRequests);
         public int MappingsRequests => Volatile.Read(ref mappingsRequests);
+        public IEnumerable<LauncherProgress> ProgressUpdates => progressCapture.Updates;
+        public TaskCompletionSource WaitingForAssetsProgress => progressCapture.WaitingForAssets;
         public bool JavaStarted { get; private set; }
         public bool FailBase { get; init; }
         public bool FailInstaller { get; init; }
@@ -311,7 +317,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
             : NeoForgeArtifactResolver.ResolveInstaller(version, loaderVersion).Url;
 
         public Installation(string root, LoaderKind loader, bool warmCache, bool legacyMetadata,
-            bool withMappingsAndSharedDependency = false, bool fallbackToOriginalInstaller = false)
+            bool withMappingsAndSharedDependency = false, bool fallbackToOriginalInstaller = false, bool useUnifiedCard = false)
         {
             this.loader = loader;
             this.legacyMetadata = legacyMetadata;
@@ -341,7 +347,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
                 WriteFile(Path.Combine(shared, "versions", version, version + ".jar"), ClientJar);
             installerBytes = CreateInstaller();
             client = new HttpClient(this, disposeHandler: false);
-            progress = new InstallCardProgressMapper(progressCapture, loader, hasOptionalContent: false);
+            progress = new InstallCardProgressMapper(progressCapture, loader, hasOptionalContent: false, useUnifiedCard);
         }
 
         public Task<string> StartAsync(CancellationToken token) => loader == LoaderKind.Forge
@@ -465,8 +471,10 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
             {
                 if (!SupportsSplitBaseContent)
                     Assert.Equal("vanilla asset", File.ReadAllText(Path.Combine(shared, "assets", "prepared.asset")));
-                Assert.Contains(progressCapture.Updates, value => value.Stage == ImportProgressStages.InstallingMinecraftBase
-                    && value.Percent == 26);
+                var unified = progress is IParallelInstallProgress { TracksParallelInstall: true };
+                Assert.Contains(progressCapture.Updates, value => unified
+                    ? value.Stage == InstallProgressStages.DownloadingGameFiles && value.Percent == 20
+                    : value.Stage == ImportProgressStages.InstallingMinecraftBase && value.Percent == 26);
             }
             Assert.All(progressCapture.Updates, value => Assert.InRange(value.Percent!.Value, 0, 30));
             JavaStartedSignal.TrySetResult();
@@ -585,8 +593,14 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
         private static HttpResponseMessage Reply(string content) => new(HttpStatusCode.OK) { Content = new StringContent(content) };
         private sealed class ProgressCapture : IProgress<LauncherProgress>
         {
-            public List<LauncherProgress> Updates { get; } = [];
-            public void Report(LauncherProgress value) => Updates.Add(value);
+            public ConcurrentQueue<LauncherProgress> Updates { get; } = new();
+            public TaskCompletionSource WaitingForAssets { get; } = NewGate();
+            public void Report(LauncherProgress value)
+            {
+                Updates.Enqueue(value);
+                if (value.Stage == InstallProgressStages.DownloadingGameFiles && value.Percent == 25)
+                    WaitingForAssets.TrySetResult();
+            }
         }
         private static void WriteFile(string path, string content)
         {

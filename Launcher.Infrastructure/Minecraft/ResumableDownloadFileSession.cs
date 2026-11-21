@@ -67,7 +67,6 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
 
     public bool IsComplete { get; private set; }
     public bool IsResumeRequested { get; private set; }
-
     public static Task<ResumableDownloadFileSession> AcquireAsync(
         string destinationPath,
         string? expectedSha1,
@@ -393,7 +392,8 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         int attemptNumber,
         Action<int, long, long?>? reportAttemptProgress,
         CancellationToken cancellationToken,
-        Action<long>? reportTransferredBytes = null)
+        Action<long>? reportTransferredBytes = null,
+        Func<long, string?, string?, SequentialDownloadTail>? prepareTail = null)
     {
         if (IsComplete)
             return;
@@ -425,6 +425,11 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         sourceCandidateKey = candidateKey;
         strongETag = GetStrongETag(response);
         lastModified = GetLastModified(response);
+        await using var tail = prepareTail is not null
+            && totalLength is > MinecraftDownloadRequestExecutor.SegmentedSplitThreshold
+            && response.StatusCode == HttpStatusCode.OK && response.Content.Headers.ContentEncoding.Count == 0
+            ? prepareTail(totalLength.Value, strongETag, lastModified)
+            : null;
 
         var hashers = integrity.CreateHashers();
         try
@@ -434,24 +439,44 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
 
             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             EnsureManagedDestinationIsSafe();
-            await using var destination = OpenTemporaryFile(resumed);
+            await using var destination = OpenTemporaryFile(resumed, canRead: tail is not null);
             if (useHiddenTemporaryFile)
                 TryMarkTemporaryHidden(temporaryPath);
             var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
             var persisted = existingLength;
+            var verifiedWithTail = false;
             try
             {
                 while (true)
                 {
+                    if (tail?.TakeReadyTail(persisted) is { } suffix)
+                    {
+                        await using (suffix)
+                        {
+                            verifiedWithTail = await TryAppendTailAsync(destination, suffix, persisted, tail.Start,
+                                cancellationToken).ConfigureAwait(false);
+                        }
+                        if (verifiedWithTail)
+                        {
+                            tail.ReportUsed(totalLength!.Value - persisted);
+                            persisted = totalLength!.Value;
+                            reportAttemptProgress?.Invoke(attemptNumber, persisted, totalLength);
+                            break;
+                        }
+                    }
+
+                    var readStarted = tail?.Timestamp ?? 0;
                     var read = await ReadNetworkAsync(source, buffer, cancellationToken).ConfigureAwait(false);
                     if (read == 0)
                         break;
+                    var readDuration = tail?.GetElapsedTime(readStarted) ?? TimeSpan.Zero;
                     reportTransferredBytes?.Invoke(read);
                     await WriteLocalAsync(destination, buffer, read, cancellationToken).ConfigureAwait(false);
                     foreach (var hasher in hashers.Values)
                         hasher.AppendData(buffer, 0, read);
                     persisted += read;
                     reportAttemptProgress?.Invoke(attemptNumber, persisted, integrity.ExpectedSize ?? totalLength);
+                    tail?.Observe(read, readDuration, persisted);
                 }
             }
             finally
@@ -461,7 +486,7 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
 
             await FlushLocalAsync(destination, cancellationToken).ConfigureAwait(false);
             ValidateCompletedLength(persisted, totalLength);
-            if (integrity.IsVerifiable && !integrity.Verify(hashers))
+            if (!verifiedWithTail && integrity.IsVerifiable && !integrity.Verify(hashers))
             {
                 DeleteTemporary();
                 throw integrity.DescribeFailure(new DownloadHashMismatchException("The downloaded file did not match its expected hash."));
@@ -474,6 +499,38 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         }
 
         Publish(cancellationToken);
+    }
+
+    internal FileStream OpenTailFile()
+    {
+        var path = $"{temporaryPath}.{Guid.NewGuid():N}.tail";
+        if (managedRoot is not null)
+            MinecraftPathGuard.EnsureNoReparsePoints(managedRoot, path, "Download tail temporary file");
+        return new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, BufferSize,
+            FileOptions.Asynchronous | FileOptions.DeleteOnClose | FileOptions.SequentialScan);
+    }
+
+    private async Task<bool> TryAppendTailAsync(
+        FileStream destination, FileStream suffix, long persisted, long tailStart, CancellationToken cancellationToken)
+    {
+        try
+        {
+            suffix.Position = persisted - tailStart;
+            await suffix.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+            await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+            destination.Flush(flushToDisk: true);
+            destination.Position = 0;
+            if (await integrity.VerifyStreamAsync(destination, cancellationToken).ConfigureAwait(false))
+                return true;
+        }
+        catch (IOException)
+        {
+            // The original response is still open and can finish the download.
+        }
+
+        destination.SetLength(persisted);
+        destination.Position = persisted;
+        return false;
     }
 
     public async ValueTask DisposeAsync()
@@ -616,14 +673,14 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         }
     }
 
-    private FileStream OpenTemporaryFile(bool resumed)
+    private FileStream OpenTemporaryFile(bool resumed, bool canRead = false)
     {
         try
         {
             return new FileStream(
                 temporaryPath,
                 resumed ? FileMode.Append : FileMode.Create,
-                FileAccess.Write,
+                canRead ? FileAccess.ReadWrite : FileAccess.Write,
                 FileShare.None,
                 BufferSize,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);

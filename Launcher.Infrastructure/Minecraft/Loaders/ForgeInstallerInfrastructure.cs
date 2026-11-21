@@ -251,7 +251,8 @@ internal sealed class FinalVersionInstaller(
             operationContext: operationContext,
             sharedSpeedMeter: speedMeter,
             contentPart: part);
-        VanillaLoaderProvider.AttachProgress(launcher, progress);
+        if (part is not LoaderBaseContentPart.Assets)
+            VanillaLoaderProvider.AttachProgress(launcher, progress);
         await launcher.InstallAsync(versionName, cancellationToken);
     }
 }

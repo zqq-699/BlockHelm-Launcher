@@ -65,6 +65,10 @@ internal sealed class ImportConcurrencyLimiter : IImportConcurrencyLimiter, IDow
     bool IImportConcurrencyLimiter.TryAcquireAvailableDownloadSlot(out IImportConcurrencyLease? lease) =>
         TryAcquireAvailableDownloadSlot(out lease);
 
+    bool IImportConcurrencyLimiter.TryAcquirePreemptibleDownloadSlot(
+        out IImportConcurrencyLease? lease, out Task? ordinaryDownloadQueued) =>
+        downloadScheduler.TryAcquirePreemptible(out lease, out ordinaryDownloadQueued);
+
     private static async ValueTask<IImportConcurrencyLease> AcquireFixedAsync(SemaphoreSlim semaphore, CancellationToken cancellationToken)
     {
         await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -87,6 +91,7 @@ internal sealed class FixedDownloadScheduler
     private int currentTarget;
     private int activeCount;
     private int waitingCount;
+    private TaskCompletionSource? ordinaryDownloadQueued;
 
     public FixedDownloadScheduler(int maximum, int? initial = null)
     {
@@ -126,22 +131,34 @@ internal sealed class FixedDownloadScheduler
             var waiter = new Waiter();
             waiters.Enqueue(waiter);
             waitingCount++;
+            ordinaryDownloadQueued?.TrySetResult();
+            ordinaryDownloadQueued = null;
             return new ValueTask<IImportConcurrencyLease>(WaitForQueuedLeaseAsync(waiter, cancellationToken));
         }
     }
 
-    public bool TryAcquireAvailable(out IImportConcurrencyLease? lease)
+    public bool TryAcquireAvailable(out IImportConcurrencyLease? lease) =>
+        TryAcquireAvailable(preemptible: false, out lease, out _);
+
+    public bool TryAcquirePreemptible(out IImportConcurrencyLease? lease, out Task? queued) =>
+        TryAcquireAvailable(preemptible: true, out lease, out queued);
+
+    private bool TryAcquireAvailable(bool preemptible, out IImportConcurrencyLease? lease, out Task? queued)
     {
         lock (syncRoot)
         {
             if (waitingCount != 0 || activeCount >= currentTarget)
             {
                 lease = null;
+                queued = null;
                 return false;
             }
 
             activeCount++;
             lease = new Lease(this);
+            queued = preemptible
+                ? (ordinaryDownloadQueued ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task
+                : null;
             return true;
         }
     }

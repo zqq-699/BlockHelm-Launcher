@@ -667,6 +667,7 @@
   <data name="Status_InstallPreparing" xml:space="preserve"><value>正在准备安装...</value></data>
   <data name="Status_InstallCheckingFiles" xml:space="preserve"><value>正在检查游戏文件...</value></data>
   <data name="Status_InstallDownloadingFiles" xml:space="preserve"><value>正在下载游戏文件...</value></data>
+  <data name="Status_InstallInstallingGame" xml:space="preserve"><value>正在安装游戏...</value></data>
   <data name="Status_InstallDownloadingLoaderInstaller" xml:space="preserve"><value>正在下载加载器安装程序...</value></data>
   <data name="Status_InstallRunningLoaderInstaller" xml:space="preserve"><value>正在运行加载器安装程序...</value></data>
   <data name="Status_InstallFinalizingVersion" xml:space="preserve"><value>正在整理版本文件...</value></data>

@@ -36,6 +36,178 @@ public sealed class MinecraftDownloadRetryTests
     private const string BmclManifestUrl = "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json";
 
     [Theory]
+    [InlineData("valid")]
+    [InlineData("lightweight")]
+    [InlineData("ignored")]
+    [InlineData("wrong-hash")]
+    [InlineData("slow-tail")]
+    [InlineData("busy")]
+    [InlineData("cancel")]
+    public async Task SlowSequentialDownloadCanUseATailWithoutDependingOnIt(string outcome)
+    {
+        const string url = "https://cdn.example.invalid/artifact.jar";
+        var payload = new byte[1797523];
+        new Random(19).NextBytes(payload);
+        var clock = new ManualTimeProvider();
+        var releasePrimary = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tailRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var primary = new SlowStartDownloadStream(payload, clock, releasePrimary.Task);
+        var logger = new CollectingLogger
+        {
+            Observe = message =>
+            {
+                if (message.Contains("tail range is ready", StringComparison.Ordinal)
+                    || message.StartsWith("Optional tail range ended", StringComparison.Ordinal))
+                    releasePrimary.TrySetResult();
+            }
+        };
+        var concurrency = new ImportConcurrencyLimiter();
+        if (outcome == "busy")
+        {
+            concurrency.SetMaximumDownloadConcurrency(1);
+            releasePrimary.TrySetResult();
+        }
+
+        using var client = CreateClient(new CallbackRequestHandler((number, request, _) =>
+        {
+            if (number == 1)
+            {
+                Assert.Null(request.Headers.Range);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(primary) });
+            }
+
+            Assert.Equal(2, number);
+            var range = Assert.Single(request.Headers.Range!.Ranges);
+            var start = Assert.IsType<long>(range.From);
+            Assert.Equal(payload.LongLength - 1, range.To);
+            tailRequested.TrySetResult();
+            if (outcome is "slow-tail" or "ignored")
+                releasePrimary.TrySetResult();
+            if (outcome == "ignored")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+
+            var tailBytes = payload[(int)start..];
+            if (outcome == "wrong-hash")
+                tailBytes[^1] ^= 1;
+            HttpContent content = outcome is "slow-tail" or "cancel"
+                ? new StreamContent(new FaultingReadStream([], stall: true))
+                : new ByteArrayContent(tailBytes);
+            content.Headers.ContentLength = tailBytes.Length;
+            content.Headers.ContentRange = new ContentRangeHeaderValue(start, payload.LongLength - 1, payload.LongLength);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = content });
+        }));
+        var executor = CreateExecutor(client, logger: logger, timeProvider: clock, limiter: concurrency);
+        var directory = CreateTempDirectory();
+        var destination = Path.Combine(directory, "artifact.jar");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var integrity = new DownloadIntegrityExpectation(payload.Length,
+            [(HashAlgorithmName.SHA512, Convert.ToHexString(SHA512.HashData(payload)))]);
+        var download = outcome == "lightweight"
+            ? executor.DownloadFileAsync(url, DownloadSourcePreference.Official, null, destination,
+                Convert.ToHexString(SHA1.HashData(payload)), payload.Length, cancellation.Token,
+                options: DownloadFileOptions.ForAsset(null, payload.Length, directory))
+            : executor.DownloadFileAsync(url, DownloadSourcePreference.Official, null,
+                destination, integrity, cancellation.Token);
+        try
+        {
+            if (outcome == "cancel")
+            {
+                await tailRequested.Task.WaitAsync(cancellation.Token);
+                await cancellation.CancelAsync();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
+                Assert.Empty(Directory.GetFiles(directory));
+            }
+            else
+            {
+                var result = await download;
+                Assert.Equal(outcome == "busy" ? 1 : 2, result.NetworkAttempts);
+                Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+                Assert.Equal(outcome is "valid" or "lightweight", primary.BytesRead < payload.Length);
+                Assert.Equal(destination, Assert.Single(Directory.GetFiles(directory)));
+            }
+            Assert.Equal(0, concurrency.DownloadSnapshot.ActiveCount);
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            releasePrimary.TrySetResult();
+            await Task.WhenAny(download);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task QueuedDownloadPreemptsAStalledSequentialTail(bool stallBeforeHeaders)
+    {
+        const string url = "https://cdn.example.invalid/artifact.jar";
+        var payload = new byte[1797523];
+        new Random(19).NextBytes(payload);
+        var clock = new ManualTimeProvider();
+        var releasePrimary = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tailStalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var primary = new SlowStartDownloadStream(payload, clock, releasePrimary.Task);
+        using var client = CreateClient(new CallbackRequestHandler(async (number, request, token) =>
+        {
+            if (number == 1)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(primary) };
+
+            Assert.Equal(2, number);
+            var range = Assert.Single(request.Headers.Range!.Ranges);
+            var start = Assert.IsType<long>(range.From);
+            if (stallBeforeHeaders)
+            {
+                tailStalled.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            }
+
+            var content = new StreamContent(new FaultingReadStream([], stall: true,
+                onStall: () => tailStalled.TrySetResult()));
+            content.Headers.ContentLength = payload.LongLength - start;
+            content.Headers.ContentRange = new ContentRangeHeaderValue(start, payload.LongLength - 1, payload.LongLength);
+            return new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = content };
+        }));
+        var concurrency = new ImportConcurrencyLimiter();
+        concurrency.SetMaximumDownloadConcurrency(2);
+        var options = new DownloadRetryOptions
+        {
+            ResponseHeadersTimeout = TimeSpan.FromSeconds(20),
+            FirstByteTimeout = TimeSpan.FromSeconds(20),
+            BodyIdleTimeout = TimeSpan.FromSeconds(20)
+        };
+        var executor = CreateExecutor(client, options, timeProvider: clock, limiter: concurrency);
+        var directory = CreateTempDirectory();
+        var destination = Path.Combine(directory, "artifact.jar");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var download = executor.DownloadFileAsync(url, DownloadSourcePreference.Official, null, destination,
+            Convert.ToHexString(SHA1.HashData(payload)), payload.Length, cancellation.Token);
+        try
+        {
+            await tailStalled.Task.WaitAsync(cancellation.Token);
+            Assert.Equal(2, concurrency.DownloadSnapshot.ActiveCount);
+            await using (await concurrency.AcquireRuntimeDownloadSlotAsync(cancellation.Token))
+            {
+                Assert.False(download.IsCompleted);
+                Assert.Equal(2, concurrency.DownloadSnapshot.ActiveCount);
+            }
+
+            releasePrimary.TrySetResult();
+            Assert.Equal(2, (await download).NetworkAttempts);
+            Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+            Assert.Equal(destination, Assert.Single(Directory.GetFiles(directory)));
+            Assert.Equal(0, concurrency.DownloadSnapshot.ActiveCount);
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            releasePrimary.TrySetResult();
+            await Task.WhenAny(download);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
     [InlineData("metadata")]
     [InlineData("staggered")]
     [InlineData("file")]
@@ -1448,7 +1620,10 @@ public sealed class MinecraftDownloadRetryTests
                 options: options);
 
             Assert.False(result.FallbackUsed);
-            Assert.Equal("bmclapi2.bangbang93.com", Assert.Single(handler.RequestUris).Host);
+            Assert.NotEmpty(handler.RequestUris);
+            Assert.All(handler.RequestUris, uri => Assert.Equal("bmclapi2.bangbang93.com", uri.Host));
+            if (!segmentedProbe)
+                Assert.Single(handler.RequestHeaders, headers => !headers.ContainsKey("Range"));
             Assert.Equal(TimeSpan.FromSeconds(20).Ticks, clock.GetTimestamp());
             Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
         }
@@ -1593,11 +1768,12 @@ public sealed class MinecraftDownloadRetryTests
         TimeProvider? timeProvider = null,
         DownloadHostHealthTracker? hostHealthTracker = null,
         DownloadHostConcurrencyController? hostConcurrencyController = null,
-        long minimumSegmentedDownloadSize = MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize)
+        long minimumSegmentedDownloadSize = MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize,
+        ImportConcurrencyLimiter? limiter = null)
     {
         return new MinecraftDownloadRequestExecutor(
             httpClient,
-            limiter: new ImportConcurrencyLimiter(),
+            limiter: limiter ?? new ImportConcurrencyLimiter(),
             logger: logger,
             hostConcurrencyController: hostConcurrencyController ?? new DownloadHostConcurrencyController(
                 delayAsync: static (_, _) => ValueTask.CompletedTask),
@@ -1682,6 +1858,7 @@ public sealed class MinecraftDownloadRetryTests
         public List<string> Messages { get; } = [];
         public List<LogEntry> Entries { get; } = [];
         public LogLevel MinimumLevel { get; init; } = LogLevel.Trace;
+        public Action<string>? Observe { get; init; }
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -1698,14 +1875,18 @@ public sealed class MinecraftDownloadRetryTests
                 return;
 
             var message = formatter(state, exception);
-            Messages.Add(message);
-            Entries.Add(new LogEntry(logLevel, message, exception));
+            lock (Messages)
+            {
+                Messages.Add(message);
+                Entries.Add(new LogEntry(logLevel, message, exception));
+            }
+            Observe?.Invoke(message);
         }
     }
 
     private sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
 
-    private sealed class FaultingReadStream(byte[] firstChunk, bool stall = false) : Stream
+    private sealed class FaultingReadStream(byte[] firstChunk, bool stall = false, Action? onStall = null) : Stream
     {
         private bool returnedFirstChunk;
 
@@ -1722,7 +1903,10 @@ public sealed class MinecraftDownloadRetryTests
             CancellationToken cancellationToken = default)
         {
             if (stall && (returnedFirstChunk || firstChunk.Length == 0))
+            {
+                onStall?.Invoke();
                 return new ValueTask<int>(WaitForCancellationAsync(cancellationToken));
+            }
             if (returnedFirstChunk)
                 return ValueTask.FromException<int>(new IOException("The network stream ended."));
 
@@ -1752,6 +1936,23 @@ public sealed class MinecraftDownloadRetryTests
         public override long GetTimestamp() => Interlocked.Read(ref timestamp);
 
         public void Advance(TimeSpan duration) => Interlocked.Add(ref timestamp, duration.Ticks);
+    }
+
+    private sealed class SlowStartDownloadStream(byte[] data, ManualTimeProvider clock, Task release) : MemoryStream(data, writable: false)
+    {
+        private const int SampleBytes = 64 * 1024;
+        public int BytesRead { get; private set; }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (BytesRead >= 3 * SampleBytes)
+                await release.WaitAsync(cancellationToken);
+            else
+                clock.Advance(TimeSpan.FromSeconds(10));
+            var read = await base.ReadAsync(buffer[..Math.Min(buffer.Length, SampleBytes)], cancellationToken);
+            BytesRead += read;
+            return read;
+        }
     }
 
     private sealed class TimedChunkReadStream(

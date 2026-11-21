@@ -1939,6 +1939,9 @@
   <data name="Status_InstallDownloadingFiles" xml:space="preserve">
     <value>ゲームファイルをダウンロード中...</value>
   </data>
+  <data name="Status_InstallInstallingGame" xml:space="preserve">
+    <value>ゲームをインストール中...</value>
+  </data>
   <data name="Status_InstallDownloadingLoaderInstaller" xml:space="preserve">
     <value>ローダーインストーラーをダウンロード中...</value>
   </data>

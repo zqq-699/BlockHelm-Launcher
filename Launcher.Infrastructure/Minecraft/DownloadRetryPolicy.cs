@@ -261,4 +261,7 @@ internal sealed record DownloadAttemptContext(
     ResolvedDownloadRequest Resolution,
     HttpResponseMessage Response,
     DownloadTransportResult Transport,
-    int AttemptNumber);
+    int AttemptNumber)
+{
+    public Func<bool>? HasReadyAlternative { get; init; }
+}

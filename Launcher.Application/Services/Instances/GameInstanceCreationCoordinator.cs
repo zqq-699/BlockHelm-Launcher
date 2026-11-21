@@ -93,7 +93,8 @@ internal sealed class GameInstanceCreationCoordinator
             : new InstallCardProgressMapper(
                 progress,
                 loader,
-                installFabricApi || !string.IsNullOrWhiteSpace(quiltStandardLibraryVersionId));
+                installFabricApi || !string.IsNullOrWhiteSpace(quiltStandardLibraryVersionId),
+                useUnifiedCard: true);
         var versionIdentity = ResolveVersionIdentity(minecraftVersion, loader, loaderVersion, name);
         // 租约同时用于串行化同名安装，并让实例发现流程识别尚未完成的版本目录。
         await using var installLease = await installCoordinator
@@ -123,34 +124,38 @@ internal sealed class GameInstanceCreationCoordinator
 
         try
         {
-            var versionName = await gameInstaller.InstallInstanceAsync(
-                minecraftVersion,
-                loader,
-                loaderVersion,
-                new LoaderInstallTarget(settings.MinecraftDirectory, versionIdentity, transaction.PendingDirectory),
-                cardProgress,
-                cancellationToken,
-                downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond).ConfigureAwait(false);
-            logger.LogDebug(
-                "Game version installed. VersionIdentity={VersionIdentity} VersionName={VersionName} Loader={Loader}",
-                versionIdentity,
-                versionName,
-                loader);
+            if (loader is LoaderKind.Fabric && installFabricApi && !string.IsNullOrWhiteSpace(fabricApiVersionId))
+            {
+                using var preparation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var gameTask = InstallGameAsync(preparation.Token);
+                var apiTask = PrepareOptionalContentAsync(preparation.Token);
+                var both = Task.WhenAll(gameTask, apiTask);
+                try
+                {
+                    var first = await Task.WhenAny(gameTask, apiTask).ConfigureAwait(false);
+                    await first.ConfigureAwait(false);
+                    await both.ConfigureAwait(false);
+                }
+                catch
+                {
+                    try
+                    {
+                        await preparation.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (AggregateException exception)
+                    {
+                        logger.LogWarning(exception, "A game installation cancellation callback failed.");
+                    }
+                    await both.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                    throw;
+                }
+            }
+            else
+            {
+                await InstallGameAsync(cancellationToken).ConfigureAwait(false);
+                await PrepareOptionalContentAsync(cancellationToken).ConfigureAwait(false);
+            }
 
-            if (!string.Equals(versionName, versionIdentity, StringComparison.Ordinal))
-                throw new InvalidDataException("Installed version name does not match the requested logical name.");
-            cardProgress?.ReportBaseInstallCompleted();
-            await InstallOptionalContentAsync(
-                    instance,
-                    installFabricApi,
-                    fabricApiVersionId,
-                    quiltStandardLibraryVersionId,
-                    cardProgress,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            cardProgress?.ReportOptionalContentCompleted();
             cardProgress?.ReportCommitStarted();
             await transaction.CommitAsync(instance, cancellationToken).ConfigureAwait(false);
         }
@@ -212,6 +217,32 @@ internal sealed class GameInstanceCreationCoordinator
             instance.InstanceDirectory,
             instance.VersionName);
         return instance;
+
+        async Task InstallGameAsync(CancellationToken token)
+        {
+            var versionName = await gameInstaller.InstallInstanceAsync(
+                minecraftVersion,
+                loader,
+                loaderVersion,
+                new LoaderInstallTarget(settings.MinecraftDirectory, versionIdentity, transaction.PendingDirectory),
+                cardProgress,
+                token,
+                downloadSourcePreference,
+                downloadSpeedLimitMbPerSecond).ConfigureAwait(false);
+            if (!string.Equals(versionName, versionIdentity, StringComparison.Ordinal))
+                throw new InvalidDataException("Installed version name does not match the requested logical name.");
+
+            logger.LogDebug("Game version installed. VersionIdentity={VersionIdentity} VersionName={VersionName} Loader={Loader}",
+                versionIdentity, versionName, loader);
+            cardProgress?.ReportBaseInstallCompleted();
+        }
+
+        async Task PrepareOptionalContentAsync(CancellationToken token)
+        {
+            await InstallOptionalContentAsync(instance, installFabricApi, fabricApiVersionId,
+                quiltStandardLibraryVersionId, cardProgress, token).ConfigureAwait(false);
+            cardProgress?.ReportOptionalContentCompleted();
+        }
     }
 
     private static bool PathsEqual(string first, string second)

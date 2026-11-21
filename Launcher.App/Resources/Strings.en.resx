@@ -1939,6 +1939,9 @@ Longer content wraps automatically.</value>
   <data name="Status_InstallDownloadingFiles" xml:space="preserve">
     <value>Downloading game files...</value>
   </data>
+  <data name="Status_InstallInstallingGame" xml:space="preserve">
+    <value>Installing game...</value>
+  </data>
   <data name="Status_InstallDownloadingLoaderInstaller" xml:space="preserve">
     <value>Downloading loader installer...</value>
   </data>

@@ -1235,6 +1235,7 @@ public static class Strings
     public static string Status_InstallPreparing => Get(nameof(Status_InstallPreparing));
     public static string Status_InstallCheckingFiles => Get(nameof(Status_InstallCheckingFiles));
     public static string Status_InstallDownloadingFiles => Get(nameof(Status_InstallDownloadingFiles));
+    public static string Status_InstallInstallingGame => Get(nameof(Status_InstallInstallingGame));
     public static string Status_InstallDownloadingLoaderInstaller => Get(nameof(Status_InstallDownloadingLoaderInstaller));
     public static string Status_InstallRunningLoaderInstaller => Get(nameof(Status_InstallRunningLoaderInstaller));
     public static string Status_InstallFinalizingVersion => Get(nameof(Status_InstallFinalizingVersion));

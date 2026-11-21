@@ -34,6 +34,13 @@ public interface IImportConcurrencyLimiter
     /// </summary>
     bool TryAcquireAvailableDownloadSlot(out IImportConcurrencyLease? lease);
 
+    /// <summary>
+    /// Acquires an idle slot for speculative work and returns a signal that
+    /// completes when an ordinary download queues. The caller must stop its
+    /// work and release the lease when signaled.
+    /// </summary>
+    bool TryAcquirePreemptibleDownloadSlot(out IImportConcurrencyLease? lease, out Task? ordinaryDownloadQueued);
+
     ValueTask<IImportConcurrencyLease> AcquireMetadataSlotAsync(CancellationToken cancellationToken = default);
 
     ValueTask<IImportConcurrencyLease> AcquireModpackDownloadSlotAsync(CancellationToken cancellationToken = default);

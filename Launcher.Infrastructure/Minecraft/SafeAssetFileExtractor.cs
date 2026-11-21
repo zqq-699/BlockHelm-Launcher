@@ -26,19 +26,22 @@ internal sealed class SafeAssetFileExtractor : IFileExtractor
     private readonly MinecraftDownloadOperationContext? operationContext;
     private readonly SpeedMeter? speedMeter;
     private readonly ILogger? logger;
+    private readonly AssetInstallProgress? assetProgress;
 
     public SafeAssetFileExtractor(
         MinecraftDownloadRequestExecutor downloadExecutor,
         DownloadSourcePreference downloadSourcePreference,
         MinecraftDownloadOperationContext? operationContext,
         SpeedMeter? speedMeter = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        AssetInstallProgress? assetProgress = null)
     {
         this.downloadExecutor = downloadExecutor;
         this.downloadSourcePreference = downloadSourcePreference;
         this.operationContext = operationContext;
         this.speedMeter = speedMeter;
         this.logger = logger;
+        this.assetProgress = assetProgress;
     }
 
     public async ValueTask<IEnumerable<GameFile>> Extract(
@@ -155,7 +158,10 @@ internal sealed class SafeAssetFileExtractor : IFileExtractor
                         path.Resource, logger));
                 }
 
-                yield return new GameFile(item.Name)
+                if (assetProgress is not null)
+                    updateTasks.Add(assetProgress);
+
+                var file = new GameFile(item.Name)
                 {
                     Path = objectPath,
                     Hash = item.Hash,
@@ -163,6 +169,8 @@ internal sealed class SafeAssetFileExtractor : IFileExtractor
                     Url = $"https://resources.download.minecraft.net/{relativeObjectPath}",
                     UpdateTask = updateTasks
                 };
+                assetProgress?.Register(file);
+                yield return file;
             }
         }
         finally

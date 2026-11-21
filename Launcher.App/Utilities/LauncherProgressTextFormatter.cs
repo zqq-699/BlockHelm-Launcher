@@ -45,6 +45,8 @@ internal static class LauncherProgressTextFormatter
         {
             InstallProgressStages.Queue => Strings.Status_InstallQueued,
             InstallProgressStages.Preparing => Strings.Status_InstallPreparing,
+            InstallProgressStages.DownloadingGameFiles => Strings.Status_InstallDownloadingFiles,
+            InstallProgressStages.InstallingGame => Strings.Status_InstallInstallingGame,
             InstallProgressStages.DownloadingLoaderInstaller => Strings.Status_InstallDownloadingLoaderInstaller,
             InstallProgressStages.CheckingJava => Strings.Status_LaunchCheckingJava,
             InstallProgressStages.DownloadingJava => Strings.Status_InstallDownloadingJava,

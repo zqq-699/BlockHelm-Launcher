@@ -35,7 +35,7 @@ namespace Launcher.Infrastructure.Minecraft;
 /// <summary>
 /// 按下载源优先级执行请求，并统一处理并发租约、重试、源切换和“确实不存在”的查询结果。
 /// </summary>
-internal sealed class MinecraftDownloadRequestExecutor
+internal sealed partial class MinecraftDownloadRequestExecutor
 {
     internal const long MinimumSegmentedDownloadSize = 2L * 1024 * 1024;
     internal const long SegmentedSplitThreshold = 1024L * 1024;
@@ -405,13 +405,8 @@ internal sealed class MinecraftDownloadRequestExecutor
                 categoryHint,
                 async (context, token) =>
                 {
-                    await session.WriteAsync(
-                        context.Response,
-                        context.Resolution,
-                        context.AttemptNumber,
-                        sequentialProgress,
-                        token,
-                        reportTransferredBytes).ConfigureAwait(false);
+                    await WriteSequentialFileAsync(context, session, integrity, recovery, segmented.AttemptCount == 0,
+                        sequentialProgress, sensitiveHeaders, speedMeter, reportTransferredBytes, token).ConfigureAwait(false);
                     return context.Resolution;
                 },
                 noResultStatus: null,
@@ -505,13 +500,8 @@ internal sealed class MinecraftDownloadRequestExecutor
                 categoryHint,
                 async (context, token) =>
                 {
-                    await session.WriteAsync(
-                        context.Response,
-                        context.Resolution,
-                        context.AttemptNumber,
-                        sequentialProgress,
-                        token,
-                        reportTransferredBytes).ConfigureAwait(false);
+                    await WriteSequentialFileAsync(context, session, integrity, recovery, segmented.AttemptCount == 0,
+                        sequentialProgress, sensitiveHeaders, speedMeter, reportTransferredBytes, token).ConfigureAwait(false);
                     return context.Resolution;
                 },
                 noResultStatus: null,
@@ -1568,12 +1558,14 @@ internal sealed class MinecraftDownloadRequestExecutor
     {
         private int nodeRedispatched;
         private int slowRangeSourceSwitched;
+        private int tailStarted;
         private volatile string? slowHost;
         public string? SlowHost { get => slowHost; set => slowHost = value; }
         public bool UsedAlternateRange { get; set; }
         public bool TryRedispatchNode() => Interlocked.CompareExchange(ref nodeRedispatched, 1, 0) == 0;
         public void ReleaseNodeRedispatch() => Volatile.Write(ref nodeRedispatched, 0);
         public bool TrySwitchSlowRangeSource() => Interlocked.CompareExchange(ref slowRangeSourceSwitched, 1, 0) == 0;
+        public bool TryStartTail() => Interlocked.CompareExchange(ref tailStarted, 1, 0) == 0;
     }
 
     private readonly record struct FileSourceAttempt(
@@ -2049,7 +2041,10 @@ internal sealed class MinecraftDownloadRequestExecutor
                         : null,
                 rangeProgress: response.StatusCode is HttpStatusCode.PartialContent ? readProgress : null).ConfigureAwait(false);
             var value = await operation(
-                new DownloadAttemptContext(resolution, response, transportResult, attempt),
+                new DownloadAttemptContext(resolution, response, transportResult, attempt)
+                {
+                    HasReadyAlternative = sourceAttempt.BackupIsReady
+                },
                 cancellationToken).ConfigureAwait(false);
             logger.LogTrace(
                 "Download transport completed. RequestedSourcePreference={RequestedSourcePreference} ResolvedSourceKind={ResolvedSourceKind} OriginalUrl={OriginalUrl} ActualUrl={ActualUrl} FinalHost={FinalHost} RedirectCount={RedirectCount} Attempt={Attempt} StatusCode={StatusCode} ResponseHeadersDuration={ResponseHeadersDuration} ResponseBodyDuration={ResponseBodyDuration} ContentLength={ContentLength} DownloadedBytes={DownloadedBytes} AverageBytesPerSecond={AverageBytesPerSecond} GlobalActive={GlobalActive} GlobalWaiting={GlobalWaiting} GlobalTarget={GlobalTarget} HostOrigin={HostOrigin}",

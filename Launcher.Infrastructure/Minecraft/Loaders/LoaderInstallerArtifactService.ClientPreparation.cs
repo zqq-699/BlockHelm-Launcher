@@ -37,6 +37,9 @@ internal sealed partial class LoaderInstallerArtifactService
         var token = preparation.Token;
         ExceptionDispatchInfo? firstFailure = null;
         var split = versionInstaller.SupportsSplitBaseContent;
+        var parallelProgress = split && progress is IParallelInstallProgress { TracksParallelInstall: true } tracked
+            ? tracked
+            : null;
         var installerTask = RunBranchAsync(PrepareInstallerAsync);
         var metadataTask = RunBranchAsync(PrepareMetadataAsync);
         var baseTask = RunBranchAsync(PrepareBaseAsync);
@@ -104,11 +107,13 @@ internal sealed partial class LoaderInstallerArtifactService
             }
 
             token.ThrowIfCancellationRequested();
+            parallelProgress?.ReportParallelInstallProgress(ParallelInstallPart.InstallerDependencies, 100);
             await runInstaller(installer, token).ConfigureAwait(false);
             await DownloadDiagnostics.RunStageAsync(logger, "RuntimeLibraries", () =>
                 MaterializeRuntimeLibrariesAsync(installerPath, installer.Plan, layout.WorkspaceMinecraftDirectory,
                     preference, speedLimit, token, operation, speedMeter, parallelDownloads: true)).ConfigureAwait(false);
-            if (!assetsTask.IsCompleted)
+            parallelProgress?.ReportParallelInstallProgress(ParallelInstallPart.Loader, 100);
+            if (parallelProgress is null && !assetsTask.IsCompleted)
                 progress?.Report(new LauncherProgress(ImportProgressStages.InstallingMinecraftBase, string.Empty));
             return (MergeSeededFiles(client, libraries), installer.Plan);
         }
@@ -126,9 +131,11 @@ internal sealed partial class LoaderInstallerArtifactService
         {
             var mappings = await mappingPlanTask.ConfigureAwait(false);
             var plan = await installerTask.ConfigureAwait(false);
-            return await DownloadDiagnostics.RunStageAsync(logger, "MappingsPreparation", () =>
+            var result = await DownloadDiagnostics.RunStageAsync(logger, "MappingsPreparation", () =>
                 PrepareInstallerMappingsAsync(installerPath, plan, mappings, minecraftVersion, layout.WorkspaceMinecraftDirectory,
                     preference, speedLimit, token, operation, speedMeter, parallelDownloads: true)).ConfigureAwait(false);
+            parallelProgress?.ReportParallelInstallProgress(ParallelInstallPart.Mappings, 100);
+            return result;
         }
 
         async Task<LoaderInstallerWorkspaceSnapshot> PrepareInstallerDependenciesAsync()
@@ -136,8 +143,11 @@ internal sealed partial class LoaderInstallerArtifactService
             var mappings = await mappingPlanTask.ConfigureAwait(false);
             var plan = mappings?.PreparedPlan ?? await installerTask.ConfigureAwait(false);
             var metadata = await metadataTask.ConfigureAwait(false);
-            return await DownloadDiagnostics.RunStageAsync(logger, "InstallerDependencies", () =>
+            var result = await DownloadDiagnostics.RunStageAsync(logger, "InstallerDependencies", () =>
                 PrepareInstallerLibrariesAsync(metadata, plan, mappings)).ConfigureAwait(false);
+            // A fallback to the original installer may still need additional libraries before Java.
+            parallelProgress?.ReportParallelInstallProgress(ParallelInstallPart.InstallerDependencies, 80);
+            return result;
         }
 
         async Task<LoaderInstallerWorkspaceSnapshot> PrepareInstallerLibrariesAsync(
@@ -185,27 +195,34 @@ internal sealed partial class LoaderInstallerArtifactService
         {
             using var branch = DownloadDiagnostics.BeginBranch(logger, "LoaderInstaller");
             await DownloadDiagnostics.RunStageAsync(logger, "InstallerDownload", () => downloadInstaller(token)).ConfigureAwait(false);
-            return await DownloadDiagnostics.RunStageAsync(logger, "InstallerPlan", () => ReadPlanAsync(installerPath, token))
+            var plan = await DownloadDiagnostics.RunStageAsync(logger, "InstallerPlan", () => ReadPlanAsync(installerPath, token))
                 .ConfigureAwait(false);
+            parallelProgress?.ReportParallelInstallProgress(ParallelInstallPart.Installer, 100);
+            return plan;
         }
 
         async Task<LoaderInstallerWorkspaceSnapshot> PrepareBaseAsync()
         {
             using var branch = DownloadDiagnostics.BeginBranch(logger, "VanillaContent");
-            return await DownloadDiagnostics.RunStageAsync(logger, "BasePrerequisites", async () =>
+            var snapshot = await DownloadDiagnostics.RunStageAsync(logger, "BasePrerequisites", async () =>
             {
                 var metadata = await metadataTask.ConfigureAwait(false);
                 return await seeder.PrepareBaseClientAsync(layout.SharedMinecraftDirectory, metadata, minecraftVersion,
                     preference, speedLimit, token, operation, speedMeter).ConfigureAwait(false);
             }).ConfigureAwait(false);
+            parallelProgress?.ReportParallelInstallProgress(ParallelInstallPart.Client, 100);
+            return snapshot;
         }
 
         async Task<LoaderInstallerWorkspaceSnapshot> PrepareMetadataAsync()
         {
             using var branch = DownloadDiagnostics.BeginBranch(logger, "VanillaContent");
-            return await DownloadDiagnostics.RunStageAsync(logger, "BaseMetadata", () =>
+            var snapshot = await DownloadDiagnostics.RunStageAsync(logger, "BaseMetadata", () =>
                 seeder.PrepareBaseMetadataAsync(layout.WorkspaceMinecraftDirectory, minecraftVersion,
                     preference, speedLimit, token, loaderCategory)).ConfigureAwait(false);
+            if (snapshot.CanPrepareBaseContent)
+                parallelProgress?.ReportParallelInstallProgress(ParallelInstallPart.Metadata, 100);
+            return snapshot;
         }
 
         async Task<bool> InstallVanillaAsync(bool assetsOnly)
@@ -219,10 +236,22 @@ internal sealed partial class LoaderInstallerArtifactService
                     logger.LogDebug("Base content preparation deferred. MinecraftVersion={MinecraftVersion}", minecraftVersion);
                 return false;
             }
-            // The background branch shares the speed meter, but must not revert the visible Java stage.
-            var baseProgress = assetsOnly || progress is null ? null : SpeedMeterProgress.Forward(progress, value =>
-                progress.Report(value with { Stage = ImportProgressStages.InstallingMinecraftBase }));
-            baseProgress?.Report(new LauncherProgress(ImportProgressStages.InstallingMinecraftBase, string.Empty, 0));
+            var part = assetsOnly ? ParallelInstallPart.Assets : ParallelInstallPart.VanillaLibraries;
+            IProgress<LauncherProgress>? baseProgress = null;
+            if (progress is not null && parallelProgress is not null)
+            {
+                baseProgress = SpeedMeterProgress.Forward(progress, value =>
+                {
+                    if (value.Percent is { } percent)
+                        parallelProgress.ReportParallelInstallProgress(part, Math.Min(99, percent));
+                });
+            }
+            else if (progress is not null && !assetsOnly)
+            {
+                baseProgress = SpeedMeterProgress.Forward(progress, value =>
+                    progress.Report(value with { Stage = ImportProgressStages.InstallingMinecraftBase }));
+                baseProgress.Report(new LauncherProgress(ImportProgressStages.InstallingMinecraftBase, string.Empty, 0));
+            }
             using var branch = DownloadDiagnostics.BeginBranch(logger, assetsOnly ? "VanillaAssets" : "VanillaContent");
             try
             {
@@ -236,6 +265,7 @@ internal sealed partial class LoaderInstallerArtifactService
             {
                 throw new MinecraftAssetInstallationException(exception);
             }
+            parallelProgress?.ReportParallelInstallProgress(part, 100);
             return true;
         }
     }

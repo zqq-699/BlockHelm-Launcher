@@ -154,6 +154,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
                 token),
             async (versionName, token) => await launcher.InstallAsync(versionName, token).ConfigureAwait(false),
             cancellationToken).ConfigureAwait(false);
+        progress?.Report(new LauncherProgress(InstallProgressStages.FinalizingVersion, string.Empty));
         await EnsureInstalledVersionIsValidAsync(
             finalVersionName,
             minecraftVersion,
@@ -371,6 +372,9 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
             bandwidthLimiter,
             category: DownloadConcurrencyCategory.Metadata,
             hostHealthTracker: operationContext?.HostHealth);
+        var assetProgress = contentPart is LoaderBaseContentPart.Assets && progress is not null
+            ? new AssetInstallProgress(progress)
+            : null;
         var gameInstaller = DownloadSpeedTrackingGameInstaller.CreateAsCoreCount(
             parameters.HttpClient,
             runtimeExecutor,
@@ -379,7 +383,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
             path,
             operationContext,
             sharedSpeedMeter,
-            logger);
+            logger,
+            assetProgress);
         parameters.GameInstaller = gameInstaller;
         var globalDownloadSnapshot = ImportConcurrencyLimiter.Shared.DownloadSnapshot;
         logger?.LogDebug(
@@ -416,7 +421,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         fileExtractors.RemoveAt(defaultAssetExtractor.index);
         if (contentPart is not LoaderBaseContentPart.WithoutClientOrAssets)
         {
-            var assetExtractor = new SafeAssetFileExtractor(assetIndexExecutor, downloadSourcePreference, operationContext, sharedSpeedMeter, logger);
+            var assetExtractor = new SafeAssetFileExtractor(assetIndexExecutor, downloadSourcePreference, operationContext,
+                sharedSpeedMeter, logger, assetProgress);
             if (contentPart is LoaderBaseContentPart.Assets)
             {
                 for (var index = fileExtractors.Count() - 1; index >= 0; index--)

@@ -11,11 +11,14 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Net;
+using System.Security.Cryptography;
 using Launcher.Application;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.Minecraft;
 using Launcher.Infrastructure.Modpacks;
+using Launcher.Infrastructure.Modrinth;
 using Launcher.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging;
 
@@ -23,6 +26,87 @@ namespace Launcher.Tests.Services;
 
 public sealed class GameInstanceServiceTests : TestTempDirectory
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FabricApiAndBaseGamePrepareTogetherBeforeInstanceCommit(bool apiFails)
+    {
+        var settings = CreateSettings();
+        var settingsService = new TestSettingsService(settings);
+        var repository = new JsonGameInstanceRepository(settingsService);
+        var releaseGame = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseApi = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new FakeLoaderProvider { Kind = LoaderKind.Fabric, WaitBeforeInstall = releaseGame.Task };
+        using var handler = new FabricApiPreparationHandler(releaseApi.Task, apiFails);
+        using var client = new HttpClient(handler);
+        var service = new GameInstanceService(settingsService, repository, [provider], new ModrinthService(client),
+            new ModpackGameInstaller([provider]), installTransactionService: new InstanceInstallTransactionService());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var install = service.CreateInstanceAsync("1.21.1", LoaderKind.Fabric, "test", "Fabric Test", null,
+            cancellationToken: timeout.Token, installFabricApi: true, fabricApiVersionId: "test-api");
+        var versions = Path.Combine(settings.MinecraftDirectory, "versions");
+        var published = Path.Combine(versions, "Fabric Test");
+        try
+        {
+            await Task.WhenAll(provider.InstallStarted.Task, handler.ApiStarted.Task).WaitAsync(timeout.Token);
+            Assert.False(Directory.Exists(published));
+            releaseApi.TrySetResult();
+            if (apiFails)
+            {
+                var failure = await Assert.ThrowsAsync<HttpRequestException>(() => install);
+                Assert.Equal(HttpStatusCode.NotFound, failure.StatusCode);
+                Assert.Empty(Directory.GetDirectories(versions));
+                Assert.Empty(await repository.GetAllAsync());
+            }
+            else
+            {
+                await handler.FileRequested.Task.WaitAsync(timeout.Token);
+                Assert.False(Directory.Exists(published));
+                releaseGame.TrySetResult();
+                var instance = await install;
+                Assert.Equal("test API", await File.ReadAllTextAsync(Path.Combine(instance.InstanceDirectory, "mods", "fabric-api.jar"), timeout.Token));
+            }
+        }
+        finally
+        {
+            releaseGame.TrySetResult();
+            releaseApi.TrySetResult();
+            await timeout.CancelAsync();
+            await Task.WhenAny(install);
+        }
+    }
+
+    private sealed class FabricApiPreparationHandler(Task releaseApi, bool apiFails) : HttpMessageHandler
+    {
+        public TaskCompletionSource ApiStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FileRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.Host == "cdn.example.invalid")
+            {
+                FileRequested.TrySetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("test API") };
+            }
+
+            Assert.EndsWith("/version/test-api", request.RequestUri.AbsolutePath);
+            ApiStarted.TrySetResult();
+            await releaseApi.WaitAsync(cancellationToken);
+            if (apiFails)
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+
+            var sha512 = Convert.ToHexString(SHA512.HashData("test API"u8));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent($$$"""
+                    {"id":"test-api","project_id":"fabric-api","version_number":"1.0","files":[
+                      {"filename":"fabric-api.jar","url":"https://cdn.example.invalid/fabric-api.jar",
+                       "primary":true,"size":8,"hashes":{"sha512":"{{{sha512}}}"}}]}
+                    """)
+            };
+        }
+    }
+
     [Fact]
     public async Task SelectingInstanceDoesNotScanUnrelatedVersionsAndRejectsRemovedTarget()
     {

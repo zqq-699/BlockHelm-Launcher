@@ -76,7 +76,15 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
         var versionDirectory = Path.Combine(layout.Path.Versions, version);
         var versionJson = Path.Combine(versionDirectory, version + ".json");
         var clientJar = Path.Combine(versionDirectory, version + ".jar");
-        const string indexText = """{"objects":{}}""";
+        const string asset = "verified asset";
+        var assetHash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(asset))).ToLowerInvariant();
+        var indexText = new JsonObject
+        {
+            ["objects"] = new JsonObject
+            {
+                ["sound.ogg"] = new JsonObject { ["hash"] = assetHash, ["size"] = asset.Length }
+            }
+        }.ToJsonString();
         Directory.CreateDirectory(versionDirectory);
         await File.WriteAllTextAsync(clientJar, "vanilla client");
         await File.WriteAllTextAsync(versionJson, new JsonObject
@@ -113,8 +121,13 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
 
         Directory.CreateDirectory(Path.GetDirectoryName(index)!);
         await File.WriteAllTextAsync(index, indexText, timeout.Token);
+        var assetPath = Path.Combine(layout.Path.GetAssetObjectPath(version), assetHash[..2], assetHash);
+        Directory.CreateDirectory(Path.GetDirectoryName(assetPath)!);
+        await File.WriteAllTextAsync(assetPath, asset, timeout.Token);
+        List<LauncherProgress> updates = [];
         await installer.InstallBasePartAsync(layout.Path, version, operation, DownloadSourcePreference.Official,
-            null, timeout.Token, 0, null, LoaderBaseContentPart.Assets);
+            new RecordingProgress(updates), timeout.Token, 0, null, LoaderBaseContentPart.Assets);
+        Assert.Contains(updates, update => update.Stage == InstallProgressStages.DownloadingGameFiles && update.Percent is > 0 and < 100);
         Assert.False(File.Exists(clientJar));
 
         await File.WriteAllTextAsync(clientJar, "vanilla client", timeout.Token);
@@ -129,6 +142,33 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
                 null, timeout.Token, 0, null, LoaderBaseContentPart.Assets));
         Assert.Equal(originalJson, await File.ReadAllTextAsync(versionJson, timeout.Token));
         Assert.Equal(originalWriteTime, File.GetLastWriteTimeUtc(versionJson));
+    }
+
+    [Fact]
+    public async Task AssetByteProgressCountsCacheAndDoesNotAccumulateRepeatedBytesFromRetries()
+    {
+        List<LauncherProgress> updates = [];
+        var progress = new AssetInstallProgress(new RecordingProgress(updates));
+        var cached = new GameFile("cached") { Path = "cached", Size = 100 };
+        var large = new GameFile("large") { Path = "large", Size = 900 };
+        progress.Register(cached);
+        progress.Register(cached);
+        progress.Register(large);
+
+        await progress.Execute(cached, CancellationToken.None);
+        progress.ReportTransfer(large, attempt: 1, bytes: 600);
+        progress.ReportTransfer(large, attempt: 2, bytes: 0);
+        progress.ReportTransfer(large, attempt: 1, bytes: 900);
+        progress.ReportTransfer(large, attempt: 2, bytes: 300);
+        progress.ReportTransfer(large, attempt: 2, bytes: 650);
+        await progress.Execute(large, CancellationToken.None);
+
+        Assert.Equal(new double?[] { 10, 70, 75, 99 }, updates.Select(update => update.Percent));
+    }
+
+    private sealed class RecordingProgress(List<LauncherProgress> updates) : IProgress<LauncherProgress>
+    {
+        public void Report(LauncherProgress value) => updates.Add(value);
     }
 
     [Fact]

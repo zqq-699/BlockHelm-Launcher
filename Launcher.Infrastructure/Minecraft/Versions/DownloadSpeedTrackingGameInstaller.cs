@@ -40,6 +40,7 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
     private readonly MinecraftPath? minecraftPath;
     private readonly MinecraftDownloadOperationContext? operationContext;
     private readonly ILogger? logger;
+    private readonly AssetInstallProgress? assetProgress;
 
     internal int ConfiguredMaxChecker { get; }
     internal int ConfiguredMaxDownloader { get; }
@@ -55,7 +56,8 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         MinecraftPath? minecraftPath,
         MinecraftDownloadOperationContext? operationContext,
         SpeedMeter? sharedSpeedMeter,
-        ILogger? logger)
+        ILogger? logger,
+        AssetInstallProgress? assetProgress)
         : base(maxChecker, maxDownloader, boundedCapacity, httpClient)
     {
         ConfiguredMaxChecker = maxChecker;
@@ -65,6 +67,7 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         this.minecraftPath = minecraftPath;
         this.operationContext = operationContext;
         this.logger = logger;
+        this.assetProgress = assetProgress;
         speedMeter = sharedSpeedMeter ?? SpeedMeterProgress.TryGet(progress);
     }
 
@@ -76,7 +79,8 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         MinecraftPath? minecraftPath = null,
         MinecraftDownloadOperationContext? operationContext = null,
         SpeedMeter? sharedSpeedMeter = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        AssetInstallProgress? assetProgress = null)
     {
         var maxChecker = Environment.ProcessorCount;
         maxChecker = Math.Max(1, maxChecker);
@@ -93,7 +97,8 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
             minecraftPath,
             operationContext,
             sharedSpeedMeter,
-            logger);
+            logger,
+            assetProgress);
     }
 
     protected override Task Download(
@@ -133,6 +138,7 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         using var diagnosticLogScope = logScope.RestoreContext();
         var reportProgress = logScope.BeginSource((attempt, progressedBytes, totalBytes) =>
         {
+            assetProgress?.ReportTransfer(file, attempt, progressedBytes);
             if (attempt != currentAttempt)
             {
                 currentAttempt = attempt;
