@@ -67,6 +67,101 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
     }
 
     [Fact]
+    public async Task VanillaFileExtractorsKeepAssetsAndJavaInputsSeparate()
+    {
+        var layout = MinecraftInstallPathLayout.Create(Path.Combine(TempRoot, "sandbox"), Path.Combine(TempRoot, "shared"));
+        using var operation = VanillaLoaderProvider.CreateDownloadOperationContext(layout.Path);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        const string version = "test-vanilla";
+        var versionDirectory = Path.Combine(layout.Path.Versions, version);
+        var versionJson = Path.Combine(versionDirectory, version + ".json");
+        var clientJar = Path.Combine(versionDirectory, version + ".jar");
+        const string indexText = """{"objects":{}}""";
+        Directory.CreateDirectory(versionDirectory);
+        await File.WriteAllTextAsync(clientJar, "vanilla client");
+        await File.WriteAllTextAsync(versionJson, new JsonObject
+        {
+            ["id"] = version,
+            ["type"] = "release",
+            ["mainClass"] = "test.Main",
+            ["libraries"] = new JsonArray(),
+            ["downloads"] = new JsonObject
+            {
+                ["client"] = new JsonObject
+                {
+                    ["url"] = "https://example.invalid/client.jar",
+                    ["size"] = new FileInfo(clientJar).Length,
+                    ["sha1"] = AtomicSharedFilePublisher.ComputeSha1(clientJar)
+                }
+            },
+            ["assetIndex"] = new JsonObject
+            {
+                ["id"] = version,
+                ["url"] = "https://example.invalid/assets.json",
+                ["size"] = indexText.Length,
+                ["sha1"] = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(indexText))).ToLowerInvariant()
+            }
+        }.ToJsonString(), timeout.Token);
+        var installer = new FinalVersionInstaller();
+        var index = layout.Path.GetIndexFilePath(version);
+
+        File.Delete(clientJar);
+        await installer.InstallBasePartAsync(layout.Path, version, operation, DownloadSourcePreference.Official,
+            null, timeout.Token, 0, null, LoaderBaseContentPart.WithoutClientOrAssets);
+        Assert.False(File.Exists(index));
+        Assert.False(File.Exists(clientJar));
+
+        Directory.CreateDirectory(Path.GetDirectoryName(index)!);
+        await File.WriteAllTextAsync(index, indexText, timeout.Token);
+        await installer.InstallBasePartAsync(layout.Path, version, operation, DownloadSourcePreference.Official,
+            null, timeout.Token, 0, null, LoaderBaseContentPart.Assets);
+        Assert.False(File.Exists(clientJar));
+
+        await File.WriteAllTextAsync(clientJar, "vanilla client", timeout.Token);
+        var originalJson = await File.ReadAllTextAsync(versionJson, timeout.Token);
+        var originalWriteTime = File.GetLastWriteTimeUtc(versionJson);
+        // Keep the same JSON readable but deny replacement or writes during both SDK installs.
+        await using var readOnlyMetadata = new FileStream(versionJson, FileMode.Open, FileAccess.Read, FileShare.Read);
+        await Task.WhenAll(
+            installer.InstallBasePartAsync(layout.Path, version, operation, DownloadSourcePreference.Official,
+                null, timeout.Token, 0, null, LoaderBaseContentPart.WithoutClientOrAssets),
+            installer.InstallBasePartAsync(layout.Path, version, operation, DownloadSourcePreference.Official,
+                null, timeout.Token, 0, null, LoaderBaseContentPart.Assets));
+        Assert.Equal(originalJson, await File.ReadAllTextAsync(versionJson, timeout.Token));
+        Assert.Equal(originalWriteTime, File.GetLastWriteTimeUtc(versionJson));
+    }
+
+    [Fact]
+    public async Task DerivedVersionReusesTheVanillaClientOnlyForTheSameContent()
+    {
+        var layout = MinecraftInstallPathLayout.Create(Path.Combine(TempRoot, "sandbox"), Path.Combine(TempRoot, "shared"));
+        using var operation = VanillaLoaderProvider.CreateDownloadOperationContext(layout.Path);
+        var source = Path.Combine(layout.Path.Versions, "1.21.10", "1.21.10.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        await File.WriteAllTextAsync(source, "verified vanilla");
+        var sha1 = AtomicSharedFilePublisher.ComputeSha1(source);
+        var size = (int)new FileInfo(source).Length;
+        operation.ReusableVanillaClient = new(source, sha1, size);
+        var launcher = VanillaLoaderProvider.CreateLauncher(layout.Path, progress: null, operationContext: operation);
+        var installer = Assert.IsType<DownloadSpeedTrackingGameInstaller>(launcher.GameInstaller);
+        var destination = Path.Combine(layout.Path.Versions, "forge", "forge.jar");
+
+        // An invalid network URL guarantees a successful result used the local client.
+        await installer.DownloadGameFileAsync(new GameFile("forge")
+        {
+            Path = destination, Url = "not a URL", Hash = sha1, Size = size
+        }, null, CancellationToken.None);
+        Assert.Equal("verified vanilla", await File.ReadAllTextAsync(destination));
+
+        var otherDestination = Path.Combine(layout.Path.Versions, "other", "other.jar");
+        await Assert.ThrowsAnyAsync<Exception>(() => installer.DownloadGameFileAsync(new GameFile("other")
+        {
+            Path = otherDestination, Url = "not a URL", Hash = new string('0', 40), Size = size
+        }, null, CancellationToken.None));
+        Assert.False(File.Exists(otherDestination));
+    }
+
+    [Fact]
     public async Task AtomicPublisherReplacesDifferentContentOnlyAfterSourceHashIsVerified()
     {
         var source = CreateFile("source-index.json", "current");
@@ -268,14 +363,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             metadataUrl,
             officialJson);
 
-        await new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null).SeedAsync(
-            shared,
-            workspace,
-            minecraftVersion,
-            installerJar,
-            DownloadSourcePreference.Official,
-            downloadSpeedLimitMbPerSecond: 0,
-            CancellationToken.None);
+        var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
+        var snapshot = await seeder.PrepareBaseAsync(shared, workspace, minecraftVersion,
+            DownloadSourcePreference.Official, downloadSpeedLimitMbPerSecond: 0, CancellationToken.None);
+        await seeder.SeedInstallerLibrariesAsync(shared, installerJar, snapshot, CancellationToken.None);
 
         Assert.False(File.Exists(Path.Combine(workspace, "escaped.jar")));
         Assert.False(File.Exists(Path.Combine(TempRoot, "installer", "escaped.jar")));
@@ -295,11 +386,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             officialJson);
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        var snapshot = await seeder.SeedAsync(
+        var snapshot = await seeder.PrepareBaseAsync(
             shared,
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None);
@@ -361,11 +451,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             officialJson);
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await seeder.SeedAsync(
+        await seeder.PrepareBaseAsync(
             shared,
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None);
@@ -399,11 +488,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             """{"id":"26.2","mainClass":"net.minecraft.client.main.Main"}""");
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => seeder.SeedAsync(
+        await Assert.ThrowsAnyAsync<Exception>(() => seeder.PrepareBaseAsync(
             shared,
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None));
@@ -429,11 +517,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             $$"""{"id":"{{minecraftVersion}}"}""");
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => seeder.SeedAsync(
+        await Assert.ThrowsAnyAsync<Exception>(() => seeder.PrepareBaseAsync(
             shared,
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None));
@@ -456,11 +543,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             wrongMetadata);
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => seeder.SeedAsync(
+        await Assert.ThrowsAnyAsync<Exception>(() => seeder.PrepareBaseAsync(
             shared,
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None));
@@ -485,11 +571,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             officialJson);
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await seeder.SeedAsync(
+        await seeder.PrepareBaseAsync(
             shared,
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None);
@@ -501,22 +586,27 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             $"{minecraftVersion}.jar")));
     }
 
-    [Fact]
-    public async Task LoaderInstallerSeederReusesClientJarOnlyWhenOfficialHashAndSizeMatch()
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("missing")]
+    [InlineData("corrupt")]
+    public async Task LoaderInstallerSeederPreparesOnlyVerifiedVanillaClientJar(string sharedJar)
     {
         const string minecraftVersion = "1.20.1";
         const string metadataUrl = "https://piston-meta.mojang.com/v1/packages/test/1.20.1.json";
+        const string jarUrl = "https://piston-data.mojang.com/v1/objects/test/client.jar";
         const string jarContent = "verified shared jar";
         var shared = Path.Combine(TempRoot, "shared");
         var workspace = Path.Combine(TempRoot, "installer", ".minecraft");
-        CreateFile(
-            Path.Combine("shared", "versions", minecraftVersion, $"{minecraftVersion}.jar"),
-            jarContent);
+        if (sharedJar != "missing")
+            CreateFile(Path.Combine("shared", "versions", minecraftVersion, $"{minecraftVersion}.jar"),
+                sharedJar == "valid" ? jarContent : new string('x', jarContent.Length));
         var officialJson = $$"""
             {
               "id":"{{minecraftVersion}}",
               "downloads":{
                 "client":{
+                  "url":"{{jarUrl}}",
                   "sha1":"{{ComputeSha1(jarContent)}}",
                   "size":{{Encoding.UTF8.GetByteCount(jarContent)}}
                 }
@@ -526,18 +616,21 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
         var handler = new OfficialMetadataHandler(
             $$"""{"versions":[{"id":"{{minecraftVersion}}","url":"{{metadataUrl}}","sha1":"{{ComputeSha1(officialJson)}}"}]}""",
             metadataUrl,
-            officialJson);
+            officialJson, clientJar: (jarUrl, jarContent));
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await seeder.SeedAsync(
+        var snapshot = await seeder.PrepareBaseAsync(
             shared,
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None);
 
+        Assert.Equal(ComputeSha1(jarContent), snapshot.SeededFiles[$"versions/{minecraftVersion}/{minecraftVersion}.jar"], ignoreCase: true);
+        Assert.Equal(sharedJar == "valid" ? 0 : 1, handler.RequestUris.Count(uri => uri.AbsoluteUri == jarUrl));
+        if (sharedJar == "corrupt")
+            Assert.Equal(new string('x', jarContent.Length), await File.ReadAllTextAsync(Path.Combine(shared, "versions", minecraftVersion, $"{minecraftVersion}.jar")));
         Assert.Equal(
             jarContent,
             await File.ReadAllTextAsync(Path.Combine(
@@ -560,11 +653,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => seeder.SeedAsync(
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => seeder.PrepareBaseAsync(
             Path.Combine(TempRoot, "shared"),
             Path.Combine(TempRoot, "installer", ".minecraft"),
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             cancellation.Token));
@@ -586,11 +678,10 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
         var workspace = Path.Combine(TempRoot, "installer", ".minecraft");
         var seeder = new LoaderInstallerPrerequisiteSeeder(new HttpClient(handler), null);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => seeder.SeedAsync(
+        await Assert.ThrowsAnyAsync<Exception>(() => seeder.PrepareBaseAsync(
             Path.Combine(TempRoot, "shared"),
             workspace,
             minecraftVersion,
-            Path.Combine(TempRoot, "missing-installer.jar"),
             DownloadSourcePreference.Official,
             downloadSpeedLimitMbPerSecond: 0,
             CancellationToken.None));
@@ -658,7 +749,8 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
         string manifestJson,
         string metadataUrl,
         string metadataJson,
-        HttpStatusCode metadataStatusCode = HttpStatusCode.OK) : HttpMessageHandler
+        HttpStatusCode metadataStatusCode = HttpStatusCode.OK,
+        (string Url, string Content)? clientJar = null) : HttpMessageHandler
     {
         public List<Uri> RequestUris { get; } = [];
 
@@ -671,6 +763,7 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
             {
                 "/mc/game/version_manifest_v2.json" => manifestJson,
                 var path when path == new Uri(metadataUrl).AbsolutePath => metadataJson,
+                _ when clientJar is { } jar && request.RequestUri.AbsoluteUri == jar.Url => jar.Content,
                 _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
             };
             var statusCode = request.RequestUri.AbsolutePath == new Uri(metadataUrl).AbsolutePath

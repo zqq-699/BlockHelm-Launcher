@@ -13,7 +13,11 @@ internal sealed class DownloadHostHealthTracker
 {
     public static DownloadHostHealthTracker Shared { get; } = new();
 
+    private static readonly TimeSpan RedispatchCooldown = TimeSpan.FromSeconds(5);
     private readonly ConcurrentDictionary<(string Source, string Host), HostState> states = new();
+    private readonly ConcurrentDictionary<string, HostState> invalidContentNodes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, HostState> networkNodes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<(string EntryOrigin, string NodeHost), RedispatchState> redispatches = new();
     private readonly TimeSpan cooldown = TimeSpan.FromSeconds(45);
     private readonly TimeProvider clock;
 
@@ -22,7 +26,42 @@ internal sealed class DownloadHostHealthTracker
         this.clock = clock ?? TimeProvider.System;
     }
 
-    internal void Clear() => states.Clear();
+    internal void Clear()
+    {
+        states.Clear();
+        invalidContentNodes.Clear();
+        networkNodes.Clear();
+        redispatches.Clear();
+    }
+
+    public bool ShouldAvoidInvalidContentNode(string host) =>
+        invalidContentNodes.TryGetValue(host, out var state) && state.AvoidUntil > clock.GetUtcNow();
+
+    public void RecordInvalidContentNode(string host) => RecordFailure(invalidContentNodes, host);
+
+    public void RecordValidNodeResponse(string host) => invalidContentNodes.TryRemove(host, out _);
+
+    public bool ShouldAvoidNode(string host) => ShouldAvoidInvalidContentNode(host)
+        || networkNodes.TryGetValue(host, out var state) && state.AvoidUntil > clock.GetUtcNow();
+
+    internal RedispatchLease? TryAcquireRedispatch(Uri entry, Uri node)
+    {
+        var key = (DownloadHostConcurrencyController.NormalizeOrigin(entry), node.IdnHost.ToLowerInvariant());
+        var state = redispatches.GetOrAdd(key, static _ => new RedispatchState());
+        lock (state)
+        {
+            if (state.InFlight || state.RetryAfter > clock.GetUtcNow())
+                return null;
+            state.InFlight = true;
+            return new RedispatchLease(this, state);
+        }
+    }
+
+    public void RecordNodeNetworkFailure(string host, DownloadFailureReason reason, System.Net.HttpStatusCode? statusCode)
+    {
+        if (AffectsHealth(reason, statusCode))
+            RecordFailure(networkNodes, host);
+    }
 
     public bool ShouldAvoid(string resolvedSourceKind, string host)
     {
@@ -43,9 +82,15 @@ internal sealed class DownloadHostHealthTracker
     {
         if (!AffectsHealth(reason, statusCode))
             return;
+        RecordFailure(states, (resolvedSourceKind, host));
+    }
+
+    private void RecordFailure<TKey>(ConcurrentDictionary<TKey, HostState> failuresByHost, TKey host)
+        where TKey : notnull
+    {
         var now = clock.GetUtcNow();
-        states.AddOrUpdate(
-            (resolvedSourceKind, host),
+        failuresByHost.AddOrUpdate(
+            host,
             _ => new HostState(1, now + cooldown, DateTimeOffset.MinValue),
             (_, current) =>
             {
@@ -62,4 +107,27 @@ internal sealed class DownloadHostHealthTracker
         || (reason is DownloadFailureReason.HttpStatus && statusCode is { } code && (int)code is >= 500 and <= 599);
 
     private sealed record HostState(int Failures, DateTimeOffset ExpiresAt, DateTimeOffset AvoidUntil);
+
+    internal sealed class RedispatchState
+    {
+        public bool InFlight { get; set; }
+        public DateTimeOffset RetryAfter { get; set; }
+    }
+
+    internal sealed class RedispatchLease(DownloadHostHealthTracker owner, RedispatchState state) : IDisposable
+    {
+        private bool redirectedToCooledNode;
+
+        public void RecordRejectedRedirect(string host) => redirectedToCooledNode = owner.ShouldAvoidNode(host);
+
+        public void Dispose()
+        {
+            lock (state)
+            {
+                if (redirectedToCooledNode)
+                    state.RetryAfter = owner.clock.GetUtcNow() + RedispatchCooldown;
+                state.InFlight = false;
+            }
+        }
+    }
 }

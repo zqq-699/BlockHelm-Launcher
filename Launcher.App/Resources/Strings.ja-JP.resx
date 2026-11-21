@@ -1963,6 +1963,9 @@
   <data name="Status_InstallFailed" xml:space="preserve">
     <value>インストールに失敗しました。しばらくしてから再試行してください。</value>
   </data>
+  <data name="Status_MinecraftAssetInstallFailed" xml:space="preserve">
+    <value>Minecraft のアセットをダウンロードまたは検証できませんでした。しばらくしてからもう一度お試しください。</value>
+  </data>
   <data name="Status_ModpackPreparingArchive" xml:space="preserve">
     <value>Modパックファイルを準備中</value>
   </data>

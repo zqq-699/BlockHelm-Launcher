@@ -164,6 +164,25 @@ public sealed class DownloadViewModelTests
     }
 
     [Fact]
+    public async Task FailedAssetsUseTheAssetErrorOnTheInstallPageAndTask()
+    {
+        var service = new FakeGameInstanceService
+        {
+            CreateException = new MinecraftAssetInstallationException(new HttpRequestException("offline"))
+        };
+        var tasks = new DownloadTasksPageViewModel(TimeSpan.FromSeconds(1));
+        var viewModel = CreateInstallViewModel(service, tasks, new DownloadInstanceNameTracker());
+
+        await viewModel.InstallAsync(CreateInstallRequest("asset-failure") with { Loader = LoaderKind.Forge });
+
+        Assert.Equal(Strings.Status_MinecraftAssetInstallFailed, viewModel.InstallError);
+        var task = Assert.Single(tasks.Tasks);
+        Assert.True(task.IsFailed);
+        Assert.Equal(Strings.Status_MinecraftAssetInstallFailed, task.StatusMessage);
+        Assert.Empty(service.CreatedInstances);
+    }
+
+    [Fact]
     public async Task CompletedInstallPublishesVersionTypeForInstanceCategoryProjection()
     {
         var service = new FakeGameInstanceService();

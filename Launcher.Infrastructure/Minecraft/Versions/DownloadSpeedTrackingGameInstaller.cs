@@ -117,7 +117,7 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
             filePath = MinecraftPathGuard.EnsureInstallFilePath(minecraftPath, filePath);
         long? expectedSize = file.Size > 0 ? file.Size : null;
         var options = operationContext?.TryGetAsset(filePath, file.Hash, expectedSize) is true
-            ? new DownloadFileOptions(DownloadPersistenceMode.LightweightAtomic, operationContext)
+            ? DownloadFileOptions.ForAsset(operationContext, expectedSize)
             : operationContext is not null && MinecraftFileIntegrity.IsSha1(file.Hash)
                 ? new DownloadFileOptions(DownloadPersistenceMode.TaskScopedResumable, operationContext)
                 : null;
@@ -145,6 +145,11 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         });
         try
         {
+            if (await TryReuseVanillaClientAsync(filePath, file.Hash, expectedSize, cancellationToken).ConfigureAwait(false))
+            {
+                logScope.CompleteWithoutDownload("ReusedVanillaClient", fileUrl);
+                return;
+            }
             var resolution = await downloadExecutor.DownloadFileAsync(
                 fileUrl,
                 downloadSourcePreference,
@@ -168,6 +173,30 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         {
             logScope.Fail(exception, fileUrl);
             throw;
+        }
+    }
+
+    private async Task<bool> TryReuseVanillaClientAsync(
+        string destination, string? expectedSha1, long? size, CancellationToken token)
+    {
+        if (operationContext?.ReusableVanillaClient is not { } client || minecraftPath is null
+            || !string.Equals(client.Sha1, expectedSha1, StringComparison.OrdinalIgnoreCase) || client.Size != size
+            || !string.Equals(Path.GetExtension(destination), ".jar", StringComparison.OrdinalIgnoreCase)
+            || !MinecraftPathGuard.IsWithin(destination, minecraftPath.Versions)
+            || !File.Exists(client.Path) || File.Exists(destination))
+            return false;
+
+        try
+        {
+            await AtomicSharedFilePublisher.PublishCopyAsync(client.Path, destination, client.Sha1,
+                token, operationContext.ResolveManagedRoot(destination), logger).ConfigureAwait(false);
+            logger?.LogDebug("Reused a verified vanilla client JAR. ExpectedBytes={ExpectedBytes}", client.Size);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException)
+        {
+            logger?.LogDebug(exception, "Vanilla client reuse failed; downloading the version JAR.");
+            return false;
         }
     }
 

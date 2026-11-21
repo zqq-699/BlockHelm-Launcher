@@ -40,36 +40,34 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         this.logger = logger ?? NullLogger.Instance;
     }
 
-    internal async Task<LoaderInstallerWorkspaceSnapshot> SeedAsync(
+    internal async Task<LoaderInstallerWorkspaceSnapshot> PrepareBaseAsync(
         string sharedMinecraftDirectory,
         string installerMinecraftDirectory,
         string minecraftVersion,
-        string installerJarPath,
         DownloadSourcePreference downloadSourcePreference,
         int downloadSpeedLimitMbPerSecond,
         CancellationToken cancellationToken,
-        string loaderCategory = "Loader")
+        string loaderCategory = "Loader",
+        MinecraftDownloadOperationContext? operationContext = null,
+        SpeedMeter? speedMeter = null)
     {
-        var seededFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var versionMetadata = await SeedBaseVersionAsync(
-            sharedMinecraftDirectory,
-            installerMinecraftDirectory,
-            minecraftVersion,
-            downloadSourcePreference,
-            downloadSpeedLimitMbPerSecond,
-            seededFiles,
-            cancellationToken,
-            loaderCategory).ConfigureAwait(false);
-        await SeedInstallerLibrariesAsync(
-            sharedMinecraftDirectory,
-            installerMinecraftDirectory,
-            installerJarPath,
-            seededFiles,
-            cancellationToken).ConfigureAwait(false);
-        return new LoaderInstallerWorkspaceSnapshot(installerMinecraftDirectory, seededFiles)
-        {
-            VerifiedVersionMetadata = versionMetadata
-        };
+        var metadata = await PrepareBaseMetadataAsync(installerMinecraftDirectory, minecraftVersion,
+            downloadSourcePreference, downloadSpeedLimitMbPerSecond, cancellationToken, loaderCategory).ConfigureAwait(false);
+        return await PrepareBaseClientAsync(sharedMinecraftDirectory, metadata, minecraftVersion,
+            downloadSourcePreference, downloadSpeedLimitMbPerSecond, cancellationToken, operationContext, speedMeter).ConfigureAwait(false);
+    }
+
+    internal async Task<LoaderInstallerWorkspaceSnapshot> SeedInstallerLibrariesAsync(
+        string sharedMinecraftDirectory,
+        string installerJarPath,
+        LoaderInstallerWorkspaceSnapshot snapshot,
+        CancellationToken cancellationToken,
+        Func<string, bool>? includeLibrary = null)
+    {
+        var seededFiles = new Dictionary<string, string>(snapshot.SeededFiles, StringComparer.OrdinalIgnoreCase);
+        await SeedInstallerLibrariesAsync(sharedMinecraftDirectory, snapshot.WorkspaceMinecraftDirectory, installerJarPath,
+            seededFiles, cancellationToken, includeLibrary).ConfigureAwait(false);
+        return snapshot with { SeededFiles = seededFiles };
     }
 
     public async Task PublishDeltaAsync(
@@ -480,17 +478,14 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         }
     }
 
-    private async Task<JsonObject> SeedBaseVersionAsync(
-        string sourceGameDirectory,
+    internal async Task<LoaderInstallerWorkspaceSnapshot> PrepareBaseMetadataAsync(
         string destinationGameDirectory,
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference,
         int downloadSpeedLimitMbPerSecond,
-        IDictionary<string, string> seededFiles,
         CancellationToken cancellationToken,
         string loaderCategory)
     {
-        var sourceVersionDirectory = Path.Combine(sourceGameDirectory, "versions", minecraftVersion);
         if (httpClient is null)
             throw SafeExceptionLog.Describe(new InvalidOperationException("Official version metadata is required to seed a loader installer workspace."), "DownloadValidation", ("Reason", "Official version metadata is required to seed a loader installer workspace."));
 
@@ -526,29 +521,23 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                     new JsonSerializerOptions(),
                     cancellationToken)
                 .ConfigureAwait(false);
-            seededFiles[NormalizeRelativePath(Path.GetRelativePath(destinationGameDirectory, destinationJsonPath))] =
-                AtomicSharedFilePublisher.ComputeSha1(destinationJsonPath);
-
-            var client = root["downloads"]?["client"] as JsonObject;
-            var clientSha1 = GetString(client?["sha1"]);
-            var clientSize = GetLong(client?["size"]);
-            if (MinecraftFileIntegrity.IsSha1(clientSha1) && clientSize is > 0)
+            var seededFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                await SeedFileAsync(
-                    Path.Combine(sourceVersionDirectory, $"{minecraftVersion}.jar"),
-                    Path.Combine(destinationGameDirectory, "versions", minecraftVersion, $"{minecraftVersion}.jar"),
-                    clientSha1,
-                    clientSize,
-                    destinationGameDirectory,
-                    seededFiles,
-                    cancellationToken).ConfigureAwait(false);
-            }
-
+                [NormalizeRelativePath(Path.GetRelativePath(destinationGameDirectory, destinationJsonPath))] =
+                    AtomicSharedFilePublisher.ComputeSha1(destinationJsonPath)
+            };
+            var client = root["downloads"]?["client"] as JsonObject;
             logger.LogInformation(
                 "Loader installer official base metadata preparation completed. LoaderCategory={LoaderCategory} MinecraftVersion={MinecraftVersion}",
                 loaderCategory,
                 minecraftVersion);
-            return root;
+            return new LoaderInstallerWorkspaceSnapshot(destinationGameDirectory, seededFiles)
+            {
+                VerifiedVersionMetadata = root,
+                CanPrepareBaseContent = TryGetDownloadUri(client, out _)
+                    && MinecraftFileIntegrity.IsSha1(GetString(client?["sha1"]))
+                    && GetLong(client?["size"]) is > 0
+            };
         }
         catch (OperationCanceledException)
         {
@@ -569,12 +558,78 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         }
     }
 
+    internal async Task<LoaderInstallerWorkspaceSnapshot> PrepareBaseClientAsync(
+        string sourceGameDirectory,
+        LoaderInstallerWorkspaceSnapshot metadata,
+        string minecraftVersion,
+        DownloadSourcePreference preference,
+        int speedLimit,
+        CancellationToken cancellationToken,
+        MinecraftDownloadOperationContext? operationContext,
+        SpeedMeter? speedMeter)
+    {
+        var client = metadata.VerifiedVersionMetadata?["downloads"]?["client"] as JsonObject;
+        var sha1 = GetString(client?["sha1"]);
+        var size = GetLong(client?["size"]);
+        if (!MinecraftFileIntegrity.IsSha1(sha1) || size is not > 0)
+            return metadata;
+
+        var workspace = metadata.WorkspaceMinecraftDirectory;
+        var relativeJar = $"versions/{minecraftVersion}/{minecraftVersion}.jar";
+        var destinationJar = Path.Combine(workspace, relativeJar);
+        var seededFiles = new Dictionary<string, string>(metadata.SeededFiles, StringComparer.OrdinalIgnoreCase);
+        await SeedFileAsync(Path.Combine(sourceGameDirectory, relativeJar), destinationJar,
+            sha1, size, workspace, seededFiles, cancellationToken).ConfigureAwait(false);
+        if (!seededFiles.ContainsKey(relativeJar) && TryGetDownloadUri(client, out var clientUri))
+        {
+            await DownloadBaseClientAsync(httpClient!, clientUri!, destinationJar, sha1!, size.Value,
+                workspace, preference, speedLimit, operationContext, speedMeter, cancellationToken).ConfigureAwait(false);
+            seededFiles[relativeJar] = sha1!;
+        }
+        return metadata with { SeededFiles = seededFiles };
+    }
+
+    private static bool TryGetDownloadUri(JsonObject? metadata, out Uri? uri) =>
+        Uri.TryCreate(GetString(metadata?["url"]), UriKind.Absolute, out uri) && uri.Scheme is "https" or "http";
+
+    private async Task DownloadBaseClientAsync(
+        HttpClient client, Uri url, string destination, string sha1, long size, string managedRoot,
+        DownloadSourcePreference preference, int speedLimit, MinecraftDownloadOperationContext? operationContext,
+        SpeedMeter? speedMeter, CancellationToken cancellationToken)
+    {
+        var executor = new MinecraftDownloadRequestExecutor(client, logger,
+            DownloadBandwidthLimiter.Create(speedLimit, downloadSpeedLimitState),
+            category: DownloadConcurrencyCategory.Runtime, hostHealthTracker: operationContext?.HostHealth);
+        var download = new ForegroundDownloadLogScope(logger, "LoaderBaseClient", Path.GetFileName(destination),
+            destination, url.AbsoluteUri, size);
+        using var diagnostic = download.RestoreContext();
+        try
+        {
+            var resolution = await executor.DownloadFileAsync(url.AbsoluteUri, preference, "Mojang", destination,
+                sha1, size, cancellationToken, reportAttemptProgress: download.BeginSource(),
+                options: new DownloadFileOptions(ManagedRoot: managedRoot), speedMeter: speedMeter,
+                reportTransferredBytes: download.ReportTransferredBytes).ConfigureAwait(false);
+            download.Complete(resolution);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            download.CompleteWithoutDownload("Canceled", url.AbsoluteUri);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            download.Fail(exception, url.AbsoluteUri);
+            throw;
+        }
+    }
+
     private async Task SeedInstallerLibrariesAsync(
         string sourceGameDirectory,
         string destinationGameDirectory,
         string installerJarPath,
         IDictionary<string, string> seededFiles,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, bool>? includeLibrary)
     {
         if (!File.Exists(installerJarPath))
             return;
@@ -615,7 +670,8 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         sourceGameDirectory,
                         destinationGameDirectory,
                         seededFiles,
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken,
+                        includeLibrary).ConfigureAwait(false);
                 }
             }
         }
@@ -626,8 +682,10 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
         string sourceGameDirectory,
         string destinationGameDirectory,
         IDictionary<string, string> seededFiles,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, bool>? includeLibrary)
     {
+        var destinationLibraryDirectory = Path.Combine(destinationGameDirectory, "libraries");
         foreach (var library in EnumerateLibraryObjects(root))
         {
             var artifacts = new List<JsonObject>();
@@ -659,14 +717,18 @@ internal sealed class LoaderInstallerPrerequisiteSeeder
                         Path.Combine(sourceGameDirectory, "libraries"),
                         "Loader prerequisite source");
                     destinationPath = MinecraftPathGuard.EnsureWithin(
-                        Path.Combine(destinationGameDirectory, "libraries", normalizedRelativePath),
-                        Path.Combine(destinationGameDirectory, "libraries"),
+                        Path.Combine(destinationLibraryDirectory, normalizedRelativePath),
+                        destinationLibraryDirectory,
                         "Loader prerequisite destination");
                 }
                 catch (InvalidDataException)
                 {
                     continue;
                 }
+
+                if (includeLibrary is not null && !includeLibrary(NormalizeRelativePath(
+                    Path.GetRelativePath(destinationLibraryDirectory, destinationPath))))
+                    continue;
 
                 await SeedFileAsync(
                     sourcePath,
@@ -790,6 +852,7 @@ internal sealed record LoaderInstallerWorkspaceSnapshot(
     IReadOnlyDictionary<string, string> SeededFiles)
 {
     public JsonObject? VerifiedVersionMetadata { get; init; }
+    public bool CanPrepareBaseContent { get; init; }
 }
 
 internal sealed record VerifiedSharedFileExpectation(string Sha1, long? Size);

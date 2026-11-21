@@ -411,6 +411,56 @@ public sealed class MinecraftDownloadRetryTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task SlowRangeUsesItsNewLogicalEndBeforeSwitchingSources(bool tailWasSplit)
+    {
+        var clock = new ManualTimeProvider();
+        const int chunkSize = 64 * 1024;
+        const int rangeSize = 4 * 1024 * 1024;
+        long remaining = rangeSize;
+        long firstSplitRemaining = 0;
+        var source = new TimedChunkReadStream(clock,
+            ((byte)0, TimeSpan.Zero), ((byte)1, TimeSpan.FromSeconds(10)),
+            ((byte)2, TimeSpan.FromSeconds(10)), ((byte)3, TimeSpan.Zero)) { BytesPerChunk = chunkSize };
+        using var response = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new StreamContent(source) };
+        await DownloadResponseThrottler.ApplyAsync(response, null, CancellationToken.None,
+            slowBodyReadThreshold: TimeSpan.FromSeconds(10), timeProvider: clock,
+            expectedContentLength: rangeSize, shouldSwitchSlowSource: seconds => seconds > 30,
+            rangeProgress: new SegmentedReadProgress(() => remaining, (_, bytes) =>
+            {
+                if (firstSplitRemaining != 0)
+                    return false;
+                firstSplitRemaining = bytes;
+                return true;
+            }));
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var buffer = new byte[chunkSize];
+        Assert.Equal(chunkSize, await ReadAndPersistAsync());
+        Assert.Equal(chunkSize, await ReadAndPersistAsync());
+        Assert.Equal(rangeSize - 2 * chunkSize, firstSplitRemaining);
+        Assert.Equal(chunkSize, await ReadAndPersistAsync());
+
+        if (tailWasSplit)
+        {
+            remaining = chunkSize;
+            Assert.Equal(chunkSize, await ReadAndPersistAsync());
+        }
+        else
+        {
+            var failure = await Assert.ThrowsAsync<DownloadBodyTooSlowException>(ReadAndPersistAsync);
+            Assert.NotNull(failure.EstimatedRemainingSeconds);
+        }
+
+        async Task<int> ReadAndPersistAsync()
+        {
+            var bytes = await stream.ReadAsync(buffer.AsMemory());
+            remaining -= bytes;
+            return bytes;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task CompletedBodyWithoutContentLengthIsNotRejectedAsSlow(bool knownSize)
     {
         var clock = new ManualTimeProvider();
@@ -1001,14 +1051,19 @@ public sealed class MinecraftDownloadRetryTests
         }
     }
 
-    [Fact]
-    public async Task LightweightAssetSingleFlightDownloadsSameTargetOnce()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AssetSingleFlightDownloadsSameTargetOnce(bool largeAsset)
     {
-        var payload = "asset-data"u8.ToArray();
+        var payload = largeAsset
+            ? new byte[MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize]
+            : new byte[MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize - 1];
         var requestStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseRequest = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var handler = new CallbackRequestHandler(async (_, request, token) =>
         {
+            Assert.Equal(largeAsset, request.Headers.Range is not null);
             requestStarted.TrySetResult(true);
             await releaseRequest.Task.WaitAsync(token);
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -1027,7 +1082,7 @@ public sealed class MinecraftDownloadRetryTests
         {
             using var operation = new MinecraftDownloadOperationContext(directory);
             operation.RegisterAsset(destination, sha1, payload.Length);
-            var options = new DownloadFileOptions(DownloadPersistenceMode.LightweightAtomic, operation);
+            var options = DownloadFileOptions.ForAsset(operation, payload.Length);
             var first = executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.Official, "Mojang", destination, sha1, payload.Length, CancellationToken.None, options: options);
             await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
             var second = executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.Official, "Mojang", destination, sha1, payload.Length, CancellationToken.None, options: options);
@@ -1036,6 +1091,365 @@ public sealed class MinecraftDownloadRetryTests
             await Task.WhenAll(first, second);
 
             Assert.Single(handler.RequestUris);
+            Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(2 * 1024 * 1024 - 1, false)]
+    [InlineData(2 * 1024 * 1024, true)]
+    public async Task NonAssetsUseTheTwoMebibyteSegmentationThreshold(int size, bool expectsRange)
+    {
+        var payload = new byte[size];
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            Assert.Equal(expectsRange, request.Headers.Range is not null);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request, Content = new ByteArrayContent(payload)
+            });
+        });
+        using var client = CreateClient(handler);
+        var directory = CreateTempDirectory();
+        try
+        {
+            await CreateExecutor(client).DownloadFileAsync(ManifestUrl, DownloadSourcePreference.Official,
+                "Mojang", Path.Combine(directory, "client.jar"), Convert.ToHexString(SHA1.HashData(payload)),
+                payload.Length, CancellationToken.None);
+            Assert.Single(handler.RequestUris);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RepeatedMirrorNodeFailuresSkipItWhileAnAlternativeWorks(bool networkFailure)
+    {
+        var clock = new ManualTimeProvider();
+        var health = new DownloadHostHealthTracker(clock);
+        var officialWorks = true;
+        var nodeWorks = false;
+        var healthyNodeOnRedispatch = false;
+        var dispatches = 0;
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            var host = request.RequestUri!.Host;
+            if (host == "bmclapi2.bangbang93.com")
+            {
+                var redirect = CreateResponse(HttpStatusCode.Found, "", request);
+                redirect.Headers.Location = new Uri(healthyNodeOnRedispatch && ++dispatches == 2
+                    ? "https://healthy.example.test/asset" : "https://node.example.test/asset");
+                return Task.FromResult(redirect);
+            }
+            if (host == "piston-meta.mojang.com")
+                return Task.FromResult(CreateResponse(officialWorks ? HttpStatusCode.OK : HttpStatusCode.NotFound, "good", request));
+            if (nodeWorks || host == "healthy.example.test")
+                return Task.FromResult(CreateResponse(HttpStatusCode.OK, "good", request));
+            if (networkFailure)
+                throw new HttpRequestException("Mirror node disconnected.");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StringContent("<html>error</html>", Encoding.UTF8, "text/html")
+            });
+        });
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, hostHealthTracker: health);
+        var directory = CreateTempDirectory();
+        var hash = Convert.ToHexString(SHA1.HashData("good"u8));
+        try
+        {
+            for (var index = 0; index < 4; index++)
+                Assert.True((await DownloadAsync(index)).FallbackUsed);
+
+            Assert.Equal(3, handler.RequestUris.Count(uri => uri.Host == "node.example.test"));
+            Assert.Equal(5, handler.RequestUris.Count(uri => uri.Host == "bmclapi2.bangbang93.com"));
+            Assert.False(health.ShouldAvoid("BmclApiMojang", "bmclapi2.bangbang93.com"));
+
+            var previousRequests = handler.RequestUris.Count;
+            healthyNodeOnRedispatch = true;
+            Assert.True((await DownloadAsync(4)).FallbackUsed);
+            Assert.Equal(new[] { "bmclapi2.bangbang93.com", "piston-meta.mojang.com" },
+                handler.RequestUris.Skip(previousRequests).Select(uri => uri.Host));
+
+            clock.Advance(TimeSpan.FromSeconds(5));
+            dispatches = 0;
+            previousRequests = handler.RequestUris.Count;
+            Assert.False((await DownloadAsync(5)).FallbackUsed);
+            Assert.Equal(new[] { "bmclapi2.bangbang93.com", "bmclapi2.bangbang93.com", "healthy.example.test" },
+                handler.RequestUris.Skip(previousRequests).Select(uri => uri.Host));
+
+            healthyNodeOnRedispatch = false;
+            Assert.True((await DownloadAsync(6)).FallbackUsed);
+            officialWorks = false;
+            nodeWorks = true;
+            for (var index = 0; index < 3; index++)
+                health.RecordFailure("MojangOfficial", "piston-meta.mojang.com", DownloadFailureReason.Network);
+            previousRequests = handler.RequestUris.Count;
+            Assert.False((await DownloadAsync(7)).FallbackUsed);
+            Assert.Equal(new[] { "bmclapi2.bangbang93.com", "node.example.test" },
+                handler.RequestUris.Skip(previousRequests).Select(uri => uri.Host));
+            Assert.Equal("good", await File.ReadAllTextAsync(Path.Combine(directory, "7.bin")));
+            Assert.False(health.ShouldAvoidInvalidContentNode("node.example.test"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+
+        Task<ResolvedDownloadRequest> DownloadAsync(int index) =>
+            executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.BmclApi, "Mojang",
+                Path.Combine(directory, $"{index}.bin"), hash, 4, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task MirrorRedispatchIsSharedAcrossFilesAndCancellationReleasesTheSlot()
+    {
+        var health = new DownloadHostHealthTracker();
+        const string cooledNode = "cooled.example.test";
+        const string otherCooledNode = "other-cooled.example.test";
+        for (var index = 0; index < 3; index++)
+        {
+            health.RecordInvalidContentNode(cooledNode);
+            health.RecordInvalidContentNode(otherCooledNode);
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        var redispatchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entryRequests = new Dictionary<string, int>();
+        var handler = new CallbackRequestHandler(async (_, request, token) =>
+        {
+            var uri = request.RequestUri!;
+            if (uri.Host != "bmclapi2.bangbang93.com")
+            {
+                Assert.True(uri.Host is "piston-meta.mojang.com" or "healthy.example.test");
+                return CreateResponse(HttpStatusCode.OK, "good", request);
+            }
+
+            var dispatches = entryRequests[uri.Query] = entryRequests.GetValueOrDefault(uri.Query) + 1;
+            if (uri.Query == "?first" && dispatches == 2)
+            {
+                redispatchStarted.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            }
+
+            var node = uri.Query == "?other" ? otherCooledNode : cooledNode;
+            var response = CreateResponse(HttpStatusCode.Found, "", request);
+            response.Headers.Location = new Uri($"https://{(dispatches == 1 ? node : "healthy.example.test")}/asset");
+            return response;
+        });
+        using var client = CreateClient(handler);
+        var firstExecutor = CreateExecutor(client, hostHealthTracker: health, options: new DownloadRetryOptions
+        {
+            ResponseHeadersTimeout = TimeSpan.FromSeconds(10),
+            RetryDelay = TimeSpan.Zero
+        });
+        var secondExecutor = CreateExecutor(client, hostHealthTracker: health);
+        var directory = CreateTempDirectory();
+        var hash = Convert.ToHexString(SHA1.HashData("good"u8));
+        var first = DownloadAsync(firstExecutor, "first", cancellation.Token);
+        try
+        {
+            await redispatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True((await DownloadAsync(secondExecutor, "blocked")).FallbackUsed);
+            Assert.Equal(1, entryRequests["?blocked"]);
+            Assert.False((await DownloadAsync(secondExecutor, "other")).FallbackUsed);
+            Assert.Equal(2, entryRequests["?other"]);
+
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+            Assert.False((await DownloadAsync(secondExecutor, "next")).FallbackUsed);
+            Assert.Equal(2, entryRequests["?next"]);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            await Task.WhenAny(first);
+            Directory.Delete(directory, recursive: true);
+        }
+
+        Task<ResolvedDownloadRequest> DownloadAsync(MinecraftDownloadRequestExecutor executor, string file,
+            CancellationToken cancellationToken = default) =>
+            executor.DownloadFileAsync($"https://piston-meta.mojang.com/v1/packages/test/version.json?{file}",
+                DownloadSourcePreference.BmclApi, "Mojang",
+                Path.Combine(directory, $"{file}.bin"), hash, 4, cancellationToken);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task LongEstimatedTransferSwitchesAfterTwoWindows(bool segmentedProbe, bool alternateRedirectsToSameNode, bool smallFile)
+    {
+        var clock = new ManualTimeProvider();
+        // At 64 KiB per ten seconds the small file estimates 36.25 s, then 26.25 s.
+        var payload = new byte[smallFile ? 360 * 1024 : MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize];
+        var slowNodeRequests = 0;
+        var handler = new CallbackRequestHandler((_, request, _) =>
+        {
+            var host = request.RequestUri!.Host;
+            if (host == "bmclapi2.bangbang93.com"
+                || alternateRedirectsToSameNode && host == "piston-meta.mojang.com")
+            {
+                var redirect = CreateResponse(HttpStatusCode.Found, "", request);
+                redirect.Headers.Location = new Uri("https://slow.example.test/asset");
+                return Task.FromResult(redirect);
+            }
+            var window = TimeSpan.FromSeconds(10);
+            var slowResponse = host == "slow.example.test" && ++slowNodeRequests == 1;
+            if (slowResponse)
+                Assert.Equal(segmentedProbe, request.Headers.Range is not null);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = slowResponse
+                    ? new StreamContent(new TimedChunkReadStream(clock, ((byte)1, TimeSpan.Zero),
+                        ((byte)1, window), ((byte)1, window)) { BytesPerChunk = 64 * 1024 })
+                    : new ByteArrayContent(payload)
+            });
+        });
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, timeProvider: clock);
+        var directory = CreateTempDirectory();
+        var destination = Path.Combine(directory, "big.bin");
+        try
+        {
+            var options = new DownloadFileOptions(segmentedProbe
+                ? DownloadPersistenceMode.TaskScopedResumable : DownloadPersistenceMode.LightweightAtomic);
+            var result = await executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.BmclApi, "Mojang",
+                destination, Convert.ToHexString(SHA1.HashData(payload)), payload.Length, CancellationToken.None,
+                options: options);
+
+            Assert.Equal(!alternateRedirectsToSameNode, result.FallbackUsed);
+            Assert.Equal(TimeSpan.FromSeconds(20).Ticks, clock.GetTimestamp());
+            Assert.Equal(alternateRedirectsToSameNode
+                    ? ["bmclapi2.bangbang93.com", "slow.example.test", "piston-meta.mojang.com", "bmclapi2.bangbang93.com", "slow.example.test"]
+                    : new[] { "bmclapi2.bangbang93.com", "slow.example.test", "piston-meta.mojang.com" },
+                handler.RequestUris.Select(uri => uri.Host));
+            Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+            Assert.Single(Directory.GetFiles(directory));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SlowLastRangeSwitchesAtThePersistedCursorAndCanReturnToTheOriginal(bool alternateIgnoresRange)
+    {
+        var clock = new ManualTimeProvider();
+        const int probeLength = 1024 * 1024;
+        var payload = new byte[probeLength + 768 * 1024];
+        var probeWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var slowWindows = 0;
+        var ranges = new List<(string Host, long Offset)>();
+        var handler = new CallbackRequestHandler(async (_, request, token) =>
+        {
+            var host = request.RequestUri!.Host;
+            var offset = request.Headers.Range!.Ranges.Single().From!.Value;
+            ranges.Add((host, offset));
+            var alternate = host != "bmclapi2.bangbang93.com";
+            if (alternate && alternateIgnoresRange)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) };
+
+            var end = offset == 0 ? probeLength : payload.Length;
+            var slow = offset == probeLength && !alternate && Interlocked.Increment(ref slowWindows) == 1;
+            if (slow)
+                await probeWritten.Task.WaitAsync(token);
+            HttpContent content = slow
+                ? new StreamContent(new TimedChunkReadStream(clock,
+                    ((byte)0, TimeSpan.Zero), ((byte)0, TimeSpan.FromSeconds(10)),
+                    ((byte)0, TimeSpan.FromSeconds(10)), ((byte)0, TimeSpan.FromSeconds(10)))
+                    { BytesPerChunk = 64 * 1024 })
+                : new ByteArrayContent(payload, (int)offset, (int)(end - offset));
+            content.Headers.ContentRange = new ContentRangeHeaderValue(offset, end - 1, payload.Length);
+            content.Headers.ContentLength = end - offset;
+            var response = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = content, RequestMessage = request };
+            response.Headers.ETag = new EntityTagHeaderValue(alternate ? "\"official\"" : "\"mirror\"");
+            return response;
+        });
+        using var client = CreateClient(handler);
+        var directory = CreateTempDirectory();
+        try
+        {
+            var destination = Path.Combine(directory, "slow-range.jar");
+            var result = await CreateExecutor(client, timeProvider: clock, minimumSegmentedDownloadSize: probeLength + 1)
+                .DownloadFileAsync(ManifestUrl, DownloadSourcePreference.BmclApi, "Mojang", destination,
+                    Convert.ToHexString(SHA1.HashData(payload)), payload.Length, CancellationToken.None,
+                    reportAttemptProgress: (_, written, _) =>
+                    {
+                        if (written >= probeLength)
+                            probeWritten.TrySetResult();
+                    },
+                    options: new DownloadFileOptions(DownloadPersistenceMode.TaskScopedResumable));
+            Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+            Assert.Equal(!alternateIgnoresRange, result.FallbackUsed);
+            Assert.Equal(("bmclapi2.bangbang93.com", 0L), ranges[0]);
+            Assert.Equal(("bmclapi2.bangbang93.com", (long)probeLength), ranges[1]);
+            Assert.Equal("piston-meta.mojang.com", ranges[2].Host);
+            Assert.InRange(ranges[2].Offset, probeLength + 1, payload.Length - 1);
+            Assert.Equal(alternateIgnoresRange ? 4 : 3, ranges.Count);
+            if (alternateIgnoresRange)
+                Assert.Equal(("bmclapi2.bangbang93.com", ranges[2].Offset), ranges[3]);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LargeTransferContinuesWhenBackupIsUnderRetryAfter(bool segmentedProbe)
+    {
+        var clock = new ManualTimeProvider();
+        var concurrencyController = new DownloadHostConcurrencyController(clock, (delay, _) =>
+        {
+            clock.Advance(delay);
+            return ValueTask.CompletedTask;
+        });
+        concurrencyController.DeferRequests(DownloadHostConcurrencyController.NormalizeOrigin(new Uri(ManifestUrl)),
+            TimeSpan.FromSeconds(60));
+        const int chunkSize = 64 * 1024;
+        var payload = new byte[MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize];
+        var chunks = Enumerable.Range(0, payload.Length / chunkSize)
+            .Select(index => ((byte)0, index is 1 or 2 ? TimeSpan.FromSeconds(10) : TimeSpan.Zero))
+            .ToArray();
+        var handler = new CallbackRequestHandler((_, request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = request.RequestUri!.Host == "bmclapi2.bangbang93.com"
+                ? new StreamContent(new TimedChunkReadStream(clock, chunks) { BytesPerChunk = chunkSize })
+                : new ByteArrayContent(payload)
+        }));
+        using var client = CreateClient(handler);
+        var executor = CreateExecutor(client, timeProvider: clock, hostConcurrencyController: concurrencyController);
+        var directory = CreateTempDirectory();
+        var destination = Path.Combine(directory, "big.bin");
+        try
+        {
+            var options = new DownloadFileOptions(segmentedProbe
+                ? DownloadPersistenceMode.TaskScopedResumable : DownloadPersistenceMode.LightweightAtomic);
+            var result = await executor.DownloadFileAsync(ManifestUrl, DownloadSourcePreference.BmclApi, "Mojang",
+                destination, Convert.ToHexString(SHA1.HashData(payload)), payload.Length, CancellationToken.None,
+                options: options);
+
+            Assert.False(result.FallbackUsed);
+            Assert.Equal("bmclapi2.bangbang93.com", Assert.Single(handler.RequestUris).Host);
+            Assert.Equal(TimeSpan.FromSeconds(20).Ticks, clock.GetTimestamp());
             Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
         }
         finally
@@ -1178,7 +1592,8 @@ public sealed class MinecraftDownloadRetryTests
         ILogger? logger = null,
         TimeProvider? timeProvider = null,
         DownloadHostHealthTracker? hostHealthTracker = null,
-        DownloadHostConcurrencyController? hostConcurrencyController = null)
+        DownloadHostConcurrencyController? hostConcurrencyController = null,
+        long minimumSegmentedDownloadSize = MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize)
     {
         return new MinecraftDownloadRequestExecutor(
             httpClient,
@@ -1189,6 +1604,7 @@ public sealed class MinecraftDownloadRetryTests
             nextRetryJitter: () => 0,
             bmclApiRequestRateLimiter: new BmclApiRequestRateLimiter(TimeSpan.Zero),
             timeProvider: timeProvider,
+            minimumSegmentedDownloadSize: minimumSegmentedDownloadSize,
             hostHealthTracker: hostHealthTracker,
             retryOptions: options ?? new DownloadRetryOptions
             {

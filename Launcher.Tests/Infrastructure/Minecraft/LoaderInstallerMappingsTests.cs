@@ -38,7 +38,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         var service = new LoaderInstallerArtifactService(client, logger: logger);
         var game = Path.Combine(TempRoot, "game");
 
-        var prepared = await service.PrepareClientInstallerAsync(installer, plan, MinecraftVersion, game,
+        var prepared = await service.PrepareInstallerMappingsAsync(installer, plan, MinecraftVersion, game,
             Metadata(), DownloadSourcePreference.Official, 0, CancellationToken.None);
 
         Assert.Equal(original, await File.ReadAllBytesAsync(installer));
@@ -46,7 +46,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         Assert.Equal(Mappings, await File.ReadAllBytesAsync(Path.Combine(game, "libraries", RelativePath)));
         Assert.NotEqual(installer, prepared.ExecutionInstallerPath);
         var summary = Assert.Single(logger.Messages.Where(message => message.Level == LogLevel.Information
-            && message.Text.Contains("Client installer mappings prepared"))).Text;
+            && message.Text.Contains("Installer mappings prepared"))).Text;
         Assert.Contains($"OriginalInstallerSha256={Convert.ToHexString(SHA256.HashData(original))}", summary);
         Assert.Contains($"ExecutionInstallerSha256={Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(prepared.ExecutionInstallerPath)))}", summary);
         Assert.Contains("ProcessorIndices=0", summary);
@@ -92,12 +92,12 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         using var client = new HttpClient(handler);
         var service = new LoaderInstallerArtifactService(client);
         var game = Path.Combine(TempRoot, "game");
-        await service.PrepareClientInstallerAsync(installer, plan, MinecraftVersion, game,
+        await service.PrepareInstallerMappingsAsync(installer, plan, MinecraftVersion, game,
             Metadata(), DownloadSourcePreference.Official, 0, CancellationToken.None);
         Assert.Equal(new[] { "piston-data.mojang.com", "bmclapi2.bangbang93.com" }, handler.Requests.Select(uri => uri.Host).Distinct());
         handler.Requests.Clear();
         using var operationContext = new MinecraftDownloadOperationContext(game);
-        await service.PrepareClientInstallerAsync(installer, plan, MinecraftVersion, game,
+        await service.PrepareInstallerMappingsAsync(installer, plan, MinecraftVersion, game,
             Metadata(), DownloadSourcePreference.BmclApi, 0, CancellationToken.None, operationContext);
         Assert.Empty(handler.Requests);
         var destination = Path.Combine(game, "libraries", RelativePath);
@@ -127,7 +127,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         var original = await File.ReadAllBytesAsync(installer);
         var handler = new MappingHandler();
         using var client = new HttpClient(handler);
-        var prepared = await new LoaderInstallerArtifactService(client).PrepareClientInstallerAsync(
+        var prepared = await new LoaderInstallerArtifactService(client).PrepareInstallerMappingsAsync(
             installer, plan, MinecraftVersion, Path.Combine(TempRoot, "game"), null,
             DownloadSourcePreference.Official, 0, CancellationToken.None);
         Assert.Equal(installer, prepared.ExecutionInstallerPath);
@@ -160,7 +160,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         using var client = new HttpClient(handler);
 
         var logger = new PreparationLogger();
-        var prepared = await new LoaderInstallerArtifactService(client, logger: logger).PrepareClientInstallerAsync(
+        var prepared = await new LoaderInstallerArtifactService(client, logger: logger).PrepareInstallerMappingsAsync(
             installer, plan, MinecraftVersion, Path.Combine(TempRoot, "game"), metadata,
             DownloadSourcePreference.Official, 0, CancellationToken.None);
 
@@ -184,7 +184,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         var handler = new MappingHandler();
         using var client = new HttpClient(handler);
         var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
-            new LoaderInstallerArtifactService(client).PrepareClientInstallerAsync(installer, plan, MinecraftVersion,
+            new LoaderInstallerArtifactService(client).PrepareInstallerMappingsAsync(installer, plan, MinecraftVersion,
                 Path.Combine(TempRoot, "game"), Metadata(), DownloadSourcePreference.Official, 0, CancellationToken.None));
         Assert.Contains("UnsafeOutputPath", SafeExceptionLog.Format(exception));
         Assert.Empty(handler.Requests);
@@ -200,7 +200,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         WriteInstaller(installer, profile);
         var handler = new MappingHandler();
         using var client = new HttpClient(handler);
-        var prepared = await new LoaderInstallerArtifactService(client).PrepareClientInstallerAsync(installer, plan,
+        var prepared = await new LoaderInstallerArtifactService(client).PrepareInstallerMappingsAsync(installer, plan,
             MinecraftVersion, Path.Combine(TempRoot, "game"), Metadata(), DownloadSourcePreference.Official, 0, CancellationToken.None);
         Assert.NotEqual(installer, prepared.ExecutionInstallerPath);
         using var archive = ZipFile.OpenRead(prepared.ExecutionInstallerPath);
@@ -221,7 +221,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         var handler = new MappingHandler();
         using var client = new HttpClient(handler);
         var logger = new PreparationLogger();
-        var prepared = await new LoaderInstallerArtifactService(client, logger: logger).PrepareClientInstallerAsync(
+        var prepared = await new LoaderInstallerArtifactService(client, logger: logger).PrepareInstallerMappingsAsync(
             installer, plan, MinecraftVersion, Path.Combine(TempRoot, "game"), Metadata(),
             DownloadSourcePreference.Official, 0, CancellationToken.None);
         Assert.Equal(installer, prepared.ExecutionInstallerPath);
@@ -246,7 +246,7 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var previous = "previous-file"u8.ToArray();
         await File.WriteAllBytesAsync(destination, previous);
-        var preparation = new LoaderInstallerArtifactService(client).PrepareClientInstallerAsync(
+        var preparation = new LoaderInstallerArtifactService(client).PrepareInstallerMappingsAsync(
             installer, plan, MinecraftVersion, game, Metadata(), DownloadSourcePreference.Official, 0, cancellation.Token);
         if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => preparation);
         else await Assert.ThrowsAsync<MinecraftDownloadRequestExecutor.DownloadSourceRequestException>(() => preparation);

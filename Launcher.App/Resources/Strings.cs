@@ -1243,6 +1243,7 @@ public static class Strings
     public static string Status_InstallingLoaderFormat => Get(nameof(Status_InstallingLoaderFormat));
     public static string Status_InstanceInstalledFormat => Get(nameof(Status_InstanceInstalledFormat));
     public static string Status_InstallFailed => Get(nameof(Status_InstallFailed));
+    public static string Status_MinecraftAssetInstallFailed => Get(nameof(Status_MinecraftAssetInstallFailed));
     public static string Status_ModpackPreparingArchive => Get(nameof(Status_ModpackPreparingArchive));
     public static string Status_ModpackParsingManifest => Get(nameof(Status_ModpackParsingManifest));
     public static string Status_ModpackResolvingFiles => Get(nameof(Status_ModpackResolvingFiles));

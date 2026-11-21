@@ -46,8 +46,18 @@ internal interface IForgeInstallerRunner
         throw new NotSupportedException("Server installation is not supported by this installer runner.");
 }
 
+internal enum LoaderBaseContentPart { All, WithoutClientOrAssets, Assets }
+
 internal interface IFinalVersionInstaller
 {
+    bool SupportsSplitBaseContent => false;
+
+    Task InstallBasePartAsync(
+        MinecraftPath path, string versionName, MinecraftDownloadOperationContext operationContext,
+        DownloadSourcePreference preference, IProgress<LauncherProgress>? progress, CancellationToken cancellationToken,
+        int speedLimit, SpeedMeter? speedMeter, LoaderBaseContentPart part) =>
+        throw new NotSupportedException("This installer does not support splitting vanilla content.");
+
     Task InstallAsync(
         string gameDirectory,
         string versionName,
@@ -130,8 +140,12 @@ internal interface IFinalVersionInstaller
     }
 }
 
-internal sealed class FinalVersionInstaller(ILogger? logger = null) : IFinalVersionInstaller
+internal sealed class FinalVersionInstaller(
+    ILogger? logger = null,
+    IDownloadSpeedLimitState? downloadSpeedLimitState = null) : IFinalVersionInstaller
 {
+    public bool SupportsSplitBaseContent => true;
+
     public Task InstallAsync(
         string gameDirectory,
         string versionName,
@@ -209,7 +223,7 @@ internal sealed class FinalVersionInstaller(ILogger? logger = null) : IFinalVers
             speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
     }
 
-    public async Task InstallAsync(
+    public Task InstallAsync(
         MinecraftPath path,
         string versionName,
         MinecraftDownloadOperationContext operationContext,
@@ -217,17 +231,26 @@ internal sealed class FinalVersionInstaller(ILogger? logger = null) : IFinalVers
         IProgress<LauncherProgress>? progress,
         CancellationToken cancellationToken,
         int downloadSpeedLimitMbPerSecond,
-        SpeedMeter? speedMeter)
+        SpeedMeter? speedMeter) =>
+        InstallBasePartAsync(path, versionName, operationContext, downloadSourcePreference, progress,
+            cancellationToken, downloadSpeedLimitMbPerSecond, speedMeter, LoaderBaseContentPart.All);
+
+    public async Task InstallBasePartAsync(
+        MinecraftPath path, string versionName, MinecraftDownloadOperationContext operationContext,
+        DownloadSourcePreference preference, IProgress<LauncherProgress>? progress, CancellationToken cancellationToken,
+        int speedLimit, SpeedMeter? speedMeter, LoaderBaseContentPart part)
     {
         ArgumentNullException.ThrowIfNull(operationContext);
         var launcher = VanillaLoaderProvider.CreateLauncher(
             path,
             progress,
-            downloadSourcePreference,
+            preference,
             logger: logger,
-            downloadSpeedLimitMbPerSecond: downloadSpeedLimitMbPerSecond,
+            downloadSpeedLimitMbPerSecond: speedLimit,
+            downloadSpeedLimitState: downloadSpeedLimitState,
             operationContext: operationContext,
-            sharedSpeedMeter: speedMeter);
+            sharedSpeedMeter: speedMeter,
+            contentPart: part);
         VanillaLoaderProvider.AttachProgress(launcher, progress);
         await launcher.InstallAsync(versionName, cancellationToken);
     }

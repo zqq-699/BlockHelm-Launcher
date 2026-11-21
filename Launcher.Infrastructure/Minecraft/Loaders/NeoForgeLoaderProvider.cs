@@ -74,7 +74,7 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
         this.httpClient = LauncherHttpUserAgent.Apply(
             httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.installerRunner = installerRunner ?? new ForgeInstallerRunner(logger);
-        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger);
+        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger, downloadSpeedLimitState);
         this.javaRuntimeResolver = javaRuntimeResolver;
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;
@@ -261,16 +261,6 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
         {
             LoaderVersionDirectoryTransaction.EnsureLauncherProfileExists(installerMinecraftDirectory);
 
-            progress?.Report(new LauncherProgress(InstallProgressStages.DownloadingLoaderInstaller, string.Empty));
-            await DownloadDiagnostics.RunStageAsync(logger, "InstallerDownload", () => DownloadInstallerAsync(
-                installerArtifact,
-                installerJarPath,
-                minecraftVersion,
-                downloadSourcePreference,
-                cancellationToken,
-                downloadSpeedLimitMbPerSecond,
-                speedMeter));
-
             var installerArtifactService = new LoaderInstallerArtifactService(
                 httpClient,
                 installerRunner,
@@ -278,69 +268,27 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
                 downloadSpeedLimitState,
                 logger,
                 tempRootDirectory);
-            var installerPlan = await DownloadDiagnostics.RunStageAsync(logger, "InstallerPlan", () => installerArtifactService.ReadPlanAsync(installerJarPath, cancellationToken))
-                .ConfigureAwait(false);
-
-            var prerequisiteSeeder = new LoaderInstallerPrerequisiteSeeder(
-                httpClient,
-                downloadSpeedLimitState,
-                logger);
-            var workspaceSnapshot = await DownloadDiagnostics.RunStageAsync(logger, "BasePrerequisites", () => prerequisiteSeeder.SeedAsync(
-                sharedMinecraftDirectory,
-                installerMinecraftDirectory,
-                minecraftVersion,
-                installerJarPath,
-                downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond,
-                cancellationToken,
-                loaderCategory: "NeoForge")).ConfigureAwait(false);
-            var preparedInstaller = await DownloadDiagnostics.RunStageAsync(logger, "MappingsPreparation", () => installerArtifactService.PrepareClientInstallerAsync(
-                installerJarPath, installerPlan, minecraftVersion, installerMinecraftDirectory,
-                workspaceSnapshot.VerifiedVersionMetadata, downloadSourcePreference, downloadSpeedLimitMbPerSecond,
-                cancellationToken, downloadOperation, speedMeter)).ConfigureAwait(false);
-            installerPlan = preparedInstaller.Plan;
-            await DownloadDiagnostics.RunStageAsync(logger, "InstallerDependencies", () => installerArtifactService.MaterializePrerequisitesAsync(
-                installerJarPath,
-                installerPlan,
-                installerMinecraftDirectory,
-                downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond,
-                cancellationToken,
-                downloadOperation,
-                speedMeter)).ConfigureAwait(false);
-
-            progress?.Report(new LauncherProgress(InstallProgressStages.CheckingJava, string.Empty));
-            var resolver = javaRuntimeResolver
-                ?? throw SafeExceptionLog.Describe(new InvalidOperationException("The loader installer Java runtime resolver is not configured."), "InstallerMetadata", ("Reason", "The loader installer Java runtime resolver is not configured."));
-            var javaRuntime = await resolver
-                .ResolveAsync(
-                    new LoaderInstallerJavaRuntimeRequest(
-                        minecraftVersion,
-                        isolatedVersionName,
-                        LoaderKind.NeoForge,
-                        selectedLoaderVersion,
-                        sharedMinecraftDirectory,
-                        downloadSourcePreference,
-                        downloadSpeedLimitMbPerSecond,
-                        progress),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            progress?.Report(new LauncherProgress(InstallProgressStages.RunningLoaderInstaller, string.Empty));
-            await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => installerRunner.RunInstallerAsync(
-                javaRuntime.ExecutablePath,
-                preparedInstaller.ExecutionInstallerPath,
-                installerMinecraftDirectory,
-                cancellationToken));
-
-            await DownloadDiagnostics.RunStageAsync(logger, "RuntimeLibraries", () => installerArtifactService.MaterializeRuntimeLibrariesAsync(
-                installerJarPath,
-                installerPlan,
-                installerMinecraftDirectory,
-                downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond,
-                cancellationToken,
-                downloadOperation,
-                speedMeter)).ConfigureAwait(false);
+            var prerequisiteSeeder = new LoaderInstallerPrerequisiteSeeder(httpClient, downloadSpeedLimitState, logger);
+            var (workspaceSnapshot, installerPlan) = await installerArtifactService.PrepareAndRunClientInstallerAsync(
+                installPathLayout, minecraftVersion, installerJarPath, "NeoForge",
+                token => DownloadInstallerAsync(installerArtifact, installerJarPath, minecraftVersion,
+                    downloadSourcePreference, token, downloadSpeedLimitMbPerSecond, speedMeter),
+                async (installer, token) =>
+                {
+                    progress?.Report(new LauncherProgress(InstallProgressStages.CheckingJava, string.Empty));
+                    var resolver = javaRuntimeResolver
+                        ?? throw SafeExceptionLog.Describe(new InvalidOperationException("The loader installer Java runtime resolver is not configured."), "InstallerMetadata", ("Reason", "The loader installer Java runtime resolver is not configured."));
+                    var javaRuntime = await resolver.ResolveAsync(new LoaderInstallerJavaRuntimeRequest(
+                        minecraftVersion, isolatedVersionName, LoaderKind.NeoForge, selectedLoaderVersion,
+                        sharedMinecraftDirectory, downloadSourcePreference, downloadSpeedLimitMbPerSecond, progress),
+                        token).ConfigureAwait(false);
+                    progress?.Report(new LauncherProgress(InstallProgressStages.RunningLoaderInstaller, string.Empty));
+                    await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => installerRunner.RunInstallerAsync(
+                        javaRuntime.ExecutablePath, installer.ExecutionInstallerPath, installerMinecraftDirectory, token))
+                        .ConfigureAwait(false);
+                },
+                prerequisiteSeeder, finalVersionInstaller, downloadSourcePreference, downloadSpeedLimitMbPerSecond,
+                downloadOperation, progress, speedMeter, cancellationToken).ConfigureAwait(false);
 
             var sandboxOutputs = await DownloadDiagnostics.RunStageAsync(logger, "ArtifactValidation", () => installerArtifactService.ValidatePublishedArtifactsAsync(
                 installerMinecraftDirectory,

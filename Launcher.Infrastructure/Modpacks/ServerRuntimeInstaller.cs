@@ -86,14 +86,11 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         using var downloadOperation = new MinecraftDownloadOperationContext(targetDirectory);
 
         progress?.Report(new LauncherProgress(ImportProgressStages.InstallingMinecraftBase, string.Empty));
-        var versionJson = await VanillaVersionMetadataClient.DownloadVersionJsonAsync(
-            httpClient,
-            modpack.MinecraftVersion,
-            preference,
-            speedLimit,
-            downloadSpeedLimitState,
-            logger,
-            cancellationToken).ConfigureAwait(false);
+        var versionJson = modpack.Loader is LoaderKind.Forge or LoaderKind.NeoForge
+            ? await VanillaVersionMetadataClient.DownloadVerifiedVersionJsonAsync(httpClient, modpack.MinecraftVersion,
+                preference, speedLimit, downloadSpeedLimitState, logger, cancellationToken).ConfigureAwait(false)
+            : await VanillaVersionMetadataClient.DownloadVersionJsonAsync(httpClient, modpack.MinecraftVersion,
+                preference, speedLimit, downloadSpeedLimitState, logger, cancellationToken).ConfigureAwait(false);
         var serverJarName = $"minecraft_server.{modpack.MinecraftVersion}.jar";
         await DownloadServerJarAsync(
             versionJson,
@@ -136,6 +133,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 await InstallForgeLikeAsync(
                     modpack,
                     targetDirectory,
+                    versionJson,
+                    serverJarName,
                     preference,
                     speedLimit,
                     progress,
@@ -300,6 +299,8 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
     private async Task InstallForgeLikeAsync(
         PreparedModpack modpack,
         string targetDirectory,
+        JsonObject versionJson,
+        string serverJarName,
         DownloadSourcePreference preference,
         int speedLimit,
         IProgress<LauncherProgress>? progress,
@@ -349,6 +350,15 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 installerPath,
                 ModpackInstallEnvironment.Server,
                 cancellationToken)).ConfigureAwait(false);
+            await DownloadDiagnostics.RunStageAsync(logger, "ServerBasePrerequisites", () => SeedForgeLikeServerJarAsync(
+                targetDirectory, serverJarName, modpack.MinecraftVersion, versionJson, installerPlan.ServerJarPath,
+                cancellationToken)).ConfigureAwait(false);
+            var speedMeter = SpeedMeterProgress.TryGet(progress);
+            var preparedInstaller = await DownloadDiagnostics.RunStageAsync(logger, "ServerMappingsPreparation",
+                () => artifactService.PrepareInstallerMappingsAsync(installerPath, installerPlan, modpack.MinecraftVersion,
+                    targetDirectory, versionJson, preference, speedLimit, cancellationToken,
+                    downloadOperation, speedMeter, ModpackInstallEnvironment.Server)).ConfigureAwait(false);
+            installerPlan = preparedInstaller.Plan;
             await artifactService.MaterializePrerequisitesAsync(
                 installerPath,
                 installerPlan,
@@ -357,7 +367,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 speedLimit,
                 cancellationToken,
                 operationContext: downloadOperation,
-                speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
+                speedMeter: speedMeter).ConfigureAwait(false);
 
             progress?.Report(new LauncherProgress(InstallProgressStages.CheckingJava, string.Empty));
             var resolver = javaRuntimeResolver
@@ -376,7 +386,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
             progress?.Report(new LauncherProgress(InstallProgressStages.RunningLoaderInstaller, string.Empty));
             await DownloadDiagnostics.RunStageAsync(logger, "ServerJavaInstaller", () => forgeInstallerRunner.RunServerInstallerAsync(
                 runtime.ExecutablePath,
-                installerPath,
+                preparedInstaller.ExecutionInstallerPath,
                 targetDirectory,
                 cancellationToken)).ConfigureAwait(false);
             await artifactService.MaterializeRuntimeLibrariesAsync(
@@ -387,7 +397,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 speedLimit,
                 cancellationToken,
                 operationContext: downloadOperation,
-                speedMeter: SpeedMeterProgress.TryGet(progress)).ConfigureAwait(false);
+                speedMeter: speedMeter).ConfigureAwait(false);
             await DownloadDiagnostics.RunStageAsync(logger, "ServerArtifactValidation", () => artifactService.ValidatePublishedArtifactsAsync(
                 targetDirectory,
                 installerPlan,
@@ -398,6 +408,40 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         {
             TryDeleteDirectory(tempDirectory);
         }
+    }
+
+    private async Task SeedForgeLikeServerJarAsync(
+        string targetDirectory, string serverJarName, string minecraftVersion, JsonObject versionJson,
+        string? installerJarPath, CancellationToken cancellationToken)
+    {
+        if (installerJarPath is null)
+            return;
+
+        var path = installerJarPath.Replace('\\', '/')
+            .Replace("{MINECRAFT_VERSION}", minecraftVersion, StringComparison.Ordinal);
+        var relativePath = path.StartsWith("{ROOT}/", StringComparison.Ordinal) ? path["{ROOT}/".Length..]
+            : path.StartsWith("{LIBRARY_DIR}/", StringComparison.Ordinal) ? "libraries/" + path["{LIBRARY_DIR}/".Length..]
+            : path;
+        if (Path.IsPathRooted(relativePath) || relativePath.IndexOfAny(['{', '}', ':']) >= 0
+            || relativePath.Split('/').Any(part => part is "" or "." or "..")
+            || !relativePath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Forge-like installer declared an unsafe server JAR path.");
+
+        var source = MinecraftPathGuard.EnsureSafeFileDestination(
+            Path.Combine(targetDirectory, serverJarName), targetDirectory, "Downloaded base server JAR");
+        var destination = MinecraftPathGuard.EnsureSafeFileDestination(
+            Path.Combine(targetDirectory, relativePath), targetDirectory, "Loader base server JAR");
+        if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var sha1 = VanillaVersionMetadataClient.GetServerJarSha1(versionJson);
+        if (!MinecraftFileIntegrity.IsSha1(sha1))
+            throw new InvalidDataException("Verified Minecraft server metadata is missing the server JAR hash.");
+
+        await AtomicSharedFilePublisher.PublishCopyAsync(source, destination, sha1!,
+            cancellationToken, targetDirectory, logger).ConfigureAwait(false);
+        logger.LogInformation("Base server JAR prepared for loader installer. MinecraftVersion={MinecraftVersion} RelativePath={RelativePath}",
+            minecraftVersion, relativePath);
     }
 
     private async Task DownloadArtifactAsync(

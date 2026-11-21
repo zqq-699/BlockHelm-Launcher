@@ -49,6 +49,7 @@ internal sealed record DownloadRetryOptions
     // spent outside reads (such as local writes and bandwidth throttling).
     public TimeSpan? SlowBodyReadThreshold { get; init; } = TimeSpan.FromSeconds(10);
     public long MinimumBodyBytesPerSecond { get; init; } = 2048;
+    public TimeSpan MaximumEstimatedRemainingTime { get; init; } = TimeSpan.FromSeconds(90);
     public TimeSpan ThrottleRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan MaximumRetryDelay { get; init; } = TimeSpan.FromMilliseconds(1400);
     public int MaxRedirects { get; init; } = 20;
@@ -72,6 +73,7 @@ internal enum DownloadFailureReason
     BodyInterrupted,
     HttpStatus,
     InvalidRedirect,
+    SourceTemporarilyAvoided,
     InvalidContent,
     HashMismatch,
     LocalFileSystem,
@@ -174,9 +176,11 @@ internal sealed class DownloadTimeoutException : DownloadAttemptException
 
 internal sealed class DownloadBodyTooSlowException : DownloadAttemptException
 {
-    public DownloadBodyTooSlowException(long bytesRead, TimeSpan readDuration)
+    public DownloadBodyTooSlowException(long bytesRead, TimeSpan readDuration, double? estimatedRemainingSeconds = null)
         : base(
-            DownloadFailureDisposition.RetryCurrentSource,
+            estimatedRemainingSeconds.HasValue
+                ? DownloadFailureDisposition.SwitchSource
+                : DownloadFailureDisposition.RetryCurrentSource,
             DownloadFailureReason.BodyTooSlow,
             $"The response body produced {bytesRead} bytes in {readDuration.TotalMilliseconds:0} ms "
             + $"({CalculateBytesPerSecond(bytesRead, readDuration):0.##} B/s).")
@@ -184,15 +188,25 @@ internal sealed class DownloadBodyTooSlowException : DownloadAttemptException
         BytesRead = bytesRead;
         ReadDuration = readDuration;
         BytesPerSecond = CalculateBytesPerSecond(bytesRead, readDuration);
+        EstimatedRemainingSeconds = estimatedRemainingSeconds;
+        if (estimatedRemainingSeconds.HasValue)
+            WithDetail("EstimatedRemainingSeconds", estimatedRemainingSeconds);
     }
 
     public long BytesRead { get; }
     public TimeSpan ReadDuration { get; }
     public double BytesPerSecond { get; }
+    public double? EstimatedRemainingSeconds { get; }
 
     private static double CalculateBytesPerSecond(long bytesRead, TimeSpan readDuration) =>
         readDuration.TotalSeconds <= 0 ? double.PositiveInfinity : bytesRead / readDuration.TotalSeconds;
 }
+
+internal sealed class DownloadSourceAvoidedException()
+    : DownloadAttemptException(
+        DownloadFailureDisposition.SwitchSource,
+        DownloadFailureReason.SourceTemporarilyAvoided,
+        "The download node was temporarily avoided while another source was available.");
 
 internal sealed class DownloadContentValidationException : DownloadAttemptException
 {

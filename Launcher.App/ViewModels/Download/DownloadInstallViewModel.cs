@@ -182,8 +182,11 @@ public sealed partial class DownloadInstallViewModel : ObservableObject
         catch (Exception exception)
         {
             instanceNameTracker.RemovePending(request.InstanceName);
-            SetLatestInstallFailure(installSequence, Strings.Status_InstallFailed);
-            installTask.Fail(Strings.Status_InstallFailed);
+            var message = exception is MinecraftAssetInstallationException
+                ? Strings.Status_MinecraftAssetInstallFailed
+                : Strings.Status_InstallFailed;
+            SetLatestInstallFailure(installSequence, message);
+            installTask.Fail(message);
             logger.LogError(
                 exception,
                 "Instance installation failed. MinecraftVersion={MinecraftVersion} Loader={Loader} InstanceName={InstanceName} DurationMs={DurationMs}",

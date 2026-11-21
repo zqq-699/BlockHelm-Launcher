@@ -23,6 +23,11 @@ internal sealed record DownloadFileOptions(
     bool UseHiddenTemporaryFile = true,
     Func<string, CancellationToken, Task>? ValidateUnverifiedFile = null)
 {
+    public static DownloadFileOptions ForAsset(MinecraftDownloadOperationContext? context, long? size, string? managedRoot = null) =>
+        new(size >= MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize
+            ? DownloadPersistenceMode.TaskScopedResumable
+            : DownloadPersistenceMode.LightweightAtomic, context, managedRoot);
+
     public string? ResolveManagedRoot(string destinationPath)
     {
         if (!string.IsNullOrWhiteSpace(ManagedRoot))

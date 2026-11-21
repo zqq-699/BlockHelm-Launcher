@@ -20,7 +20,7 @@ internal sealed record PreparedLoaderInstaller(string ExecutionInstallerPath, Fo
 
 internal sealed partial class LoaderInstallerArtifactService
 {
-    public async Task<PreparedLoaderInstaller> PrepareClientInstallerAsync(
+    public async Task<PreparedLoaderInstaller> PrepareInstallerMappingsAsync(
         string installerPath,
         ForgeInstallerPlan plan,
         string minecraftVersion,
@@ -30,7 +30,23 @@ internal sealed partial class LoaderInstallerArtifactService
         int speedLimit,
         CancellationToken cancellationToken,
         MinecraftDownloadOperationContext? operationContext = null,
-        SpeedMeter? speedMeter = null)
+        SpeedMeter? speedMeter = null,
+        ModpackInstallEnvironment environment = ModpackInstallEnvironment.Client)
+    {
+        var mappings = await ReadInstallerMappingsPlanAsync(installerPath, plan, minecraftVersion, minecraftDirectory,
+            verifiedVersionMetadata, environment, cancellationToken).ConfigureAwait(false);
+        return await PrepareInstallerMappingsAsync(installerPath, plan, mappings, minecraftVersion, minecraftDirectory,
+            preference, speedLimit, cancellationToken, operationContext, speedMeter).ConfigureAwait(false);
+    }
+
+    private async Task<InstallerMappingsPlan?> ReadInstallerMappingsPlanAsync(
+        string installerPath,
+        ForgeInstallerPlan plan,
+        string minecraftVersion,
+        string minecraftDirectory,
+        JsonObject? verifiedVersionMetadata,
+        ModpackInstallEnvironment environment,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         await using var source = new FileStream(installerPath, FileMode.Open, FileAccess.Read, FileShare.Read,
@@ -38,48 +54,50 @@ internal sealed partial class LoaderInstallerArtifactService
         using var archive = OpenInstallerArchive(source, installerPath);
         var profile = await ReadObjectAsync(archive, "install_profile.json", required: true, cancellationToken).ConfigureAwait(false);
         if (profile["processors"] is not JsonArray processors)
-            return new PreparedLoaderInstaller(installerPath, plan);
+            return null;
 
-        var values = ReadSideData(profile["data"] as JsonObject, ModpackInstallEnvironment.Client);
-        values["SIDE"] = "client";
+        var side = environment is ModpackInstallEnvironment.Server ? "server" : "client";
+        var oppositeSide = environment is ModpackInstallEnvironment.Server ? "client" : "server";
+        var values = ReadSideData(profile["data"] as JsonObject, environment);
+        values["SIDE"] = side;
         values["MINECRAFT_VERSION"] = minecraftVersion;
         var tasks = new List<(int Index, string RelativePath)>();
         for (var index = 0; index < processors.Count; index++)
         {
             if (processors[index] is not JsonObject processor
-                || !RunsOnSide(processor, ModpackInstallEnvironment.Client))
+                || !RunsOnSide(processor, environment))
                 continue;
             var options = ReadMappingsOptions(processor["args"] as JsonArray, values);
             if (options.GetValueOrDefault("task") != "DOWNLOAD_MOJMAPS")
                 continue;
-            if (options.GetValueOrDefault("side") == "server")
+            if (options.GetValueOrDefault("side") == oppositeSide)
                 continue;
             if (!IsMappingsTool(processor["jar"]))
             {
-                logger.LogDebug("Client mappings processor uses an unsupported tool; leaving it to the installer. ProcessorIndex={ProcessorIndex} Tool={Tool} Side={Side}",
-                    index, MappingString(processor["jar"]), "client");
+                logger.LogDebug("Mappings processor uses an unsupported tool. ProcessorIndex={ProcessorIndex} Tool={Tool} Side={Side}",
+                    index, MappingString(processor["jar"]), side);
                 return Fallback("UnsupportedTool", index);
             }
-            if (options.GetValueOrDefault("side") != "client"
+            if (options.GetValueOrDefault("side") != side
                 || options.GetValueOrDefault("version") != minecraftVersion)
                 return Fallback("ProcessorParameters", index);
             var output = options.GetValueOrDefault("output") ?? string.Empty;
             var outputValue = output.Trim('[', ']');
             if (Path.IsPathRooted(outputValue) || outputValue.Split('/', '\\', ':').Any(segment => segment == ".."))
-                throw InvalidMappings("UnsafeOutputPath", index);
+                throw InvalidMappings("UnsafeOutputPath", index, side);
             if (output.Length < 3 || output[0] != '[' || output[^1] != ']'
                 || output.Contains('{') || output.Contains('}')
                 || !ManagedLibraryArtifactResolver.TryBuildMavenPath(output[1..^1], null, out var relativePath))
                 return Fallback("OutputPath", index);
             if (!IsSafeRelativePath(relativePath))
-                throw InvalidMappings("UnsafeOutputPath", index);
+                throw InvalidMappings("UnsafeOutputPath", index, side);
             _ = ResolveLibraryPath(minecraftDirectory, relativePath);
             tasks.Add((index, relativePath));
         }
         if (tasks.Count == 0)
-            return new PreparedLoaderInstaller(installerPath, plan);
+            return null;
 
-        var mappings = verifiedVersionMetadata?["downloads"]?["client_mappings"] as JsonObject;
+        var mappings = verifiedVersionMetadata?["downloads"]?[$"{side}_mappings"] as JsonObject;
         var url = MappingString(mappings?["url"]);
         var sha1 = MappingString(mappings?["sha1"]);
         if (MappingString(verifiedVersionMetadata?["id"]) != minecraftVersion
@@ -99,15 +117,47 @@ internal sealed partial class LoaderInstallerArtifactService
             mappingLibraries[task.RelativePath] = new ForgeInstallerLibrary(artifact, null);
         }
 
+        return new InstallerMappingsPlan(side, profile, tasks.Select(task => task.Index).ToArray(), mappingLibraries,
+            plan with { PrerequisiteLibraries = prerequisites.Values.OrderBy(library => library.Artifact.RelativePath, StringComparer.OrdinalIgnoreCase).ToArray() });
+
+        InstallerMappingsPlan? Fallback(string reason, int? processorIndex = null)
+        {
+            logger.LogWarning("Mappings preparation is unsupported; using the original installer. Reason={Reason} ProcessorIndex={ProcessorIndex} Side={Side}",
+                reason, processorIndex, side);
+            return null;
+        }
+    }
+
+    private async Task<PreparedLoaderInstaller> PrepareInstallerMappingsAsync(
+        string installerPath,
+        ForgeInstallerPlan originalPlan,
+        InstallerMappingsPlan? mappings,
+        string minecraftVersion,
+        string minecraftDirectory,
+        DownloadSourcePreference preference,
+        int speedLimit,
+        CancellationToken cancellationToken,
+        MinecraftDownloadOperationContext? operationContext,
+        SpeedMeter? speedMeter,
+        bool parallelDownloads = false)
+    {
+        if (mappings is null)
+            return new PreparedLoaderInstaller(installerPath, originalPlan);
+
         // Use the same downloader and verified-file handling as installer libraries.
         // Do not remove the Java task until every mapping file has been accepted.
-        await MaterializeLibrariesAsync(installerPath, mappingLibraries.Values, minecraftDirectory,
-            preference, speedLimit, cancellationToken, operationContext, speedMeter).ConfigureAwait(false);
-        foreach (var task in tasks.OrderByDescending(task => task.Index))
-            processors.RemoveAt(task.Index);
+        await MaterializeLibrariesAsync(installerPath, mappings.Libraries.Values, minecraftDirectory,
+            preference, speedLimit, cancellationToken, operationContext, speedMeter, parallelDownloads).ConfigureAwait(false);
+        var profile = mappings.Profile;
+        var processors = (JsonArray)profile["processors"]!;
+        foreach (var index in mappings.ProcessorIndices.OrderDescending())
+            processors.RemoveAt(index);
 
         var executionPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(installerPath))!,
             $"{Path.GetFileNameWithoutExtension(installerPath)}.bhl-managed-{Guid.NewGuid():N}.jar");
+        await using var source = new FileStream(installerPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            128 * 1024, FileOptions.Asynchronous);
+        using var archive = OpenInstallerArchive(source, installerPath);
         string originalSha256;
         string executionSha256;
         try
@@ -140,7 +190,9 @@ internal sealed partial class LoaderInstallerArtifactService
             if (!await ValidateExecutionCopyAsync(executionPath, profile, originalManifest, cancellationToken).ConfigureAwait(false))
             {
                 TryDeleteFile(executionPath);
-                return Fallback("ExecutionCopyValidation");
+                logger.LogWarning("Mappings preparation is unsupported; using the original installer. Reason={Reason} Side={Side}",
+                    "ExecutionCopyValidation", mappings.Side);
+                return new PreparedLoaderInstaller(installerPath, originalPlan);
             }
             source.Position = 0;
             originalSha256 = Convert.ToHexString(await SHA256.HashDataAsync(source, cancellationToken).ConfigureAwait(false));
@@ -153,21 +205,18 @@ internal sealed partial class LoaderInstallerArtifactService
             throw;
         }
         logger.LogInformation(
-            "Client installer mappings prepared by launcher. MinecraftVersion={MinecraftVersion} MappingFiles={MappingFiles} SkippedProcessors={SkippedProcessors} ProcessorIndices={ProcessorIndices} OriginalInstaller={OriginalInstaller} ExecutionInstaller={ExecutionInstaller} OriginalInstallerSha256={OriginalInstallerSha256} ExecutionInstallerSha256={ExecutionInstallerSha256}",
-            minecraftVersion, mappingLibraries.Count, tasks.Count, string.Join(",", tasks.Select(task => task.Index)),
+            "Installer mappings prepared by launcher. Side={Side} MinecraftVersion={MinecraftVersion} MappingFiles={MappingFiles} SkippedProcessors={SkippedProcessors} ProcessorIndices={ProcessorIndices} OriginalInstaller={OriginalInstaller} ExecutionInstaller={ExecutionInstaller} OriginalInstallerSha256={OriginalInstallerSha256} ExecutionInstallerSha256={ExecutionInstallerSha256}",
+            mappings.Side, minecraftVersion, mappings.Libraries.Count, mappings.ProcessorIndices.Count, string.Join(",", mappings.ProcessorIndices),
             Path.GetFileName(installerPath), Path.GetFileName(executionPath), originalSha256, executionSha256);
-        return new PreparedLoaderInstaller(executionPath, plan with
-        {
-            PrerequisiteLibraries = prerequisites.Values.OrderBy(library => library.Artifact.RelativePath, StringComparer.OrdinalIgnoreCase).ToArray()
-        });
-
-        PreparedLoaderInstaller Fallback(string reason, int? processorIndex = null)
-        {
-            logger.LogWarning("Client mappings preparation is unsupported; using the original installer. Reason={Reason} ProcessorIndex={ProcessorIndex} Side={Side}",
-                reason, processorIndex, "client");
-            return new PreparedLoaderInstaller(installerPath, plan);
-        }
+        return new PreparedLoaderInstaller(executionPath, mappings.PreparedPlan);
     }
+
+    private sealed record InstallerMappingsPlan(
+        string Side,
+        JsonObject Profile,
+        IReadOnlyList<int> ProcessorIndices,
+        IReadOnlyDictionary<string, ForgeInstallerLibrary> Libraries,
+        ForgeInstallerPlan PreparedPlan);
 
     private static async Task<bool> ValidateExecutionCopyAsync(
         string path, JsonObject expectedProfile, string? originalManifest, CancellationToken cancellationToken)
@@ -233,7 +282,7 @@ internal sealed partial class LoaderInstallerArtifactService
     private static string? MappingString(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
-    private static InvalidDataException InvalidMappings(string reason, int? processor = null) =>
+    private static InvalidDataException InvalidMappings(string reason, int processor, string side) =>
         SafeExceptionLog.Describe(new InvalidDataException("Installer client mappings cannot be prepared."),
-            "InstallerMappingsInvalid", ("Reason", reason), ("ProcessorIndex", processor), ("Side", "client"));
+            "InstallerMappingsInvalid", ("Reason", reason), ("ProcessorIndex", processor), ("Side", side));
 }

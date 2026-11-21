@@ -48,6 +48,7 @@ internal sealed class MinecraftDownloadOperationContext : IDisposable
 
     public string ManagedRoot { get; }
     internal DownloadHostHealthTracker HostHealth { get; } = new();
+    internal VerifiedVanillaClient? ReusableVanillaClient { get; set; }
 
     public string ResolveManagedRoot(string destinationPath)
     {
@@ -83,6 +84,8 @@ internal sealed class MinecraftDownloadOperationContext : IDisposable
             && string.Equals(expected.Sha1, sha1, StringComparison.OrdinalIgnoreCase)
             && expected.Size == size;
     }
+
+    internal bool HasRegisteredAsset(string normalizedDestination) => assets.ContainsKey(normalizedDestination);
 
     public bool IsVerified(string destinationPath, DownloadIntegrityExpectation integrity)
     {
@@ -135,3 +138,5 @@ internal sealed class MinecraftDownloadOperationContext : IDisposable
         public void Dispose() => Interlocked.Exchange(ref semaphore, null)?.Release();
     }
 }
+
+internal sealed record VerifiedVanillaClient(string Path, string Sha1, long Size);

@@ -225,7 +225,9 @@ internal sealed class ManagedVersionRepairDownloadBatch
             && MinecraftFileIntegrity.IsSha1(download.ExpectedSha1)
             && download.PersistenceMode is DownloadPersistenceMode.LightweightAtomic)
             context.RegisterAsset(download.DestinationPath, download.ExpectedSha1!, download.ExpectedSize);
-        return new DownloadFileOptions(download.PersistenceMode, context, managedRoot);
+        return download.PersistenceMode is DownloadPersistenceMode.LightweightAtomic && MinecraftFileIntegrity.IsSha1(download.ExpectedSha1)
+            ? DownloadFileOptions.ForAsset(context, download.ExpectedSize, managedRoot)
+            : new DownloadFileOptions(download.PersistenceMode, context, managedRoot);
     }
 
     private static InstanceRepairException CreateDownloadException(

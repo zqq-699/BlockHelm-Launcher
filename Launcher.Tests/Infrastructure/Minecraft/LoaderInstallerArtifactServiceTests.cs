@@ -9,6 +9,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
@@ -114,7 +115,7 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
         string outputOption,
         ModpackInstallEnvironment environment)
     {
-        var installerPath = await WriteProcessorOutputInstallerAsync(outputOption);
+        var installerPath = await WriteProcessorOutputInstallerAsync(outputOption, environment);
         var handler = new RecordingHandler();
         var service = new LoaderInstallerArtifactService(new HttpClient(handler));
 
@@ -124,6 +125,7 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
             ? "net/minecraft/server/1.0/server-1.0-srg.jar"
             : "net/minecraft/client/1.0/client-1.0-srg.jar";
         Assert.Contains(plan.ProcessorOutputs, output => output.RelativePath == expectedRelativePath);
+        Assert.Contains(plan.RuntimeLibraries, library => library.Artifact.RelativePath == expectedRelativePath);
         Assert.DoesNotContain(
             plan.PrerequisiteLibraries,
             library => library.Artifact.RelativePath == expectedRelativePath);
@@ -488,7 +490,7 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
         return installerPath;
     }
 
-    private async Task<string> WriteProcessorOutputInstallerAsync(string outputOption)
+    private async Task<string> WriteProcessorOutputInstallerAsync(string outputOption, ModpackInstallEnvironment environment)
     {
         Directory.CreateDirectory(TempRoot);
         var installerPath = Path.Combine(TempRoot, $"processor-output-{Guid.NewGuid():N}.jar");
@@ -514,7 +516,23 @@ public sealed class LoaderInstallerArtifactServiceTests : TestTempDirectory
               ]
             }
             """);
-        WriteEntry(archive, "version.json", """{ "libraries": [] }""");
+        var side = environment == ModpackInstallEnvironment.Server ? "server" : "client";
+        var generatedPath = $"net/minecraft/{side}/1.0/{side}-1.0-srg.jar";
+        WriteEntry(archive, "version.json", JsonSerializer.Serialize(new
+        {
+            libraries = new[]
+            {
+                new
+                {
+                    name = $"net.minecraft:{side}:1.0:srg",
+                    downloads = new { artifact = new
+                    {
+                        path = generatedPath, url = $"https://example.test/{generatedPath}",
+                        sha1 = "1111111111111111111111111111111111111111"
+                    } }
+                }
+            }
+        }));
         WriteEntry(archive, "maven/com/example/processor/1.0/processor-1.0.jar", "processor");
         return installerPath;
     }

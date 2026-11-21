@@ -83,7 +83,7 @@ public sealed partial class ForgeLoaderProvider : ILoaderProvider, IStagedLoader
         this.httpClient = LauncherHttpUserAgent.Apply(
             httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.installerRunner = installerRunner ?? new ForgeInstallerRunner(logger);
-        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger);
+        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger, downloadSpeedLimitState);
         this.javaRuntimeResolver = javaRuntimeResolver;
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;

@@ -152,6 +152,7 @@ internal sealed class AdaptiveSegmentDownloadSession
         AdaptiveDownloadSegment? largest = null;
         var largestRemaining = 0L;
         var sourceWasActive = false;
+        var preferred = false;
 
         foreach (var candidate in queued)
         {
@@ -166,11 +167,13 @@ internal sealed class AdaptiveSegmentDownloadSession
         foreach (var candidate in active)
         {
             var remaining = candidate.RemainingLength;
-            if (remaining <= largestRemaining)
+            var candidatePreferred = remaining >= splitThreshold && candidate.PreferSplit;
+            if (preferred && !candidatePreferred || candidatePreferred == preferred && remaining <= largestRemaining)
                 continue;
             largest = candidate;
             largestRemaining = remaining;
             sourceWasActive = true;
+            preferred = candidatePreferred;
         }
 
         if (largest is null
@@ -223,6 +226,7 @@ internal sealed class AdaptiveDownloadSegment
     private long logicalEnd;
     private long nextOffset;
     private bool shortened;
+    private bool preferSplit;
 
     public AdaptiveDownloadSegment(int chunkId, long start, long end, long totalLength)
     {
@@ -261,6 +265,26 @@ internal sealed class AdaptiveDownloadSegment
         {
             lock (syncRoot)
                 return Math.Max(0, logicalEnd - nextOffset + 1);
+        }
+    }
+
+    public bool PreferSplit
+    {
+        get
+        {
+            lock (syncRoot)
+                return preferSplit;
+        }
+    }
+
+    public bool TryPreferSplitting(long minimumRemaining)
+    {
+        lock (syncRoot)
+        {
+            if (logicalEnd - nextOffset + 1 < minimumRemaining)
+                return false;
+            preferSplit = true;
+            return true;
         }
     }
 
@@ -338,6 +362,7 @@ internal sealed class AdaptiveDownloadSegment
             retainedEnd = splitStart - 1;
             logicalEnd = retainedEnd;
             shortened = true;
+            preferSplit = false;
             suffix = new AdaptiveDownloadSegment(
                 suffixChunkId,
                 splitStart,

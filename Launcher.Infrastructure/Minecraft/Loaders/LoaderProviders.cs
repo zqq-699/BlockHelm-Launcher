@@ -332,7 +332,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         MinecraftDownloadOperationContext? operationContext = null,
         SpeedMeter? sharedSpeedMeter = null,
-        CmlLibJavaFileMode javaFileMode = CmlLibJavaFileMode.Exclude)
+        CmlLibJavaFileMode javaFileMode = CmlLibJavaFileMode.Exclude,
+        LoaderBaseContentPart contentPart = LoaderBaseContentPart.All)
     {
         // 统一注入镜像路由、限速和运行库下载器，保证 Vanilla/Fabric 使用相同下载策略。
         var parameters = MinecraftLauncherParameters.CreateDefault(path);
@@ -413,14 +414,27 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
             .Select((extractor, index) => (extractor, index))
             .First(entry => entry.extractor is CmlLib.Core.FileExtractors.AssetFileExtractor);
         fileExtractors.RemoveAt(defaultAssetExtractor.index);
-        fileExtractors.Insert(
-            defaultAssetExtractor.index,
-            new SafeAssetFileExtractor(assetIndexExecutor, downloadSourcePreference, operationContext, sharedSpeedMeter, logger));
+        if (contentPart is not LoaderBaseContentPart.WithoutClientOrAssets)
+        {
+            var assetExtractor = new SafeAssetFileExtractor(assetIndexExecutor, downloadSourcePreference, operationContext, sharedSpeedMeter, logger);
+            if (contentPart is LoaderBaseContentPart.Assets)
+            {
+                for (var index = fileExtractors.Count() - 1; index >= 0; index--)
+                    fileExtractors.RemoveAt(index);
+                fileExtractors.Insert(0, assetExtractor);
+                return new MinecraftLauncher(parameters);
+            }
+            fileExtractors.Insert(defaultAssetExtractor.index, assetExtractor);
+        }
 
         var clientExtractor = fileExtractors
             .Select((extractor, index) => (extractor, index))
             .First(entry => entry.extractor is CmlLib.Core.FileExtractors.ClientFileExtractor);
-        if (clientExtractor.index > 0)
+        if (contentPart is LoaderBaseContentPart.WithoutClientOrAssets)
+        {
+            fileExtractors.RemoveAt(clientExtractor.index);
+        }
+        else if (clientExtractor.index > 0)
         {
             fileExtractors.RemoveAt(clientExtractor.index);
             fileExtractors.Insert(0, clientExtractor.extractor);

@@ -1963,6 +1963,9 @@
   <data name="Status_InstallFailed" xml:space="preserve">
     <value>安裝失敗，請稍後再試。</value>
   </data>
+  <data name="Status_MinecraftAssetInstallFailed" xml:space="preserve">
+    <value>Minecraft 資源下載或驗證失敗，請稍後再試。</value>
+  </data>
   <data name="Status_ModpackPreparingArchive" xml:space="preserve">
     <value>正在準備整合包檔案</value>
   </data>

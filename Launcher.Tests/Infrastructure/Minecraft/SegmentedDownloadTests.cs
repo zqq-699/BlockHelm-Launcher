@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Threading.Channels;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.Minecraft;
@@ -91,6 +92,153 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
             Assert.Single(requests.Where(item => item.Host == "cdn.example.test"));
         else
             Assert.Contains(requests, item => item.Host == "cdn.example.test" && item.Range is null);
+        AssertNoPendingFiles(destination);
+    }
+
+    [Fact]
+    public async Task InterruptedFullProbeCanRetryAsVerifiedSegmentedDownload()
+    {
+        var handler = new RecordingRequestHandler((number, request, _) =>
+        {
+            if (number > 1)
+                return Task.FromResult(CreatePartialResponse(request, LargePayload));
+
+            var response = CreateFullResponse(request, LargePayload[..4096]);
+            response.Content.Headers.ContentLength = LargePayload.Length;
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "interrupted-probe.jar");
+
+        var result = await CreateExecutor(client, maxAttempts: 2).DownloadFileAsync(
+            DownloadUrl, DownloadSourcePreference.Official, "ThirdParty",
+            destination, Sha1(LargePayload), LargePayload.Length, CancellationToken.None);
+
+        Assert.Equal(1, result.RetryCount);
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+        AssertNoPendingFiles(destination);
+    }
+
+    [Fact]
+    public async Task InterruptedPartialProbeRetriesFromTheWrittenCursorWithItsETag()
+    {
+        const int probeLength = 1024 * 1024;
+        const int writtenPrefix = 64 * 1024;
+        var probeRanges = new ConcurrentQueue<(string Range, string? IfRange)>();
+        var handler = new RecordingRequestHandler((_, request, _) =>
+        {
+            var range = Assert.Single(request.Headers.Range!.Ranges);
+            if (range.From < probeLength)
+                probeRanges.Enqueue((request.Headers.Range!.ToString(), request.Headers.IfRange?.ToString()));
+            if (range.From != 0)
+            {
+                var remainder = CreatePartialResponse(request, LargePayload);
+                remainder.Headers.ETag = new EntityTagHeaderValue("\"original\"");
+                return Task.FromResult(remainder);
+            }
+
+            var interrupted = new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                RequestMessage = request,
+                Content = new ByteArrayContent(LargePayload, 0, writtenPrefix)
+            };
+            interrupted.Headers.ETag = new EntityTagHeaderValue("\"original\"");
+            interrupted.Content.Headers.ContentLength = probeLength;
+            interrupted.Content.Headers.ContentRange = new ContentRangeHeaderValue(0, probeLength - 1, LargePayload.Length);
+            return Task.FromResult(interrupted);
+        });
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "interrupted-partial-probe.jar");
+
+        await CreateExecutor(client, maxAttempts: 2).DownloadFileAsync(
+            DownloadUrl, DownloadSourcePreference.Official, "ThirdParty", destination, Sha1(LargePayload),
+            LargePayload.Length, CancellationToken.None);
+
+        Assert.Equal([("bytes=0-", null), ($"bytes={writtenPrefix}-{probeLength - 1}", "\"original\"")], probeRanges);
+        Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+        AssertNoPendingFiles(destination);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SlowProbeOverlapsRemainingRangesAndResumesFromItsWrittenBytes(bool alternateIgnoresRange)
+    {
+        const string mirror = "bmclapi2.bangbang93.com";
+        const string official = "piston-data.mojang.com";
+        const int probeLength = 1024 * 1024;
+        const int chunkLength = 32 * 1024;
+        var clock = new SteppedTimeProvider();
+        var waitingReads = Channel.CreateUnbounded<TaskCompletionSource>();
+        var suffixWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var probeRequests = new ConcurrentQueue<(string Host, string Range)>();
+        var handler = new RecordingRequestHandler((_, request, _) =>
+        {
+            var host = request.RequestUri!.Host;
+            var range = Assert.Single(request.Headers.Range!.Ranges);
+            if (range.From < probeLength)
+                probeRequests.Enqueue((host, request.Headers.Range!.ToString()));
+            if (host == official && alternateIgnoresRange)
+                return Task.FromResult(CreateFullResponse(request, LargePayload));
+            if (range.From != 0)
+                return Task.FromResult(CreatePartialResponse(request, LargePayload));
+
+            var response = new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                RequestMessage = request,
+                Content = new StreamContent(new SteppedRangeStream(
+                    LargePayload, 0, LargePayload.Length, chunkLength, 3, waitingReads.Writer))
+            };
+            response.Content.Headers.ContentLength = LargePayload.Length;
+            response.Content.Headers.ContentRange = new ContentRangeHeaderValue(0, LargePayload.Length - 1, LargePayload.Length);
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var limiter = new ImportConcurrencyLimiter();
+        limiter.SetMaximumDownloadConcurrency(2);
+        var destination = Path.Combine(TempRoot, "slow-probe.jar");
+        var download = CreateExecutor(client, limiter, timeProvider: clock).DownloadFileAsync(
+            "https://piston-data.mojang.com/v1/objects/example/client.jar",
+            DownloadSourcePreference.BmclApi, "Mojang", destination, Sha1(LargePayload), LargePayload.Length, cancellation.Token,
+            reportAttemptProgress: (_, written, _) =>
+            {
+                if (written == LargePayload.Length - probeLength)
+                    suffixWritten.TrySetResult();
+            });
+
+        try
+        {
+            var firstRead = await waitingReads.Reader.ReadAsync(cancellation.Token);
+            await suffixWritten.Task.WaitAsync(cancellation.Token);
+            Assert.False(download.IsCompleted);
+            firstRead.SetResult();
+            for (var window = 0; window < 2; window++)
+            {
+                var pendingRead = await waitingReads.Reader.ReadAsync(cancellation.Token);
+                clock.Advance(TimeSpan.FromSeconds(10));
+                pendingRead.SetResult();
+            }
+
+            var result = await download;
+            var resumedRange = $"bytes={3 * chunkLength}-{probeLength - 1}";
+            Assert.Equal(alternateIgnoresRange
+                ? [(mirror, "bytes=0-"), (official, resumedRange), (mirror, resumedRange)]
+                : [(mirror, "bytes=0-"), (official, resumedRange)], probeRequests);
+            Assert.Equal(!alternateIgnoresRange, result.FallbackUsed);
+            Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (!download.IsCompleted)
+            {
+                try { await download; }
+                catch (OperationCanceledException) { }
+            }
+        }
+
+        Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
         AssertNoPendingFiles(destination);
     }
 
@@ -231,6 +379,232 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
         Assert.Equal(1, result.RetryCount);
         Assert.True(result.NetworkAttempts > result.RetryCount);
         Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Theory]
+    [InlineData(64, 16)]
+    [InlineData(4, 4)]
+    public async Task LargeFileExpandsUpToItsLimitWithinGlobalAdmission(int globalLimit, int expectedWorkers)
+    {
+        var payload = CreatePayload(20 * 1024 * 1024);
+        var targetReached = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedConcurrency = new ConcurrentBag<int>();
+        var active = 0;
+        var handler = new RecordingRequestHandler(async (_, request, token) =>
+        {
+            if (request.Headers.Range!.Ranges.Single().From == 0)
+                return CreatePartialResponse(request, payload);
+
+            var count = Interlocked.Increment(ref active);
+            observedConcurrency.Add(count);
+            if (count >= expectedWorkers)
+                targetReached.TrySetResult(true);
+            try
+            {
+                await release.Task.WaitAsync(token);
+                return CreatePartialResponse(request, payload);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref active);
+            }
+        });
+        using var client = CreateClient(handler);
+        var limiter = new ImportConcurrencyLimiter();
+        limiter.SetMaximumDownloadConcurrency(globalLimit);
+        var destination = Path.Combine(TempRoot, "worker-limit.jar");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var download = CreateExecutor(client, limiter).DownloadFileAsync(
+            DownloadUrl, DownloadSourcePreference.Official, "ThirdParty", destination, Sha1(payload),
+            payload.Length, cancellation.Token);
+        try
+        {
+            await targetReached.Task.WaitAsync(cancellation.Token);
+        }
+        finally
+        {
+            release.TrySetResult(true);
+        }
+
+        await download;
+        Assert.Equal(expectedWorkers, observedConcurrency.Max());
+        Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
+        Assert.Equal(Sha1(payload), Sha1(await File.ReadAllBytesAsync(destination)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LastRangeUsesLowerThresholdOnlyWhenNoOtherBytesArePending(bool hasQueuedRange)
+    {
+        const long fileSize = 3850;
+        long written = 0;
+        double? appliedThreshold = null;
+        var clock = new SteppedTimeProvider();
+        var window = TimeSpan.FromSeconds(10);
+        var backup = MinecraftDownloadSourceResolver.EnumerateRequests(DownloadUrl, DownloadSourcePreference.Official).First();
+        var recovery = new SegmentedSlowSourceRecovery(
+            clock, window, 30, 15, fileSize,
+            () => written, () => true, () => backup, () => true,
+            (_, _, _, _, threshold) => appliedThreshold = threshold);
+        recovery.BodyStarted();
+
+        written += 1000;
+        clock.Advance(window);
+        Assert.Null(recovery.GetBackup(100, RemainingInActiveRange(), RemainingInActiveRange));
+
+        written += 1000;
+        clock.Advance(window);
+        Assert.Same(hasQueuedRange ? null : backup, recovery.GetBackup(100, RemainingInActiveRange(), RemainingInActiveRange));
+        Assert.Equal(hasQueuedRange ? null : 15d, appliedThreshold);
+        recovery.BodyEnded();
+
+        long RemainingInActiveRange() => fileSize - written - (hasQueuedRange ? 100 : 0);
+    }
+
+    [Fact]
+    public void SelectedBackupDoesNotMoveAFasterRangeWithALongSuffix()
+    {
+        const long fileSize = 10_000;
+        long written = 0;
+        var clock = new SteppedTimeProvider();
+        var window = TimeSpan.FromSeconds(10);
+        var backup = MinecraftDownloadSourceResolver.EnumerateRequests(DownloadUrl, DownloadSourcePreference.Official).First();
+        var recovery = new SegmentedSlowSourceRecovery(
+            clock, window, 30, 15, fileSize,
+            () => written, () => true, () => backup, () => true, (_, _, _, _, _) => { });
+        recovery.BodyStarted();
+        recovery.BodyStarted();
+
+        written += 1000;
+        clock.Advance(window);
+        Assert.Null(recovery.GetBackup(25, 2000, () => 2000));
+        written += 1000;
+        clock.Advance(window);
+        Assert.Same(backup, recovery.GetBackup(25, 2000, () => 2000));
+        Assert.Null(recovery.GetBackup(100, 6000, () => 6000));
+        Assert.Same(backup, recovery.GetBackup(20, 2000, () => 2000));
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public async Task ConcurrentSmallRangesSwitchOnlyForSustainedSlowTransfer(
+        bool sustainedSlow, bool cancelOnBackup, bool fastTail)
+    {
+        const string mirror = "bmclapi2.bangbang93.com";
+        const int probeLength = 1024 * 1024;
+        const int chunkLength = 32 * 1024;
+        var payload = CreatePayload(probeLength + 1536 * 1024);
+        var clock = new SteppedTimeProvider();
+        var waitingReads = Channel.CreateUnbounded<TaskCompletionSource>();
+        var switched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var mirrorOffsets = new ConcurrentQueue<long>();
+        var backupOffsets = new ConcurrentQueue<long>();
+        var handler = new RecordingRequestHandler(async (_, request, token) =>
+        {
+            var range = Assert.Single(request.Headers.Range!.Ranges);
+            var start = (int)range.From!.Value;
+            var end = (int)(range.To ?? payload.Length - 1);
+            var response = CreatePartialResponse(request, payload, maximumEnd: start == 0 ? probeLength - 1 : null);
+            if (request.RequestUri!.Host != mirror)
+            {
+                backupOffsets.Enqueue(start);
+                switched.TrySetResult();
+                if (cancelOnBackup)
+                {
+                    using (response)
+                        await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+            }
+            else if (start > 0)
+            {
+                mirrorOffsets.Enqueue(start);
+                response.Content.Dispose();
+                var steppedChunkLength = fastTail && start > probeLength ? 112 * 1024 : chunkLength;
+                response.Content = new StreamContent(new SteppedRangeStream(
+                    payload, start, end - start + 1, steppedChunkLength, sustainedSlow ? 3 : 2, waitingReads.Writer));
+                response.Content.Headers.ContentLength = end - start + 1;
+                response.Content.Headers.ContentRange = new ContentRangeHeaderValue(start, end, payload.Length);
+            }
+
+            return response;
+        });
+        using var client = CreateClient(handler);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var limiter = new ImportConcurrencyLimiter();
+        limiter.SetMaximumDownloadConcurrency(2);
+        var destination = Path.Combine(TempRoot, "slow-pair.jar");
+        var download = CreateExecutor(client, limiter, timeProvider: clock).DownloadFileAsync(
+            "https://piston-data.mojang.com/v1/objects/example/client.jar",
+            DownloadSourcePreference.BmclApi, "Mojang", destination, Sha1(payload), payload.Length, cancellation.Token);
+        try
+        {
+            // A long first-byte wait must not enter the throughput window.
+            await ReleaseReadPairAsync(TimeSpan.FromSeconds(60));
+            await ReleaseReadPairAsync(TimeSpan.FromSeconds(10));
+            Assert.Empty(backupOffsets);
+            if (sustainedSlow)
+                await ReleaseReadPairAsync(TimeSpan.FromSeconds(10));
+
+            if (cancelOnBackup)
+            {
+                await switched.Task.WaitAsync(cancellation.Token);
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
+                Assert.False(File.Exists(destination));
+            }
+            else
+            {
+                var result = await download;
+                Assert.Equal(sustainedSlow, result.FallbackUsed);
+                Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+                Assert.Equal(sustainedSlow ? mirrorOffsets.Where(offset => !fastTail || offset == probeLength)
+                        .Order().Select(offset => offset + 3L * chunkLength) : [],
+                    backupOffsets.Order());
+            }
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (!download.IsCompleted)
+            {
+                try { await download; }
+                catch (OperationCanceledException) { }
+            }
+        }
+
+        Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
+        AssertNoPendingFiles(destination);
+
+        async Task ReleaseReadPairAsync(TimeSpan elapsed)
+        {
+            var first = await waitingReads.Reader.ReadAsync(cancellation.Token);
+            var second = await waitingReads.Reader.ReadAsync(cancellation.Token);
+            clock.Advance(elapsed);
+            first.SetResult();
+            second.SetResult();
+        }
+    }
+
+    [Fact]
+    public void SchedulerSplitsTheMarkedSlowTailBeforeALargerRange()
+    {
+        const long unit = MinecraftDownloadRequestExecutor.SegmentedSplitThreshold;
+        var session = new AdaptiveSegmentDownloadSession(0, unit * 10, unit);
+        Assert.True(session.TryTake(out var first));
+        Assert.True(session.TryTakeQueuedOrSplit(out var slower, out _));
+        Assert.True(first!.RemainingLength > slower!.RemainingLength);
+        Assert.True(slower.TryPreferSplitting(unit));
+
+        Assert.True(session.TryTakeQueuedOrSplit(out var newTail, out var split));
+
+        Assert.Equal(slower.ChunkId, split!.Value.SourceChunkId);
+        Assert.Equal(slower.LogicalEnd + 1, newTail!.NextOffset);
+        Assert.Equal(split.Value.SourceOriginalEnd, newTail.LogicalEnd);
     }
 
     [Fact]
@@ -417,14 +791,16 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     public async Task CancellationCleansTemporaryFileAndReleasesDownloadSlots()
     {
         var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestCount = 0;
         var handler = new RecordingRequestHandler((_, request, _) =>
         {
-            started.TrySetResult(true);
+            if (Interlocked.Increment(ref requestCount) == 2)
+                started.TrySetResult(true);
             return Task.FromResult(CreateBlockingPartialResponse(request, LargePayload.Length));
         });
         using var client = CreateClient(handler);
         var limiter = new ImportConcurrencyLimiter();
-        limiter.SetMaximumDownloadConcurrency(4);
+        limiter.SetMaximumDownloadConcurrency(2);
         var destination = Path.Combine(TempRoot, "cancelled.jar");
         using var cancellation = new CancellationTokenSource();
 
@@ -450,7 +826,8 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
         HttpClient client,
         IImportConcurrencyLimiter? limiter = null,
         int maxAttempts = 1,
-        DownloadHostHealthTracker? health = null)
+        DownloadHostHealthTracker? health = null,
+        TimeProvider? timeProvider = null)
     {
         var effectiveLimiter = limiter;
         if (effectiveLimiter is null)
@@ -478,9 +855,9 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
                 delayAsync: static (_, _) => ValueTask.CompletedTask),
             bmclApiRequestRateLimiter: new BmclApiRequestRateLimiter(TimeSpan.Zero),
             nextRetryJitter: () => 0,
+            timeProvider: timeProvider,
             hostHealthTracker: health,
-            segmentedDownloadCoordinator: new SegmentedDownloadCoordinator(),
-            minimumSegmentedDownloadSize: TestSegmentedDownloadSize);
+            segmentedDownloadCoordinator: new SegmentedDownloadCoordinator());
     }
 
     private static RecordingRequestHandler FullResponseHandler(byte[] payload) =>
@@ -499,11 +876,12 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     private static HttpResponseMessage CreatePartialResponse(
         HttpRequestMessage request,
         byte[] payload,
-        bool corrupt = false)
+        bool corrupt = false,
+        long? maximumEnd = null)
     {
         var range = Assert.Single(request.Headers.Range!.Ranges);
         var start = range.From!.Value;
-        var end = range.To ?? payload.Length - 1;
+        var end = Math.Min(range.To ?? payload.Length - 1, maximumEnd ?? payload.Length - 1);
         var bytes = payload.AsSpan(
             checked((int)start),
             checked((int)(end - start + 1))).ToArray();
@@ -590,6 +968,38 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     }
 
     private sealed record RequestSnapshot(string? Range, string? IfRange);
+
+    private sealed class SteppedTimeProvider : TimeProvider
+    {
+        private long timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Read(ref timestamp);
+        public void Advance(TimeSpan elapsed) => Interlocked.Add(ref timestamp, elapsed.Ticks);
+    }
+
+    private sealed class SteppedRangeStream(
+        byte[] payload,
+        int start,
+        int length,
+        int chunkLength,
+        int steppedReads,
+        ChannelWriter<TaskCompletionSource> waitingReads) : MemoryStream(payload, start, length, writable: false)
+    {
+        private int reads;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (reads++ < steppedReads)
+            {
+                var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                await waitingReads.WriteAsync(released, cancellationToken);
+                await released.Task.WaitAsync(cancellationToken);
+                buffer = buffer[..Math.Min(chunkLength, buffer.Length)];
+            }
+
+            return await base.ReadAsync(buffer, cancellationToken);
+        }
+    }
 
     private sealed class TailBlockingStream(byte[] bytes) : MemoryStream(bytes, writable: false)
     {

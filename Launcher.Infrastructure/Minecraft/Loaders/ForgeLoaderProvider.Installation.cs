@@ -88,26 +88,6 @@ private async Task<string> InstallCoreAsync(
         {
             LoaderVersionDirectoryTransaction.EnsureLauncherProfileExists(installerMinecraftDirectory);
 
-            progress?.Report(new LauncherProgress(InstallProgressStages.DownloadingLoaderInstaller, string.Empty));
-            var installerDownloadStopwatch = Stopwatch.StartNew();
-        logger.LogInformation(
-                "Forge installer download started. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion}",
-                minecraftVersion,
-                selectedLoaderVersion);
-            await DownloadDiagnostics.RunStageAsync(logger, "InstallerDownload", () => DownloadInstallerAsync(
-                catalogEntry.InstallerUrl,
-                installerJarPath,
-                minecraftVersion,
-                downloadSourcePreference,
-                cancellationToken,
-                downloadSpeedLimitMbPerSecond,
-                speedMeter));
-        logger.LogInformation(
-                "Forge installer download completed. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion} DurationMs={DurationMs}",
-                minecraftVersion,
-                selectedLoaderVersion,
-                installerDownloadStopwatch.ElapsedMilliseconds);
-
             var installerArtifactService = new LoaderInstallerArtifactService(
                 httpClient,
                 installerRunner,
@@ -115,89 +95,17 @@ private async Task<string> InstallCoreAsync(
                 downloadSpeedLimitState,
                 logger,
                 tempRootDirectory);
-            var planReadStopwatch = Stopwatch.StartNew();
-            var installerPlan = await DownloadDiagnostics.RunStageAsync(logger, "InstallerPlan", () => installerArtifactService.ReadPlanAsync(installerJarPath, cancellationToken))
-                .ConfigureAwait(false);
-        logger.LogInformation(
-                "Forge installer plan read completed. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion} PrerequisiteLibraries={PrerequisiteLibraries} RuntimeLibraries={RuntimeLibraries} ProcessorOutputs={ProcessorOutputs} DurationMs={DurationMs}",
-                minecraftVersion,
-                selectedLoaderVersion,
-                installerPlan.PrerequisiteLibraries.Count,
-                installerPlan.RuntimeLibraries.Count,
-                installerPlan.ProcessorOutputs.Count,
-                planReadStopwatch.ElapsedMilliseconds);
-
-            var prerequisiteSeeder = new LoaderInstallerPrerequisiteSeeder(
-                httpClient,
-                downloadSpeedLimitState,
-                logger);
-            var prerequisitesStopwatch = Stopwatch.StartNew();
-        logger.LogDebug(
-                "Forge installer prerequisites preparation started. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion}",
-                minecraftVersion,
-                selectedLoaderVersion);
-            var workspaceSnapshot = await DownloadDiagnostics.RunStageAsync(logger, "BasePrerequisites", () => prerequisiteSeeder.SeedAsync(
-                sharedMinecraftDirectory,
-                installerMinecraftDirectory,
-                minecraftVersion,
-                installerJarPath,
-                downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond,
-                cancellationToken,
-                loaderCategory: "Forge")).ConfigureAwait(false);
-            var preparedInstaller = await DownloadDiagnostics.RunStageAsync(logger, "MappingsPreparation", () => installerArtifactService.PrepareClientInstallerAsync(
-                installerJarPath, installerPlan, minecraftVersion, installerMinecraftDirectory,
-                workspaceSnapshot.VerifiedVersionMetadata, downloadSourcePreference, downloadSpeedLimitMbPerSecond,
-                cancellationToken, downloadOperation, speedMeter)).ConfigureAwait(false);
-            installerPlan = preparedInstaller.Plan;
-            await DownloadDiagnostics.RunStageAsync(logger, "InstallerDependencies", () => installerArtifactService.MaterializePrerequisitesAsync(
-                installerJarPath,
-                installerPlan,
-                installerMinecraftDirectory,
-                downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond,
-                cancellationToken,
-                downloadOperation,
-                speedMeter)).ConfigureAwait(false);
-        logger.LogInformation(
-                "Forge installer prerequisites preparation completed. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion} LibraryCount={LibraryCount} DurationMs={DurationMs}",
-                minecraftVersion,
-                selectedLoaderVersion,
-                installerPlan.PrerequisiteLibraries.Count,
-                prerequisitesStopwatch.ElapsedMilliseconds);
-
-            var installerRunStopwatch = Stopwatch.StartNew();
-        logger.LogInformation(
-                "Forge Java installer process started. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion}",
-                minecraftVersion,
-                selectedLoaderVersion);
-            await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => RunForgeInstallerAsync(
-                installerJarPath,
-                preparedInstaller.ExecutionInstallerPath,
-                installerMinecraftDirectory,
-                sharedMinecraftDirectory,
-                minecraftVersion,
-                isolatedVersionName,
-                selectedLoaderVersion,
-                downloadSourcePreference,
-                progress,
-                cancellationToken,
-                downloadSpeedLimitMbPerSecond));
-        logger.LogInformation(
-                "Forge Java installer process completed. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion} DurationMs={DurationMs}",
-                minecraftVersion,
-                selectedLoaderVersion,
-                installerRunStopwatch.ElapsedMilliseconds);
-
-            await DownloadDiagnostics.RunStageAsync(logger, "RuntimeLibraries", () => installerArtifactService.MaterializeRuntimeLibrariesAsync(
-                installerJarPath,
-                installerPlan,
-                installerMinecraftDirectory,
-                downloadSourcePreference,
-                downloadSpeedLimitMbPerSecond,
-                cancellationToken,
-                downloadOperation,
-                speedMeter)).ConfigureAwait(false);
+            var prerequisiteSeeder = new LoaderInstallerPrerequisiteSeeder(httpClient, downloadSpeedLimitState, logger);
+            var (workspaceSnapshot, installerPlan) = await installerArtifactService.PrepareAndRunClientInstallerAsync(
+                installPathLayout, minecraftVersion, installerJarPath, "Forge",
+                token => DownloadInstallerAsync(catalogEntry.InstallerUrl, installerJarPath, minecraftVersion,
+                    downloadSourcePreference, token, downloadSpeedLimitMbPerSecond, speedMeter),
+                (installer, token) => DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => RunForgeInstallerAsync(
+                    installerJarPath, installer.ExecutionInstallerPath, installerMinecraftDirectory, sharedMinecraftDirectory,
+                    minecraftVersion, isolatedVersionName, selectedLoaderVersion, downloadSourcePreference, progress,
+                    token, downloadSpeedLimitMbPerSecond)),
+                prerequisiteSeeder, finalVersionInstaller, downloadSourcePreference, downloadSpeedLimitMbPerSecond,
+                downloadOperation, progress, speedMeter, cancellationToken).ConfigureAwait(false);
 
             var sandboxValidationStopwatch = Stopwatch.StartNew();
             var sandboxOutputs = await DownloadDiagnostics.RunStageAsync(logger, "ArtifactValidation", () => installerArtifactService.ValidatePublishedArtifactsAsync(

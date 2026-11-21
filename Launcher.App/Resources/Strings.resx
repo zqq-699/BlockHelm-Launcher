@@ -675,6 +675,7 @@
   <data name="Status_InstallingLoaderFormat" xml:space="preserve"><value>正在安装 {0} {1}...</value></data>
   <data name="Status_InstanceInstalledFormat" xml:space="preserve"><value>游戏 {0} 已安装</value></data>
   <data name="Status_InstallFailed" xml:space="preserve"><value>安装失败，请稍后重试。</value></data>
+  <data name="Status_MinecraftAssetInstallFailed" xml:space="preserve"><value>Minecraft 资源下载或校验失败，请稍后重试。</value></data>
   <data name="Status_ModpackPreparingArchive" xml:space="preserve"><value>正在准备整合包文件</value></data>
   <data name="Status_ModpackParsingManifest" xml:space="preserve"><value>正在解析整合包清单</value></data>
   <data name="Status_ModpackResolvingFiles" xml:space="preserve"><value>正在解析整合包文件</value></data>

@@ -41,6 +41,8 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
     private readonly List<SegmentedWrittenInterval> segmentedWrittenIntervals = [];
     private bool disposed;
 
+    public long SegmentedBytesWritten => Interlocked.Read(ref segmentedBytes);
+
     private ResumableDownloadFileSession(
         string destinationPath,
         string temporaryPath,
@@ -118,21 +120,17 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
         IDisposable? assetLock = null;
         try
         {
-            if (options.PersistenceMode is DownloadPersistenceMode.LightweightAtomic)
+            if (options.OperationContext is { } context
+                && (options.PersistenceMode is DownloadPersistenceMode.LightweightAtomic || context.HasRegisteredAsset(normalizedDestination)))
             {
-                assetLock = options.OperationContext is null
-                    ? null
-                    : await options.OperationContext.AcquireAssetLockAsync(normalizedDestination, cancellationToken).ConfigureAwait(false);
+                assetLock = await context.AcquireAssetLockAsync(normalizedDestination, cancellationToken).ConfigureAwait(false);
             }
 
             if (File.Exists(normalizedDestination))
             {
-                using var verifiedLease = options.PersistenceMode is DownloadPersistenceMode.LightweightAtomic
-                    ? options.OperationContext?.AcquireVerifiedFileLease(normalizedDestination, integrity)
-                    : null;
-                var trusted = options.PersistenceMode is DownloadPersistenceMode.LightweightAtomic
-                    && verifiedLease is not null;
-                if (trusted || await integrity.VerifyFileAsync(normalizedDestination, cancellationToken).ConfigureAwait(false))
+                using var verifiedLease = assetLock is not null
+                    ? options.OperationContext?.AcquireVerifiedFileLease(normalizedDestination, integrity) : null;
+                if (verifiedLease is not null || await integrity.VerifyFileAsync(normalizedDestination, cancellationToken).ConfigureAwait(false))
                 {
                     options.OperationContext?.MarkVerified(normalizedDestination, integrity);
                     return new ResumableDownloadFileSession(
@@ -290,8 +288,8 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
                 lock (segmentedProgressLock)
                 {
                     var newlyWritten = RecordSegmentedWrite(offset - accepted, offset - 1);
-                    segmentedBytes += newlyWritten;
-                    reportAttemptProgress?.Invoke(attemptNumber, segmentedBytes, knownTotalLength);
+                    var written = Interlocked.Add(ref segmentedBytes, newlyWritten);
+                    reportAttemptProgress?.Invoke(attemptNumber, written, knownTotalLength);
                 }
 
                 if (accepted < read)
@@ -331,8 +329,8 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
             throw SafeExceptionLog.Describe(new DownloadLocalFileException("Failed to flush the segmented download temporary file.", exception), "DownloadLocalFileException", ("Reason", "Failed to flush the segmented download temporary file."));
         }
 
-        if (knownTotalLength is null || Interlocked.Read(ref segmentedBytes) != knownTotalLength.Value)
-            throw SafeExceptionLog.Describe(new DownloadBodyInterruptedException("The segmented download did not write the expected number of bytes."), "DownloadBodyInterruptedException", ("Reason", "The segmented download did not write the expected number of bytes."), ("Artifact", temporaryPath), ("ExpectedBytes", knownTotalLength), ("ActualBytes", Interlocked.Read(ref segmentedBytes)));
+        if (knownTotalLength is null || SegmentedBytesWritten != knownTotalLength.Value)
+            throw SafeExceptionLog.Describe(new DownloadBodyInterruptedException("The segmented download did not write the expected number of bytes."), "DownloadBodyInterruptedException", ("Reason", "The segmented download did not write the expected number of bytes."), ("Artifact", temporaryPath), ("ExpectedBytes", knownTotalLength), ("ActualBytes", SegmentedBytesWritten));
         if (integrity.IsVerifiable
             && !await VerifyTemporaryAsync(cancellationToken).ConfigureAwait(false))
             throw integrity.DescribeFailure(new DownloadHashMismatchException("The segmented download did not match its expected hash."));
@@ -344,7 +342,7 @@ internal sealed class ResumableDownloadFileSession : IAsyncDisposable
     {
         segmentedDestination?.Dispose();
         segmentedDestination = null;
-        segmentedBytes = 0;
+        Interlocked.Exchange(ref segmentedBytes, 0);
         segmentedWrittenIntervals.Clear();
         knownTotalLength = null;
         sourceCandidateKey = null;

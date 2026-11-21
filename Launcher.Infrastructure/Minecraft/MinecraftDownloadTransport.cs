@@ -58,12 +58,15 @@ internal sealed class MinecraftDownloadTransport
         DownloadRequestHeaders? sensitiveHeaders = null,
         bool opportunisticAdmission = false,
         DownloadHostConcurrencyController.DownloadAdmissionLease? preacquiredAdmission = null,
-        Action? entryRedirected = null)
+        Action? entryRedirected = null,
+        Func<Uri, bool>? shouldAvoidHost = null,
+        Func<Uri, Uri, DownloadHostHealthTracker.RedispatchLease?>? tryAcquireRedispatch = null)
     {
         using var diagnosticRequest = DownloadDiagnostics.BeginRequest(logger);
         var originalUri = ParseHttpUri(actualUrl);
         var currentUri = originalUri;
         var suppliedAdmission = preacquiredAdmission;
+        DownloadHostHealthTracker.RedispatchLease? redispatchLease = null;
         var stopwatch = Stopwatch.StartNew();
         var redirects = new List<Uri>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -76,8 +79,35 @@ internal sealed class MinecraftDownloadTransport
             var admissionStopwatch = Stopwatch.StartNew();
             using var admissionHeartbeat = new Timer(_ => logger?.LogInformation("Download still waiting for admission. Host={Host} Stage=Admission QueueDurationMs={QueueDurationMs}", currentUri.Host, admissionStopwatch.ElapsedMilliseconds), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
             DownloadHostConcurrencyController.DownloadAdmissionLease? admissionLease = null;
+            var followingRedirect = false;
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (shouldAvoidHost?.Invoke(currentUri) == true)
+                {
+                    if (redirectCount > 0)
+                    {
+                        if (redispatchLease is not null)
+                        {
+                            redispatchLease.RecordRejectedRedirect(currentUri.Host);
+                        }
+                        else if ((redispatchLease = tryAcquireRedispatch?.Invoke(originalUri, currentUri)) is not null)
+                        {
+                            logger?.LogDebug("Requesting mirror entry again after skipping a cooled node. EntryHost={EntryHost} NodeHost={NodeHost}",
+                                originalUri.Host, currentUri.Host);
+                            DownloadNetworkObservation.Retried();
+                            currentUri = originalUri;
+                            redirectCount = -1;
+                            redirects.Clear();
+                            visited.Clear();
+                            visited.Add(originalUri.AbsoluteUri);
+                            followingRedirect = true;
+                            continue;
+                        }
+                    }
+                    throw new DownloadSourceAvoidedException();
+                }
+
                 if (suppliedAdmission is not null)
                 {
                     admissionLease = suppliedAdmission;
@@ -156,6 +186,7 @@ internal sealed class MinecraftDownloadTransport
                 response.Dispose();
                 redirects.Add(nextUri);
                 currentUri = nextUri;
+                followingRedirect = true;
             }
             catch (DownloadAttemptException exception)
             {
@@ -167,6 +198,8 @@ internal sealed class MinecraftDownloadTransport
             }
             finally
             {
+                if (!followingRedirect)
+                    redispatchLease?.Dispose();
                 if (admissionLease is not null)
                     await admissionLease.DisposeAsync().ConfigureAwait(false);
             }

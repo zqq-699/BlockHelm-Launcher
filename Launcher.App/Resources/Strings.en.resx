@@ -1963,6 +1963,9 @@ Longer content wraps automatically.</value>
   <data name="Status_InstallFailed" xml:space="preserve">
     <value>Installation failed. Please try again later.</value>
   </data>
+  <data name="Status_MinecraftAssetInstallFailed" xml:space="preserve">
+    <value>Minecraft assets could not be downloaded or verified. Please try again.</value>
+  </data>
   <data name="Status_ModpackPreparingArchive" xml:space="preserve">
     <value>Preparing modpack file</value>
   </data>

@@ -44,6 +44,8 @@ internal sealed class InstallCardProgressMapper : IProgress<LauncherProgress>, I
             InstallProgressStages.Queue => 0d,
             InstallProgressStages.Preparing => 4d,
             InstallProgressStages.DownloadingLoaderInstaller => MapLoaderBoundary(12d),
+            ImportProgressStages.InstallingMinecraftBase when hasExternalLoaderInstaller => MapLoaderBoundary(
+                12d + (14d * Math.Clamp(value.Percent ?? 0, 0, 100) / 100d)),
             InstallProgressStages.CheckingJava => MapLoaderBoundary(26d),
             InstallProgressStages.DownloadingJava => MapLoaderBoundary(
                 26d + (4d * Math.Clamp(value.Percent ?? 0, 0, 100) / 100d)),
