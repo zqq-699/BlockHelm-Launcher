@@ -97,8 +97,12 @@ private async Task<IReadOnlyDictionary<string, ForgeCatalogEntry>> GetCatalogAsy
                 },
                 statusCode => statusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest,
                 cancellationToken);
-            catalogCache[cacheKey] = result.Found ? result.Value! : EmptyCatalog();
-            return catalogCache[cacheKey];
+            if (!result.Found)
+                return catalogCache.TryGetValue(cacheKey, out var concurrentResult) ? concurrentResult : EmptyCatalog();
+
+            var catalog = result.Value!;
+            catalogCache[cacheKey] = catalog;
+            return catalog;
         }
         finally
         {

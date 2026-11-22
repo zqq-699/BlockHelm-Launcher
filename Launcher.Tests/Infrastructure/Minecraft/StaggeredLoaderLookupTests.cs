@@ -92,6 +92,67 @@ public sealed class StaggeredLoaderLookupTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ForgeConcurrentEmptyLookupCannotHideValidCatalog(bool validFinishesFirst)
+    {
+        var handler = new ConcurrentForgeCatalogHandler();
+        using var client = new HttpClient(handler);
+        var provider = new ForgeLoaderProvider(client);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var empty = provider.GetLoaderVersionsAsync("1.20.1", DownloadSourcePreference.Official,
+            timeout.Token, interactive: true);
+        await handler.EmptyStarted.Task.WaitAsync(timeout.Token);
+        var valid = provider.GetLoaderVersionsAsync("1.20.1", DownloadSourcePreference.Official,
+            timeout.Token);
+        await handler.ValidStarted.Task.WaitAsync(timeout.Token);
+
+        try
+        {
+            if (validFinishesFirst)
+            {
+                handler.ReleaseValid.TrySetResult();
+                Assert.Equal("47.2.0", Assert.Single(await valid.WaitAsync(timeout.Token)).Version);
+                handler.ReleaseEmpty.TrySetResult();
+                Assert.Equal("47.2.0", Assert.Single(await empty.WaitAsync(timeout.Token)).Version);
+            }
+            else
+            {
+                handler.ReleaseEmpty.TrySetResult();
+                Assert.Empty(await empty.WaitAsync(timeout.Token));
+                handler.ReleaseValid.TrySetResult();
+                Assert.Equal("47.2.0", Assert.Single(await valid.WaitAsync(timeout.Token)).Version);
+            }
+
+            var cached = await provider.GetLoaderVersionsAsync("1.20.1", DownloadSourcePreference.Official,
+                timeout.Token, interactive: true).WaitAsync(timeout.Token);
+            Assert.Equal("47.2.0", Assert.Single(cached).Version);
+        }
+        finally
+        {
+            handler.ReleaseEmpty.TrySetResult();
+            handler.ReleaseValid.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task ForgeEmptyCatalogCanBeRetriedWhenVersionsBecomeAvailable()
+    {
+        var handler = new ConcurrentForgeCatalogHandler();
+        handler.ReleaseEmpty.TrySetResult();
+        handler.ReleaseValid.TrySetResult();
+        using var client = new HttpClient(handler);
+        var provider = new ForgeLoaderProvider(client);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        Assert.Empty(await provider.GetLoaderVersionsAsync("1.20.1", DownloadSourcePreference.Official,
+            timeout.Token, interactive: true).WaitAsync(timeout.Token));
+        var retried = await provider.GetLoaderVersionsAsync("1.20.1", DownloadSourcePreference.Official,
+            timeout.Token, interactive: true).WaitAsync(timeout.Token);
+        Assert.Equal("47.2.0", Assert.Single(retried).Version);
+    }
+
+    [Theory]
     [InlineData(HttpStatusCode.NotFound, "")]
     [InlineData(HttpStatusCode.OK, "empty")]
     [InlineData(HttpStatusCode.InternalServerError, "")]
@@ -202,6 +263,34 @@ public sealed class StaggeredLoaderLookupTests
         nextRetryJitter: () => 0);
 
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private sealed class ConcurrentForgeCatalogHandler : HttpMessageHandler
+    {
+        private int officialRequests;
+        public TaskCompletionSource EmptyStarted { get; } = NewSignal();
+        public TaskCompletionSource ValidStarted { get; } = NewSignal();
+        public TaskCompletionSource ReleaseEmpty { get; } = NewSignal();
+        public TaskCompletionSource ReleaseValid { get; } = NewSignal();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.Host != "files.minecraftforge.net")
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            if (Interlocked.Increment(ref officialRequests) == 1)
+            {
+                EmptyStarted.TrySetResult();
+                await ReleaseEmpty.Task.WaitAsync(cancellationToken);
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            ValidStarted.TrySetResult();
+            await ReleaseValid.Task.WaitAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("<html>https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.2.0/forge-1.20.1-47.2.0-installer.jar</html>")
+            };
+        }
+    }
 
     private sealed class ScriptedHandler(bool ignoreCancellation = false) : HttpMessageHandler
     {

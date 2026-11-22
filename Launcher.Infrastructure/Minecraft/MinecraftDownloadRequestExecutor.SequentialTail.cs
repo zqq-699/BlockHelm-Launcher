@@ -96,7 +96,7 @@ internal sealed partial class MinecraftDownloadRequestExecutor
                     request.Headers.TryAddWithoutValidation("If-Range", validator);
             }, sensitiveHeaders, preacquiredAdmission: admission, shouldAvoidHost: target => target != uri).ConfigureAwait(false);
 
-            var response = result.Response;
+            using var response = result.Response;
             var expected = new DownloadSegmentRange(range.Start, range.TotalLength - 1, range.TotalLength, 0);
             var actual = ValidateSegmentResponse(response, expected, range.StrongETag);
             if (actual.End != expected.End || range.StrongETag is null && range.LastModified is { } modified

@@ -134,6 +134,40 @@ public sealed class InstanceAuthoritativeVersionLoaderTests : TestTempDirectory
     }
 
     [Fact]
+    public async Task UnreadableUnrelatedVersionDoesNotBlockHealthyVersionOrUseRemoteParent()
+    {
+        var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");
+        WriteVersionJson(minecraftDirectory, "healthy",
+            """{"id":"healthy","mainClass":"example.Main","libraries":[],"arguments":{"game":[],"jvm":["-cp","${classpath}"]}}""");
+        WriteVersionJson(minecraftDirectory, "child",
+            """{"id":"child","inheritsFrom":"unreadable","mainClass":"example.Child","libraries":[]}""");
+        var unreadableDirectory = Path.Combine(minecraftDirectory, "versions", "unreadable");
+        Directory.CreateDirectory(unreadableDirectory);
+        var candidate = Path.Combine(unreadableDirectory, "different-name.json");
+        await File.WriteAllTextAsync(candidate, """{"id":"unreadable","mainClass":"example.Parent","libraries":[]}""");
+        using var locked = new FileStream(candidate, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var path = new MinecraftPath(minecraftDirectory);
+        var remoteRequested = false;
+        var loader = new InstanceAuthoritativeVersionLoader(path, (_, _) =>
+        {
+            remoteRequested = true;
+            throw new InvalidOperationException("Remote metadata must not replace an unreadable local version.");
+        });
+
+        var versions = await loader.GetVersionMetadatasAsync();
+        var healthy = await versions.GetAndSaveVersionAsync("healthy", path, CancellationToken.None);
+        Assert.Equal("example.Main", healthy.MainClass);
+        var launcher = VanillaLoaderProvider.CreateLauncher(minecraftDirectory, progress: null);
+        using var process = await launcher.BuildProcessAsync("healthy", new MLaunchOption { JavaPath = "java.exe" });
+        Assert.Contains("example.Main", process.StartInfo.Arguments, StringComparison.Ordinal);
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            versions.GetAndSaveVersionAsync("unreadable", path, CancellationToken.None));
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            versions.GetAndSaveVersionAsync("child", path, CancellationToken.None));
+        Assert.False(remoteRequested);
+    }
+
+    [Fact]
     public async Task MissingOfficialParentIsResolvedInMemoryWithoutWritingEitherVersion()
     {
         var minecraftDirectory = Path.Combine(TempRoot, ".minecraft");

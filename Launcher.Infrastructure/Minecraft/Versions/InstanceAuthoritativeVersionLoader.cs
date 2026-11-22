@@ -14,6 +14,7 @@ using CmlLib.Core;
 using CmlLib.Core.Version;
 using CmlLib.Core.VersionLoader;
 using CmlLib.Core.VersionMetadata;
+using Microsoft.Extensions.Logging;
 
 namespace Launcher.Infrastructure.Minecraft;
 
@@ -23,7 +24,8 @@ namespace Launcher.Infrastructure.Minecraft;
 /// </summary>
 internal sealed class InstanceAuthoritativeVersionLoader(
     MinecraftPath minecraftPath,
-    Func<string, CancellationToken, Task<JsonObject>> resolveMissingParentAsync)
+    Func<string, CancellationToken, Task<JsonObject>> resolveMissingParentAsync,
+    ILogger? logger = null)
     : IVersionLoader
 {
     private const int MaximumInheritanceDepth = 10;
@@ -33,21 +35,49 @@ internal sealed class InstanceAuthoritativeVersionLoader(
     public async ValueTask<VersionMetadataCollection> GetVersionMetadatasAsync(
         CancellationToken cancellationToken = default)
     {
-        var localVersions = Directory.Exists(minecraftPath.Versions)
-            ? Directory.EnumerateDirectories(minecraftPath.Versions)
-                .Where(p => InstanceDirectoryClassifier.IsInstanceDirectory(p)
-                    && PendingInstanceRenameMarkerFile.Read(p).Status == PendingInstanceRenameMarkerStatus.Missing)
-                .Select(p => (Path.GetFileName(p), InstanceVersionFiles.TryResolveVersionJsonPath(p, Path.GetFileName(p))))
-                .Where(p => p.Item2 is not null).Select(p => (p.Item1, p.Item2!)).ToArray()
-            : [];
+        var localVersions = new List<(string Name, string? Path, Exception? Error)>();
+        if (Directory.Exists(minecraftPath.Versions))
+        {
+            foreach (var directory in Directory.EnumerateDirectories(minecraftPath.Versions))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!InstanceDirectoryClassifier.IsInstanceDirectory(directory))
+                    continue;
+                var name = Path.GetFileName(directory);
+                try
+                {
+                    var marker = PendingInstanceRenameMarkerFile.Read(directory);
+                    if (marker.Status == PendingInstanceRenameMarkerStatus.Unreadable)
+                        throw marker.Exception ?? new IOException("Unable to read the instance rename marker.");
+                    if (marker.Status != PendingInstanceRenameMarkerStatus.Missing)
+                        continue;
+                    var path = InstanceVersionFiles.TryResolveVersionJsonPath(directory, name);
+                    if (path is not null)
+                        localVersions.Add((name, path, null));
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    logger?.LogWarning(exception, "Unable to read local version metadata during launch discovery. InstanceDirectory={InstanceDirectory}", directory);
+                    // Preserve the local name so an unreadable parent cannot be replaced with remote metadata.
+                    localVersions.Add((name, null, exception));
+                }
+            }
+        }
         var knownNames = localVersions
-            .Select(version => version.Item1)
+            .Select(version => version.Name)
             .ToHashSet(StringComparer.Ordinal);
-        var metadata = new List<IVersionMetadata>(localVersions.Length);
+        var metadata = new List<IVersionMetadata>(localVersions.Count);
         var missingParentNames = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var (name, path) in localVersions)
+        foreach (var (name, path, error) in localVersions)
         {
+            if (error is not null)
+            {
+                metadata.Add(new UnreadableLocalVersionMetadata(name, error));
+                continue;
+            }
+            if (path is null)
+                continue;
             metadata.Add(new ReadOnlyLocalVersionMetadata(name, path));
 
             var parentName = await TryReadParentNameAsync(path, cancellationToken).ConfigureAwait(false);
@@ -148,6 +178,18 @@ internal sealed class InstanceAuthoritativeVersionLoader(
             cancellationToken.ThrowIfCancellationRequested();
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class UnreadableLocalVersionMetadata(string name, Exception error) : IVersionMetadata
+    {
+        public string Name => name;
+        public string? Type => "local";
+        public DateTimeOffset ReleaseTime => default;
+        public Task<IVersion> GetVersionAsync(CancellationToken cancellationToken = default) =>
+            cancellationToken.IsCancellationRequested ? Task.FromCanceled<IVersion>(cancellationToken) : Task.FromException<IVersion>(error);
+        public Task<IVersion> GetAndSaveVersionAsync(MinecraftPath path, CancellationToken cancellationToken = default) => GetVersionAsync(cancellationToken);
+        public Task SaveVersionAsync(MinecraftPath path, CancellationToken cancellationToken = default) =>
+            cancellationToken.IsCancellationRequested ? Task.FromCanceled(cancellationToken) : Task.FromException(error);
     }
 
     private sealed class ReadOnlyRemoteVersionMetadata(

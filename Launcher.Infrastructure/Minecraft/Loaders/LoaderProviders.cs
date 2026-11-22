@@ -361,7 +361,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
                 downloadSpeedLimitMbPerSecond,
                 downloadSpeedLimitState,
                 logger,
-                cancellationToken));
+                cancellationToken),
+            logger);
         runtimeHttpClient ??= MinecraftHttpClientFactory.CreateTransportClient(logger: logger, connectionPurpose: "MinecraftContent");
         var runtimeExecutor = new MinecraftDownloadRequestExecutor(
             runtimeHttpClient,

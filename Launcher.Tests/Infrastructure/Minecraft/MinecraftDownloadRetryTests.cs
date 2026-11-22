@@ -39,6 +39,7 @@ public sealed class MinecraftDownloadRetryTests
     [InlineData("valid")]
     [InlineData("lightweight")]
     [InlineData("ignored")]
+    [InlineData("invalid-range")]
     [InlineData("wrong-hash")]
     [InlineData("slow-tail")]
     [InlineData("busy")]
@@ -51,6 +52,7 @@ public sealed class MinecraftDownloadRetryTests
         var clock = new ManualTimeProvider();
         var releasePrimary = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var tailRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        TrackingByteArrayContent? rejectedTailContent = null;
         using var primary = new SlowStartDownloadStream(payload, clock, releasePrimary.Task);
         var logger = new CollectingLogger
         {
@@ -84,7 +86,17 @@ public sealed class MinecraftDownloadRetryTests
             if (outcome is "slow-tail" or "ignored")
                 releasePrimary.TrySetResult();
             if (outcome == "ignored")
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+            {
+                rejectedTailContent = new TrackingByteArrayContent(payload);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = rejectedTailContent });
+            }
+
+            if (outcome == "invalid-range")
+            {
+                rejectedTailContent = new TrackingByteArrayContent(payload[(int)start..]);
+                rejectedTailContent.Headers.ContentRange = new ContentRangeHeaderValue(0, payload.LongLength - 1, payload.LongLength);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = rejectedTailContent });
+            }
 
             var tailBytes = payload[(int)start..];
             if (outcome == "wrong-hash")
@@ -127,6 +139,8 @@ public sealed class MinecraftDownloadRetryTests
                 Assert.Equal(destination, Assert.Single(Directory.GetFiles(directory)));
             }
             Assert.Equal(0, concurrency.DownloadSnapshot.ActiveCount);
+            if (outcome is "ignored" or "invalid-range")
+                Assert.True(Assert.IsType<TrackingByteArrayContent>(rejectedTailContent).IsDisposed);
         }
         finally
         {
@@ -1852,6 +1866,17 @@ public sealed class MinecraftDownloadRetryTests
                 header => string.Join(",", header.Value),
                 StringComparer.OrdinalIgnoreCase));
             return callback(Interlocked.Increment(ref requestCount), request, cancellationToken);
+        }
+    }
+
+    private sealed class TrackingByteArrayContent(byte[] content) : ByteArrayContent(content)
+    {
+        public bool IsDisposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) IsDisposed = true;
+            base.Dispose(disposing);
         }
     }
 
