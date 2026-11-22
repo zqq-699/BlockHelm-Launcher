@@ -60,7 +60,8 @@ internal sealed class MinecraftDownloadTransport
         DownloadHostConcurrencyController.DownloadAdmissionLease? preacquiredAdmission = null,
         Action? entryRedirected = null,
         Func<Uri, bool>? shouldAvoidHost = null,
-        Func<Uri, Uri, DownloadHostHealthTracker.RedispatchLease?>? tryAcquireRedispatch = null)
+        Func<Uri, Uri, DownloadHostHealthTracker.RedispatchLease?>? tryAcquireRedispatch = null,
+        bool logResponse = true)
     {
         using var diagnosticRequest = DownloadDiagnostics.BeginRequest(logger);
         var originalUri = ParseHttpUri(actualUrl);
@@ -68,6 +69,7 @@ internal sealed class MinecraftDownloadTransport
         var suppliedAdmission = preacquiredAdmission;
         DownloadHostHealthTracker.RedispatchLease? redispatchLease = null;
         var stopwatch = Stopwatch.StartNew();
+        var queueDuration = TimeSpan.Zero;
         var redirects = new List<Uri>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -80,6 +82,8 @@ internal sealed class MinecraftDownloadTransport
             using var admissionHeartbeat = new Timer(_ => logger?.LogInformation("Download still waiting for admission. Host={Host} Stage=Admission QueueDurationMs={QueueDurationMs}", currentUri.Host, admissionStopwatch.ElapsedMilliseconds), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
             DownloadHostConcurrencyController.DownloadAdmissionLease? admissionLease = null;
             var followingRedirect = false;
+            var admissionCompleted = false;
+            string? requestedRange = null;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -124,18 +128,19 @@ internal sealed class MinecraftDownloadTransport
                         currentUri,
                         cancellationToken).ConfigureAwait(false);
                 }
+                queueDuration += admissionStopwatch.Elapsed;
+                admissionCompleted = true;
                 admissionHeartbeat.Change(Timeout.Infinite, Timeout.Infinite);
-                logger?.LogDebug("Download HTTP request started. Method=GET Host={Host} Redirect={Redirect} QueueDurationMs={QueueDurationMs} HeadersTimeoutMs={HeadersTimeoutMs}", currentUri.Host, redirectCount, admissionStopwatch.ElapsedMilliseconds, retryOptions.ResponseHeadersTimeout.TotalMilliseconds);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(retryOptions.ResponseHeadersTimeout);
-                var response = await SendSingleAsync(
+                var (response, range) = await SendSingleAsync(
                     currentUri,
                     timeout.Token,
                     cancellationToken,
                     configureRequest,
                     sensitiveHeaders)
                     .ConfigureAwait(false);
-                logger?.LogDebug("Download HTTP headers received. Host={Host} StatusCode={StatusCode} HttpVersion={HttpVersion} ContentType={ContentType} ContentLength={ContentLength} ContentRange={ContentRange} RetryAfter={RetryAfter} DurationMs={DurationMs}", currentUri.Host, (int)response.StatusCode, response.Version, response.Content.Headers.ContentType?.MediaType, response.Content.Headers.ContentLength, response.Content.Headers.ContentRange?.ToString(), response.Headers.RetryAfter?.ToString(), stopwatch.ElapsedMilliseconds);
+                requestedRange = range;
                 if (!IsRedirect(response.StatusCode))
                 {
                     var result = new DownloadTransportResult(
@@ -144,8 +149,19 @@ internal sealed class MinecraftDownloadTransport
                         currentUri,
                         currentUri.Host,
                         redirects,
-                        stopwatch.Elapsed,
+                        stopwatch.Elapsed - queueDuration,
+                        queueDuration,
+                        requestedRange,
                         admissionLease);
+                    if (logResponse && logger?.IsEnabled(LogLevel.Debug) == true)
+                    {
+                        logger.LogDebug(
+                            "Download HTTP response received. EntryHost={EntryHost} FinalUrl={FinalUrl} RedirectHosts={RedirectHosts} StatusCode={StatusCode} HttpVersion={HttpVersion} RequestedRange={RequestedRange} ContentRange={ContentRange} ContentLength={ContentLength} RetryAfter={RetryAfter} QueueMs={QueueMs} HeadersMs={HeadersMs}",
+                            originalUri.Host, DownloadUriLogSanitizer.Sanitize(currentUri), result.RedirectHosts,
+                            (int)response.StatusCode, response.Version, requestedRange, response.Content.Headers.ContentRange?.ToString(),
+                            response.Content.Headers.ContentLength, response.Headers.RetryAfter?.ToString(),
+                            (long)queueDuration.TotalMilliseconds, (long)result.ResponseHeadersDuration.TotalMilliseconds);
+                    }
                     admissionLease = null;
                     return result;
                 }
@@ -190,11 +206,20 @@ internal sealed class MinecraftDownloadTransport
             }
             catch (DownloadAttemptException exception)
             {
-                logger?.LogWarning(exception, "Download HTTP request failed. Host={Host} Redirect={Redirect} DurationMs={DurationMs} FailureReason={FailureReason}", currentUri.Host, redirectCount, stopwatch.ElapsedMilliseconds, exception.Reason);
-                throw exception
+                var waiting = queueDuration + (admissionCompleted ? TimeSpan.Zero : admissionStopwatch.Elapsed);
+                exception
                     .WithRedirectCount(redirectCount)
                     .WithFinalHost(currentUri.Host)
-                    .WithFinalOrigin(DownloadHostConcurrencyController.NormalizeOrigin(currentUri));
+                    .WithFinalOrigin(DownloadHostConcurrencyController.NormalizeOrigin(currentUri))
+                    .WithDetail("EntryUrl", DownloadUriLogSanitizer.Sanitize(originalUri))
+                    .WithDetail("FinalUrl", DownloadUriLogSanitizer.Sanitize(currentUri))
+                    .WithDetail("RedirectHosts", string.Join(" -> ", redirects.Select(uri => uri.Host)))
+                    .WithDetail("QueueDurationMs", waiting.TotalMilliseconds)
+                    .WithDetail("HeadersTimeoutMs", retryOptions.ResponseHeadersTimeout.TotalMilliseconds);
+                if (requestedRange is not null)
+                    exception.WithDetail("RequestedRange", requestedRange);
+                logger?.LogWarning(exception, "Download HTTP request failed. Host={Host} Redirect={Redirect} DurationMs={DurationMs} FailureReason={FailureReason}", currentUri.Host, redirectCount, stopwatch.ElapsedMilliseconds, exception.Reason);
+                throw;
             }
             finally
             {
@@ -206,13 +231,14 @@ internal sealed class MinecraftDownloadTransport
         }
     }
 
-    private async Task<HttpResponseMessage> SendSingleAsync(
+    private async Task<(HttpResponseMessage Response, string? RequestedRange)> SendSingleAsync(
         Uri uri,
         CancellationToken timeoutToken,
         CancellationToken callerToken,
         Action<HttpRequestMessage>? configureRequest,
         DownloadRequestHeaders? sensitiveHeaders)
     {
+        string? requestedRange = null;
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri)
@@ -226,12 +252,13 @@ internal sealed class MinecraftDownloadTransport
                 throw InvalidRedirect("The configured download request URI changed before it was sent.");
             }
             sensitiveHeaders?.ApplyIfAllowed(request);
-            logger?.LogDebug("Download HTTP sending. Host={Host} RequestedRange={RequestedRange}", uri.Host, request.Headers.Range?.ToString());
+            requestedRange = request.Headers.Range?.ToString();
             DownloadNetworkObservation.Sent();
-            return await httpClient.SendAsync(
+            var response = await httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 timeoutToken).ConfigureAwait(false);
+            return (response, requestedRange);
         }
         catch (OperationCanceledException exception) when (!callerToken.IsCancellationRequested)
         {
@@ -239,14 +266,14 @@ internal sealed class MinecraftDownloadTransport
                 DownloadFailureDisposition.RetryCurrentSource,
                 DownloadFailureReason.ResponseHeadersTimeout,
                 $"The source did not return response headers within {retryOptions.ResponseHeadersTimeout}.",
-                exception);
+                exception).WithDetail("RequestedRange", requestedRange);
         }
         catch (HttpRequestException exception)
             when (exception.HttpRequestError is HttpRequestError.ConfigurationLimitExceeded)
         {
             throw InvalidRedirect(
                 "The HTTP redirect chain was invalid or exceeded the transport limit.",
-                exception);
+                exception).WithDetail("RequestedRange", requestedRange);
         }
         catch (HttpRequestException exception)
         {
@@ -254,7 +281,7 @@ internal sealed class MinecraftDownloadTransport
                 DownloadFailureDisposition.RetryCurrentSource,
                 DownloadFailureReason.Network,
                 "The HTTP request failed before response headers were received.",
-                exception);
+                exception).WithDetail("RequestedRange", requestedRange);
         }
     }
 

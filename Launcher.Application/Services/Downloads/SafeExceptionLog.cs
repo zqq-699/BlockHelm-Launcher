@@ -65,8 +65,7 @@ public static class SafeExceptionLog
 
         static string BoundedText(string value)
         {
-            // Do not slice a potentially secret value before redaction. Large fields are omitted as a whole;
-            // process output has already been recorded incrementally in its own safe events.
+            // Do not slice a potentially secret value before redaction. Large fields are omitted as a whole.
             if (value.Length > MaximumFieldCharacters) return "<diagnostic-field-truncated>";
             return SensitiveLogText.Redact(value);
         }

@@ -9,10 +9,15 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Threading.Channels;
+using Launcher.App.Logging;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.Minecraft;
 using Launcher.Infrastructure.Modpacks;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 
 namespace Launcher.Tests.Infrastructure.Minecraft;
 
@@ -22,6 +27,38 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     private const int TestSegmentedDownloadSize = 2 * 1024 * 1024;
     private static readonly byte[] LargePayload = CreatePayload(
         TestSegmentedDownloadSize);
+
+    [Fact]
+    public async Task OneMebibyteFileDownloadsWithVerifiedRanges()
+    {
+        var payload = CreatePayload(1024 * 1024);
+        var handler = new RecordingRequestHandler((_, request, _) =>
+            Task.FromResult(CreatePartialResponse(request, payload)));
+        using var client = CreateClient(handler);
+        var destination = Path.Combine(TempRoot, "small-segmented.jar");
+
+        await CreateExecutor(client).DownloadFileAsync(DownloadUrl, DownloadSourcePreference.Official,
+            "ThirdParty", destination, Sha1(payload), payload.Length, CancellationToken.None);
+
+        Assert.True(handler.RequestCount >= 2);
+        Assert.All(handler.RangeHeaders, range => Assert.NotNull(range));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+        AssertNoPendingFiles(destination);
+    }
+
+    [Theory]
+    [InlineData(256 * 1024 - 1, false)]
+    [InlineData(256 * 1024, true)]
+    public void ActiveRangeCanSplitAtTheNewThreshold(int remaining, bool canSplit)
+    {
+        var session = new AdaptiveSegmentDownloadSession(0, remaining,
+            MinecraftDownloadRequestExecutor.SegmentedSplitThreshold);
+        Assert.True(session.TryTake(out var original));
+
+        Assert.Equal(canSplit, session.TryTakeQueuedOrSplit(out var tail, out _));
+        if (canSplit)
+            Assert.Equal(remaining, original!.RemainingLength + tail!.RemainingLength);
+    }
 
     [Theory]
     [InlineData(false)]
@@ -240,6 +277,82 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
 
         Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
         AssertNoPendingFiles(destination);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SlowProbeIsSplitAfterOtherRangesFinishAndFileRemainsValid(bool cancelAfterSplit)
+    {
+        const int probeLength = 1024 * 1024;
+        var payload = CreatePayload(probeLength + 1536 * 1024);
+        var clock = new SteppedTimeProvider();
+        var reads = Channel.CreateUnbounded<TaskCompletionSource>();
+        var otherRangesFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var probeTailStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new RecordingRequestHandler((_, request, _) =>
+        {
+            var range = Assert.Single(request.Headers.Range!.Ranges);
+            var start = range.From!.Value;
+            if (start > 0 && start < probeLength)
+                probeTailStarted.TrySetResult();
+            if (start != 0)
+                return Task.FromResult(CreatePartialResponse(request, payload));
+            var response = new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                RequestMessage = request,
+                Content = new StreamContent(new SteppedRangeStream(payload, 0, payload.Length, 32 * 1024, 3, reads.Writer))
+            };
+            response.Content.Headers.ContentLength = payload.Length;
+            response.Content.Headers.ContentRange = new ContentRangeHeaderValue(0, payload.Length - 1, payload.Length);
+            return Task.FromResult(response);
+        });
+        using var client = CreateClient(handler);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var limiter = new ImportConcurrencyLimiter();
+        limiter.SetMaximumDownloadConcurrency(2);
+        var destination = Path.Combine(TempRoot, "split-slow-probe.jar");
+        var download = CreateExecutor(client, limiter, timeProvider: clock).DownloadFileAsync(
+            DownloadUrl, DownloadSourcePreference.Official, "ThirdParty", destination, Sha1(payload), payload.Length,
+            cancellation.Token, reportAttemptProgress: (_, written, _) =>
+            {
+                if (written == payload.Length - probeLength)
+                    otherRangesFinished.TrySetResult();
+            });
+        try
+        {
+            var first = await reads.Reader.ReadAsync(cancellation.Token);
+            await otherRangesFinished.Task.WaitAsync(cancellation.Token);
+            first.SetResult();
+            var second = await reads.Reader.ReadAsync(cancellation.Token);
+            clock.Advance(TimeSpan.FromSeconds(10));
+            second.SetResult();
+            var third = await reads.Reader.ReadAsync(cancellation.Token);
+            await probeTailStarted.Task.WaitAsync(cancellation.Token);
+            if (cancelAfterSplit)
+            {
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
+                Assert.False(File.Exists(destination));
+            }
+            else
+            {
+                third.SetResult();
+                await download.WaitAsync(cancellation.Token);
+                Assert.Equal(payload, await File.ReadAllBytesAsync(destination));
+            }
+            AssertNoPendingFiles(destination);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (!download.IsCompleted)
+            {
+                try { await download; }
+                catch (OperationCanceledException) { }
+            }
+        }
+        Assert.Equal(0, limiter.DownloadSnapshot.ActiveCount);
     }
 
     [Fact]
@@ -608,6 +721,23 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     }
 
     [Fact]
+    public void ProbeIsOnlySplittableAfterMarkedSlow()
+    {
+        const int threshold = 256 * 1024;
+        var session = new AdaptiveSegmentDownloadSession(1024 * 1024, 2 * 1024 * 1024, threshold);
+        var probe = new AdaptiveDownloadSegment(0, 0, 1024 * 1024 - 1, 2 * 1024 * 1024);
+        session.TrackProbe(probe);
+        Assert.True(session.TryTake(out var remaining));
+        Assert.False(session.TrySplitLargest(out var noProbeSplit) && noProbeSplit.SourceChunkId == 0);
+        Assert.True(probe.TryPreferSplitting(threshold));
+        Assert.True(session.TrySplitLargest(out var probeSplit));
+        Assert.Equal(0, probeSplit.SourceChunkId);
+        Assert.True(probeSplit.SourceWasActive);
+        Assert.Equal(probe.LogicalEnd + 1, probeSplit.NewStart);
+        Assert.NotNull(remaining);
+    }
+
+    [Fact]
     public async Task UnverifiedLargeFileUsesRangesOnlyWithStableStrongEtag()
     {
         var handler = new RecordingRequestHandler((_, request, _) =>
@@ -720,20 +850,30 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
         using var client = CreateClient(handler);
         var destination = Path.Combine(TempRoot, "invalid-range.jar");
 
-        await CreateExecutor(client).DownloadFileAsync(
-            DownloadUrl,
-            DownloadSourcePreference.Official,
-            "ThirdParty",
-            destination,
-            Sha1(LargePayload),
-            LargePayload.Length,
-            CancellationToken.None);
+        using (var sink = LauncherLogConfiguration.CreateLogger(new LoggingLevelSwitch(LogEventLevel.Verbose),
+            new LoggingLevelSwitch(LogEventLevel.Warning), TempRoot))
+        using (var factory = LoggerFactory.Create(builder => builder.AddSerilog(sink, false)))
+        {
+            await CreateExecutor(client, logger: factory.CreateLogger("RangeFallbackTest")).DownloadFileAsync(
+                DownloadUrl,
+                DownloadSourcePreference.Official,
+                "ThirdParty",
+                destination,
+                Sha1(LargePayload),
+                LargePayload.Length,
+                CancellationToken.None);
+        }
 
         Assert.Equal(2, handler.RequestCount);
         Assert.NotNull(handler.RangeHeaders.ElementAt(0));
         Assert.Null(handler.RangeHeaders.ElementAt(1));
         Assert.Equal(LargePayload, await File.ReadAllBytesAsync(destination));
         AssertNoPendingFiles(destination);
+        var log = string.Join('\n', Directory.GetFiles(TempRoot, "bhl*.log").Select(File.ReadAllText));
+        Assert.Contains("RequestedRange=\"bytes=0-", log);
+        Assert.Contains($"ContentRange=\"bytes 1-2/{LargePayload.Length}\"", log);
+        Assert.Contains("ResponseStatusCode=206", log);
+        Assert.Contains("will use the existing single-stream path", log);
     }
 
     [Fact]
@@ -827,7 +967,8 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
         IImportConcurrencyLimiter? limiter = null,
         int maxAttempts = 1,
         DownloadHostHealthTracker? health = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Microsoft.Extensions.Logging.ILogger? logger = null)
     {
         var effectiveLimiter = limiter;
         if (effectiveLimiter is null)
@@ -839,6 +980,7 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
 
         return new MinecraftDownloadRequestExecutor(
             client,
+            logger,
             limiter: effectiveLimiter,
             category: DownloadConcurrencyCategory.Runtime,
             retryOptions: new DownloadRetryOptions

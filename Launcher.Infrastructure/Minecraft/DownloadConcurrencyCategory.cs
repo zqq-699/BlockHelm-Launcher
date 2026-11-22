@@ -23,5 +23,6 @@ internal enum DownloadConcurrencyCategory
 {
     Metadata = 0,
     Modpack = 1,
-    Runtime = 2
+    Runtime = 2,
+    InteractiveVersionCatalog = 3
 }

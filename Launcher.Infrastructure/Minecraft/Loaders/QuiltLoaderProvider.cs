@@ -54,7 +54,8 @@ public sealed class QuiltLoaderProvider : ILoaderProvider, ISeparatedInstallPath
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
         CancellationToken cancellationToken = default,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false)
     {
         logger.LogDebug(
             "Loading Quilt versions. MinecraftVersion={MinecraftVersion}",
@@ -64,7 +65,7 @@ public sealed class QuiltLoaderProvider : ILoaderProvider, ISeparatedInstallPath
             httpClient,
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-            category: DownloadConcurrencyCategory.Metadata);
+            category: interactive ? DownloadConcurrencyCategory.InteractiveVersionCatalog : DownloadConcurrencyCategory.Metadata);
         var result = await executor.ExecuteStaggeredLookupAsync(
             $"https://meta.quiltmc.org/v3/versions/loader/{minecraftVersion}",
             downloadSourcePreference,
@@ -200,7 +201,8 @@ public sealed class QuiltLoaderProvider : ILoaderProvider, ISeparatedInstallPath
                 downloadSpeedLimitMbPerSecond,
                 downloadSpeedLimitState,
                 downloadOperation,
-                speedMeter);
+                speedMeter,
+                runtimeHttpClient: httpClient);
             VanillaLoaderProvider.AttachProgress(launcher, progress);
             var finalVersionName = await ComposedVersionInstallRunner.RunAsync(
                 token => QuiltVersionComposer.PrepareFinalVersionAsync(

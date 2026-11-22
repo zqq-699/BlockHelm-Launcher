@@ -614,7 +614,8 @@ public sealed class GameFileIntegrityServiceTests : TestTempDirectory
             string minecraftVersion,
             DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
             CancellationToken cancellationToken = default,
-            int downloadSpeedLimitMbPerSecond = 0) =>
+            int downloadSpeedLimitMbPerSecond = 0,
+            bool interactive = false) =>
             Task.FromResult<IReadOnlyList<LoaderVersionInfo>>([new LoaderVersionInfo("test")]);
 
         public Task<string> InstallAsync(

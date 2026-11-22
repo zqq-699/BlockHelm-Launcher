@@ -442,14 +442,14 @@ public sealed class ServerDeploymentTests : TestTempDirectory
         public bool WasRun { get; private set; }
         public bool UsedPreparedInstaller { get; private set; }
 
-        public Task RunInstallerAsync(
+        public Task<InstallerProcessResult?> RunInstallerAsync(
             string javaExecutablePath,
             string installerJarPath,
             string minecraftDirectory,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task RunServerInstallerAsync(
+        public Task<InstallerProcessResult?> RunServerInstallerAsync(
             string javaExecutablePath,
             string installerJarPath,
             string serverDirectory,
@@ -458,7 +458,7 @@ public sealed class ServerDeploymentTests : TestTempDirectory
             WasRun = true;
             UsedPreparedInstaller = Path.GetFileName(installerJarPath).Contains(".bhl-managed-", StringComparison.Ordinal);
             install(serverDirectory);
-            return Task.CompletedTask;
+            return Task.FromResult<InstallerProcessResult?>(null);
         }
     }
 

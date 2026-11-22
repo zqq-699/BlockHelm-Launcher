@@ -85,6 +85,13 @@ internal sealed class AdaptiveSegmentDownloadSession
         }
     }
 
+    public void TrackProbe(AdaptiveDownloadSegment probe)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+        lock (syncRoot)
+            active.Add(probe);
+    }
+
     public bool TryTakeQueuedOrSplit(
         out AdaptiveDownloadSegment? segment,
         out AdaptiveSegmentSplit? split)
@@ -167,6 +174,10 @@ internal sealed class AdaptiveSegmentDownloadSession
         foreach (var candidate in active)
         {
             var remaining = candidate.RemainingLength;
+            // The initial range is eligible only after its own slow-read window
+            // requests a split; other ranges retain the usual eager scheduling.
+            if (candidate.ChunkId == 0 && !candidate.PreferSplit)
+                continue;
             var candidatePreferred = remaining >= splitThreshold && candidate.PreferSplit;
             if (preferred && !candidatePreferred || candidatePreferred == preferred && remaining <= largestRemaining)
                 continue;

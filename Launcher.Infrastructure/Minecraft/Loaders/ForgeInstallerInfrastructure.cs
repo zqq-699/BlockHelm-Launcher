@@ -36,9 +36,9 @@ namespace Launcher.Infrastructure.Minecraft;
 
 internal interface IForgeInstallerRunner
 {
-    Task RunInstallerAsync(string javaExecutablePath, string installerJarPath, string minecraftDirectory, CancellationToken cancellationToken);
+    Task<InstallerProcessResult?> RunInstallerAsync(string javaExecutablePath, string installerJarPath, string minecraftDirectory, CancellationToken cancellationToken);
 
-    Task RunServerInstallerAsync(
+    Task<InstallerProcessResult?> RunServerInstallerAsync(
         string javaExecutablePath,
         string installerJarPath,
         string serverDirectory,
@@ -142,7 +142,8 @@ internal interface IFinalVersionInstaller
 
 internal sealed class FinalVersionInstaller(
     ILogger? logger = null,
-    IDownloadSpeedLimitState? downloadSpeedLimitState = null) : IFinalVersionInstaller
+    IDownloadSpeedLimitState? downloadSpeedLimitState = null,
+    HttpClient? runtimeHttpClient = null) : IFinalVersionInstaller
 {
     public bool SupportsSplitBaseContent => true;
 
@@ -250,7 +251,8 @@ internal sealed class FinalVersionInstaller(
             downloadSpeedLimitState: downloadSpeedLimitState,
             operationContext: operationContext,
             sharedSpeedMeter: speedMeter,
-            contentPart: part);
+            contentPart: part,
+            runtimeHttpClient: runtimeHttpClient);
         if (part is not LoaderBaseContentPart.Assets)
             VanillaLoaderProvider.AttachProgress(launcher, progress);
         await launcher.InstallAsync(versionName, cancellationToken);
@@ -275,7 +277,7 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
         this.logger = logger;
     }
 
-    public Task RunInstallerAsync(
+    public Task<InstallerProcessResult?> RunInstallerAsync(
         string javaExecutablePath,
         string installerJarPath,
         string minecraftDirectory,
@@ -287,7 +289,7 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
             "--installClient",
             cancellationToken);
 
-    public Task RunServerInstallerAsync(
+    public Task<InstallerProcessResult?> RunServerInstallerAsync(
         string javaExecutablePath,
         string installerJarPath,
         string serverDirectory,
@@ -299,7 +301,7 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
             "--installServer",
             cancellationToken);
 
-    private async Task RunInstallerCoreAsync(
+    private async Task<InstallerProcessResult?> RunInstallerCoreAsync(
         string javaExecutablePath,
         string installerJarPath,
         string minecraftDirectory,
@@ -347,7 +349,10 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
             var capture = new InstallerProcessOutput(logger, process.Id, inheritedOptions);
             var outputTask = capture.PumpAsync(process.StandardOutput, "stdout");
             var errorTask = capture.PumpAsync(process.StandardError, "stderr");
-            using var heartbeat = new Timer(_ => logger?.LogInformation("Loader installer process still running. ProcessId={ProcessId} DurationMs={DurationMs} LastOutputAgeMs={LastOutputAgeMs}", process.Id, stopwatch.ElapsedMilliseconds, capture.SinceLastOutput.TotalMilliseconds), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            using var heartbeat = new Timer(_ => logger?.LogInformation(
+                "Loader installer process still running. ProcessId={ProcessId} DurationMs={DurationMs} LastOutputAgeMs={LastOutputAgeMs} OutputLines={OutputLines} InstallerPhase={InstallerPhase}",
+                process.Id, stopwatch.ElapsedMilliseconds, capture.SinceLastOutput.TotalMilliseconds, capture.OutputLines, capture.Phase),
+                null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
 
             try
             {
@@ -361,16 +366,19 @@ internal sealed class ForgeInstallerRunner : IForgeInstallerRunner
                     logger?.LogError(cleanupException, "Canceled installer process cleanup failed. ProcessId={ProcessId} PrimaryFailure=Cancellation", process.Id);
                     throw new OperationCanceledException("The installer was canceled; process cleanup also failed.", cleanupException, cancellationToken);
                 }
-                logger?.LogInformation("Loader installer process canceled and terminated. ProcessId={ProcessId} DurationMs={DurationMs} StdoutTail={StdoutTail} StderrTail={StderrTail}", process.Id, stopwatch.ElapsedMilliseconds, await outputTask, await errorTask);
+                logger?.LogInformation("Loader installer process canceled and terminated. ProcessId={ProcessId} DurationMs={DurationMs} StdoutTail={StdoutTail} StderrTail={StderrTail}",
+                    process.Id, stopwatch.ElapsedMilliseconds,
+                    InstallerProcessException.BoundTail(await outputTask), InstallerProcessException.BoundTail(await errorTask));
                 throw;
             }
 
             var output = await outputTask;
             var error = await errorTask;
-            logger?.LogInformation("Loader installer process exited. ProcessId={ProcessId} ExitCode={ExitCode} DurationMs={DurationMs}", process.Id, process.ExitCode, stopwatch.ElapsedMilliseconds);
+            logger?.LogInformation("Loader installer process exited. ProcessId={ProcessId} ExitCode={ExitCode} DurationMs={DurationMs} OutputLines={OutputLines} InstallerPhase={InstallerPhase}",
+                process.Id, process.ExitCode, stopwatch.ElapsedMilliseconds, capture.OutputLines, capture.Phase);
             if (process.ExitCode == 0)
-                return;
-            var failure = new InstallerProcessException(process.ExitCode, capture.UnsupportedInstallClient, output, error);
+                return new InstallerProcessResult(process.Id, output, error, capture.FirstError);
+            var failure = new InstallerProcessException(process.ExitCode, capture.UnsupportedInstallClient, output, error, capture.FirstError);
             logger?.LogError(failure, "Loader installer process failed. ProcessId={ProcessId} ExitCode={ExitCode}", process.Id, process.ExitCode);
             throw failure;
         }

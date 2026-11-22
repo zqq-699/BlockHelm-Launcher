@@ -40,9 +40,11 @@ private async Task<IReadOnlyDictionary<string, ForgeCatalogEntry>> GetCatalogAsy
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference,
         CancellationToken cancellationToken,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false)
     {
-        await catalogLock.WaitAsync(cancellationToken);
+        if (!interactive)
+            await catalogLock.WaitAsync(cancellationToken);
         try
         {
             var cacheKey = $"{downloadSourcePreference}:{minecraftVersion}";
@@ -53,7 +55,7 @@ private async Task<IReadOnlyDictionary<string, ForgeCatalogEntry>> GetCatalogAsy
                 httpClient,
                 logger,
                 DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-                category: DownloadConcurrencyCategory.Metadata);
+                category: interactive ? DownloadConcurrencyCategory.InteractiveVersionCatalog : DownloadConcurrencyCategory.Metadata);
             var result = await executor.ExecuteStaggeredLookupAsync(
                 GetForgeIndexUrl(minecraftVersion),
                 downloadSourcePreference,
@@ -100,7 +102,8 @@ private async Task<IReadOnlyDictionary<string, ForgeCatalogEntry>> GetCatalogAsy
         }
         finally
         {
-            catalogLock.Release();
+            if (!interactive)
+                catalogLock.Release();
         }
     }
 

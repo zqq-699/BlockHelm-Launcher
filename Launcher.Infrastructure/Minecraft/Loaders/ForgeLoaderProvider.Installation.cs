@@ -83,6 +83,7 @@ private async Task<string> InstallCoreAsync(
             sharedMinecraftDirectory);
         using var downloadOperation = VanillaLoaderProvider.CreateDownloadOperationContext(installPathLayout.Path);
         Directory.CreateDirectory(installerSessionDirectory);
+        InstallerProcessResult? installerOutput = null;
 
         try
         {
@@ -100,10 +101,13 @@ private async Task<string> InstallCoreAsync(
                 installPathLayout, minecraftVersion, installerJarPath, "Forge",
                 token => DownloadInstallerAsync(catalogEntry.InstallerUrl, installerJarPath, minecraftVersion,
                     downloadSourcePreference, token, downloadSpeedLimitMbPerSecond, speedMeter),
-                (installer, token) => DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => RunForgeInstallerAsync(
-                    installerJarPath, installer.ExecutionInstallerPath, installerMinecraftDirectory, sharedMinecraftDirectory,
-                    minecraftVersion, isolatedVersionName, selectedLoaderVersion, downloadSourcePreference, progress,
-                    token, downloadSpeedLimitMbPerSecond)),
+                async (installer, token) =>
+                {
+                    installerOutput = await RunForgeInstallerAsync(
+                        installerJarPath, installer.ExecutionInstallerPath, installerMinecraftDirectory, sharedMinecraftDirectory,
+                        minecraftVersion, isolatedVersionName, selectedLoaderVersion, downloadSourcePreference, progress,
+                        token, downloadSpeedLimitMbPerSecond).ConfigureAwait(false);
+                },
                 prerequisiteSeeder, finalVersionInstaller, downloadSourcePreference, downloadSpeedLimitMbPerSecond,
                 downloadOperation, progress, speedMeter, cancellationToken).ConfigureAwait(false);
 
@@ -246,6 +250,7 @@ private async Task<string> InstallCoreAsync(
         catch (Exception exception)
         {
             logger.LogError(exception, "Loader installation failed before cleanup. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion}", minecraftVersion, selectedLoaderVersion);
+            installerOutput?.LogAfterFailure(logger);
             LoaderVersionDirectoryTransaction.CleanupCreatedVersionDirectories(gameDirectory, existingVersionNames, preserveVersionName: null, logger);
             throw;
         }
@@ -293,7 +298,7 @@ private async Task<string> InstallCoreAsync(
         return (selectedLoaderVersion, catalogEntry);
     }
 
-    private async Task RunForgeInstallerAsync(
+    private async Task<InstallerProcessResult?> RunForgeInstallerAsync(
         string installerJarPath,
         string executionInstallerPath,
         string installerMinecraftDirectory,
@@ -326,7 +331,7 @@ private async Task<string> InstallCoreAsync(
 
         try
         {
-            await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => installerRunner.RunInstallerAsync(
+            return await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => installerRunner.RunInstallerAsync(
                 javaRuntime.ExecutablePath,
                 executionInstallerPath,
                 installerMinecraftDirectory,
@@ -352,6 +357,7 @@ private async Task<string> InstallCoreAsync(
                 progress,
                 cancellationToken,
                 downloadSpeedLimitMbPerSecond);
+            return null;
         }
     }
 }

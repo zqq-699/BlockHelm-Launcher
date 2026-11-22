@@ -29,7 +29,8 @@ public interface ILoaderProvider
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
         CancellationToken cancellationToken = default,
-        int downloadSpeedLimitMbPerSecond = 0);
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false);
     Task<string> InstallAsync(
         string minecraftVersion,
         string gameDirectory,

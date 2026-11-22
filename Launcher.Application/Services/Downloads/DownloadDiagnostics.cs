@@ -74,13 +74,15 @@ public static class DownloadDiagnostics
     {
         using var scope = logger?.BeginScope(new Dictionary<string, object?> { ["Stage"] = stage });
         var stopwatch = Stopwatch.StartNew();
-        logger?.Log(quiet ? LogLevel.Debug : LogLevel.Information, "Download stage started. Stage={Stage}", stage);
+        if (!quiet)
+            logger?.LogInformation("Download stage started. Stage={Stage}", stage);
         using var timer = new Timer(_ => logger?.LogInformation("Download stage still running. Stage={Stage} DurationMs={DurationMs}", stage, stopwatch.ElapsedMilliseconds),
             null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
         try
         {
             var result = await action().ConfigureAwait(false);
-            logger?.Log(quiet ? LogLevel.Debug : LogLevel.Information, "Download stage completed. Stage={Stage} DurationMs={DurationMs}", stage, stopwatch.ElapsedMilliseconds);
+            if (!quiet)
+                logger?.LogInformation("Download stage completed. Stage={Stage} DurationMs={DurationMs}", stage, stopwatch.ElapsedMilliseconds);
             return result;
         }
         catch (OperationCanceledException)

@@ -209,20 +209,50 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
     [Fact]
     public async Task RecoveryCountsHeaderOnlyFailuresAndIdentifiesActualFallback()
     {
-        using var sink = CreateMainLogger();
-        using var factory = LoggerFactory.Create(builder => builder.AddSerilog(sink, false));
+        const string entry = "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-installer.jar";
         var count = 0;
-        using var client = new HttpClient(new Handler(request => new HttpResponseMessage(
-            Interlocked.Increment(ref count) == 1 ? HttpStatusCode.Forbidden : HttpStatusCode.OK)
-            { RequestMessage = request, Content = new StringContent("artifact") }));
-        var executor = new MinecraftDownloadRequestExecutor(client, factory.CreateLogger("RecoveryTest"),
-            retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 });
-        var resolution = await executor.DownloadFileAsync(
-            "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-installer.jar",
-            DownloadSourcePreference.Official, "Forge", Path.Combine(TempRoot, "artifact.jar"), null, null, CancellationToken.None);
-        Assert.Equal(2, resolution.NetworkAttempts);
-        Assert.Equal(0, resolution.RetryCount);
-        Assert.True(resolution.FallbackUsed);
+        using (var sink = LauncherLogConfiguration.CreateLogger(new LoggingLevelSwitch(LogEventLevel.Verbose),
+            new LoggingLevelSwitch(LogEventLevel.Warning), TempRoot))
+        using (var factory = LoggerFactory.Create(builder => builder.AddSerilog(sink, false)))
+        using (var client = new HttpClient(new Handler(request => Interlocked.Increment(ref count) switch
+        {
+            1 => new HttpResponseMessage(HttpStatusCode.Found)
+            { Headers = { Location = new Uri("https://cdn.example.test/artifact.jar?token=private-cdn-token") } },
+            2 => new HttpResponseMessage(HttpStatusCode.Forbidden),
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("artifact") }
+        })))
+        {
+            var logger = factory.CreateLogger("RecoveryTest");
+            var path = Path.Combine(TempRoot, "artifact.jar");
+            var file = new ForegroundDownloadLogScope(logger, "Test", "artifact.jar", path, entry, logStart: false);
+            using var context = file.RestoreContext();
+            var executor = new MinecraftDownloadRequestExecutor(client, logger,
+                retryOptions: new DownloadRetryOptions { MaxFileAttemptsPerSource = 1 });
+            var resolution = await executor.DownloadFileAsync(entry, DownloadSourcePreference.Official, "Forge", path,
+                null, null, CancellationToken.None, reportTransferredBytes: file.ReportTransferredBytes);
+            file.Complete(resolution);
+            Assert.Equal(3, resolution.NetworkAttempts);
+            Assert.Equal(0, resolution.RetryCount);
+            Assert.True(resolution.FallbackUsed);
+        }
+        var output = ReadLogs();
+        var lines = output.Split('\n');
+        var failure = Assert.Single(lines.Where(line => line.Contains("Download resource attempt failed.")));
+        var response = Assert.Single(lines.Where(line => line.Contains("Download HTTP attempt finished.")));
+        var terminal = Assert.Single(lines.Where(line => line.Contains("Foreground file download completed.")));
+        var fileId = System.Text.RegularExpressions.Regex.Match(terminal, "FileId=\\\"?[a-f0-9]{32}").Value;
+        Assert.NotEmpty(fileId);
+        Assert.Contains(fileId, failure);
+        Assert.Contains(fileId, response);
+        Assert.Contains("StatusCode=403", failure);
+        Assert.Contains("FinalHost=cdn.example.test", failure);
+        Assert.Contains("RedirectHosts=\"cdn.example.test\"", failure);
+        Assert.Contains("StatusCode=200", response);
+        Assert.Contains("HttpVersion=", response);
+        Assert.Contains("FirstBodyByteMs=", response);
+        Assert.Contains("FallbackUsed=true", terminal);
+        Assert.DoesNotContain("private-cdn-token", output);
+        Assert.DoesNotContain("Foreground file download started.", output);
     }
 
     [Theory]
@@ -444,9 +474,11 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
         }
         var output = ReadLogs();
         Assert.Contains("Foreground file download completed.", output);
-        foreach (var message in new[] { "Foreground file download started.", "Download HTTP request started.",
-                     "Download HTTP sending.", "Download HTTP headers received.", "Loader installer output." })
+        foreach (var message in new[] { "Foreground file download started.", "Download HTTP attempt finished." })
             Assert.Equal(diagnostic, output.Contains(message, StringComparison.Ordinal));
+        foreach (var message in new[] { "Download HTTP request started.", "Download HTTP sending.",
+                     "Download HTTP headers received.", "Download transport completed.", "installer line" })
+            Assert.DoesNotContain(message, output);
     }
 
     [Fact]
@@ -553,16 +585,22 @@ public sealed class DownloadDiagnosticsTests : TestTempDirectory
         {
             var logger = factory.CreateLogger("InstallerTest");
             var capture = new InstallerProcessOutput(logger, 42);
-            var text = "password=\"first\nsecret-suffix\" healthy\n" +
+            var text = "password=\"first\nsecret-suffix\" healthy\nError: first installer error\n" +
+                string.Concat(Enumerable.Repeat("Patching ordinary entry\n", 110)) +
                 ForgeInstallerRunner.InstallClientUnrecognizedOptionMessage + "\n" + new string('x', 17 * 1024) + "\nignored";
             using var stream = new StreamReader(new MemoryStream(Encoding.UTF8.GetBytes(text)));
             var tail = await capture.PumpAsync(stream, "stderr");
             Assert.True(capture.UnsupportedInstallClient);
+            Assert.Equal("Error: first installer error", capture.FirstError);
+            Assert.Contains("earlier output omitted", tail);
+            Assert.DoesNotContain("first installer error", tail);
             Assert.DoesNotContain("secret-suffix", tail);
         }
         var output = ReadLogs();
         Assert.Contains("Stream=stderr", output);
         Assert.Contains("output truncated", output);
+        Assert.Contains("Phase=PatchingJar", output);
+        Assert.DoesNotContain("Patching ordinary entry", output);
         Assert.DoesNotContain("secret-suffix", output);
         Assert.DoesNotContain(new string('x', 100), output);
     }

@@ -20,6 +20,35 @@ public sealed class LoaderInstallerFallbackTests
     private const string ValidSha1 = "0123456789abcdef0123456789abcdef01234567";
 
     [Fact]
+    public async Task DedicatedInstallerFailureFallsBackToOfficialWithChecksumValidation()
+    {
+        var archive = CreateArchive("1.21.1");
+        var checksum = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(archive));
+        var requests = new List<Uri>();
+        using var client = new HttpClient(new Handler(request =>
+        {
+            requests.Add(request.RequestUri!);
+            return request.RequestUri!.Host == "bmclapi2.bangbang93.com"
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(archive) };
+        }));
+        var directory = Path.Combine(Path.GetTempPath(), "bhl-loader-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var destination = Path.Combine(directory, "installer.jar");
+            var executor = new MinecraftDownloadRequestExecutor(client, retryOptions: new DownloadRetryOptions { MaxAttemptsPerSource = 1, MaxFileAttemptsPerSource = 1 });
+            var result = await executor.DownloadFileAsync(Url, DownloadSourcePreference.BmclApi, "NeoForge", destination,
+                checksum, null, CancellationToken.None);
+            Assert.Equal("/neoforge/version/21.1.250/download/installer.jar", requests[0].AbsolutePath);
+            Assert.Equal(Url, requests[1].AbsoluteUri);
+            Assert.Equal(Url, result.ActualUrl);
+            Assert.Equal(archive, await File.ReadAllBytesAsync(destination));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task ChecksumBudgetIncludesPendingOfficialRequestAfterMirror404()
     {
         var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

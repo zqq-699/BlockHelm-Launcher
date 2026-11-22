@@ -72,9 +72,9 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
         ILoaderInstallerJavaRuntimeResolver? javaRuntimeResolver = null)
     {
         this.httpClient = LauncherHttpUserAgent.Apply(
-            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient(logger: logger, connectionPurpose: "NeoForgeShared"));
         this.installerRunner = installerRunner ?? new ForgeInstallerRunner(logger);
-        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger, downloadSpeedLimitState);
+        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger, downloadSpeedLimitState, this.httpClient);
         this.javaRuntimeResolver = javaRuntimeResolver;
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;
@@ -92,7 +92,8 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
         CancellationToken cancellationToken = default,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false)
     {
         if (!NeoForgeArtifactResolver.TryResolveCatalog(minecraftVersion, out var catalog))
         {
@@ -111,7 +112,7 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
             httpClient,
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-            category: DownloadConcurrencyCategory.Metadata);
+            category: interactive ? DownloadConcurrencyCategory.InteractiveVersionCatalog : DownloadConcurrencyCategory.Metadata);
         var result = await executor.ExecuteStaggeredLookupAsync(
             catalog.MetadataUrl,
             downloadSourcePreference,
@@ -256,6 +257,7 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
             sharedMinecraftDirectory);
         using var downloadOperation = VanillaLoaderProvider.CreateDownloadOperationContext(installPathLayout.Path);
         Directory.CreateDirectory(installerSessionDirectory);
+        InstallerProcessResult? installerOutput = null;
 
         try
         {
@@ -283,7 +285,7 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
                         sharedMinecraftDirectory, downloadSourcePreference, downloadSpeedLimitMbPerSecond, progress),
                         token).ConfigureAwait(false);
                     progress?.Report(new LauncherProgress(InstallProgressStages.RunningLoaderInstaller, string.Empty));
-                    await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => installerRunner.RunInstallerAsync(
+                    installerOutput = await DownloadDiagnostics.RunStageAsync(logger, "JavaInstallerProcess", () => installerRunner.RunInstallerAsync(
                         javaRuntime.ExecutablePath, installer.ExecutionInstallerPath, installerMinecraftDirectory, token))
                         .ConfigureAwait(false);
                 },
@@ -384,6 +386,7 @@ public sealed class NeoForgeLoaderProvider : ILoaderProvider, IStagedLoaderProvi
         catch (Exception exception)
         {
             logger.LogError(exception, "Loader installation failed before cleanup. MinecraftVersion={MinecraftVersion} LoaderVersion={LoaderVersion}", minecraftVersion, selectedLoaderVersion);
+            installerOutput?.LogAfterFailure(logger);
             LoaderVersionDirectoryTransaction.CleanupCreatedVersionDirectories(gameDirectory, existingVersionNames, preserveVersionName: null, logger);
             throw;
         }

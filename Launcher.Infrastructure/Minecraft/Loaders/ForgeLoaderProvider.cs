@@ -52,7 +52,7 @@ public sealed partial class ForgeLoaderProvider : ILoaderProvider, IStagedLoader
     private readonly ILogger logger;
     private readonly string tempRootDirectory;
     private readonly SemaphoreSlim catalogLock = new(1, 1);
-    private readonly Dictionary<string, IReadOnlyDictionary<string, ForgeCatalogEntry>> catalogCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyDictionary<string, ForgeCatalogEntry>> catalogCache = new(StringComparer.OrdinalIgnoreCase);
 
     public ForgeLoaderProvider(
         HttpClient? httpClient = null,
@@ -81,9 +81,9 @@ public sealed partial class ForgeLoaderProvider : ILoaderProvider, IStagedLoader
         ILoaderInstallerJavaRuntimeResolver? javaRuntimeResolver = null)
     {
         this.httpClient = LauncherHttpUserAgent.Apply(
-            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
+            httpClient ?? MinecraftHttpClientFactory.CreateTransportClient(logger: logger, connectionPurpose: "ForgeShared"));
         this.installerRunner = installerRunner ?? new ForgeInstallerRunner(logger);
-        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger, downloadSpeedLimitState);
+        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger, downloadSpeedLimitState, this.httpClient);
         this.javaRuntimeResolver = javaRuntimeResolver;
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;
@@ -101,13 +101,15 @@ public sealed partial class ForgeLoaderProvider : ILoaderProvider, IStagedLoader
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
         CancellationToken cancellationToken = default,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false)
     {
         var catalog = await GetCatalogAsync(
             minecraftVersion,
             downloadSourcePreference,
             cancellationToken,
-            downloadSpeedLimitMbPerSecond);
+            downloadSpeedLimitMbPerSecond,
+            interactive);
         return catalog.Values
             .OrderByDescending(entry => ParseForgeVersion(entry.ForgeVersion))
             .ThenByDescending(entry => entry.ForgeVersion, StringComparer.OrdinalIgnoreCase)

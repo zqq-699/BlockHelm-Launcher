@@ -42,7 +42,8 @@ internal sealed class ForegroundDownloadLogScope
         string? sourceUrl,
         long? expectedBytes = null,
         int? position = null,
-        int? total = null)
+        int? total = null,
+        bool logStart = true)
     {
         this.logger = logger ?? NullLogger.Instance;
         using var operationScope = DownloadDiagnostics.BeginOperation(this.logger, operation);
@@ -55,6 +56,9 @@ internal sealed class ForegroundDownloadLogScope
         this.expectedBytes = expectedBytes;
         this.position = position;
         this.total = total;
+
+        if (!logStart)
+            return;
 
         this.logger.LogDebug(
             "Foreground file download started. Operation={Operation} FileName={FileName} DestinationPath={DestinationPath} SourceUrl={SourceUrl} ExpectedBytes={ExpectedBytes} Position={Position} Total={Total}",

@@ -121,7 +121,8 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
         if (minecraftPath is not null)
             filePath = MinecraftPathGuard.EnsureInstallFilePath(minecraftPath, filePath);
         long? expectedSize = file.Size > 0 ? file.Size : null;
-        var options = operationContext?.TryGetAsset(filePath, file.Hash, expectedSize) is true
+        var isAsset = operationContext?.TryGetAsset(filePath, file.Hash, expectedSize) is true;
+        var options = isAsset
             ? DownloadFileOptions.ForAsset(operationContext, expectedSize)
             : operationContext is not null && MinecraftFileIntegrity.IsSha1(file.Hash)
                 ? new DownloadFileOptions(DownloadPersistenceMode.TaskScopedResumable, operationContext)
@@ -134,7 +135,8 @@ internal sealed class DownloadSpeedTrackingGameInstaller : ParallelGameInstaller
             file.Name,
             filePath,
             fileUrl,
-            expectedSize);
+            expectedSize,
+            logStart: !isAsset || expectedSize >= MinecraftDownloadRequestExecutor.MinimumSegmentedDownloadSize);
         using var diagnosticLogScope = logScope.RestoreContext();
         var reportProgress = logScope.BeginSource((attempt, progressedBytes, totalBytes) =>
         {

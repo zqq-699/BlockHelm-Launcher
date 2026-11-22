@@ -50,7 +50,8 @@ internal sealed class FakeLoaderProvider : ILoaderProvider
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
         CancellationToken cancellationToken = default,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false)
     {
         GetLoaderVersionsCallCount++;
         LastMinecraftVersion = minecraftVersion;

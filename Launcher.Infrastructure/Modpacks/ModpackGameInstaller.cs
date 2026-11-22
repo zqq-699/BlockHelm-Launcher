@@ -48,7 +48,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
         IModpackSandboxCleanupService? sandboxCleanupService = null)
         : this(
             providers,
-            new FinalVersionInstaller(logger),
+            finalVersionInstaller: null,
             httpClient: null,
             downloadSpeedLimitState,
             tempRootDirectory: null,
@@ -59,7 +59,7 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
 
     internal ModpackGameInstaller(
         IEnumerable<ILoaderProvider> providers,
-        IFinalVersionInstaller finalVersionInstaller,
+        IFinalVersionInstaller? finalVersionInstaller,
         HttpClient? httpClient = null,
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
         string? tempRootDirectory = null,
@@ -67,9 +67,9 @@ internal sealed class ModpackGameInstaller : IModpackGameInstaller
         IModpackSandboxCleanupService? sandboxCleanupService = null)
     {
         this.providers = providers.ToDictionary(provider => provider.Kind);
-        this.finalVersionInstaller = finalVersionInstaller;
         this.httpClient = LauncherHttpUserAgent.Apply(
             httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
+        this.finalVersionInstaller = finalVersionInstaller ?? new FinalVersionInstaller(logger, downloadSpeedLimitState, this.httpClient);
         this.downloadSpeedLimitState = downloadSpeedLimitState;
         this.logger = logger ?? NullLogger.Instance;
         this.sandboxCleanupService = sandboxCleanupService ?? new ModpackSandboxCleanupService(

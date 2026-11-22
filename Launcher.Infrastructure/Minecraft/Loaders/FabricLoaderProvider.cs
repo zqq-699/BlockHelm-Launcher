@@ -55,14 +55,15 @@ public sealed class FabricLoaderProvider : ILoaderProvider, ISeparatedInstallPat
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
         CancellationToken cancellationToken = default,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false)
     {
         // 响应必须是非空数组且包含有效 loader.version，格式错误与没有结果使用不同诊断。
         var executor = new MinecraftDownloadRequestExecutor(
             httpClient,
             logger,
             DownloadBandwidthLimiter.Create(downloadSpeedLimitMbPerSecond, downloadSpeedLimitState),
-            category: DownloadConcurrencyCategory.Metadata);
+            category: interactive ? DownloadConcurrencyCategory.InteractiveVersionCatalog : DownloadConcurrencyCategory.Metadata);
         var result = await executor.ExecuteStaggeredLookupAsync(
             $"https://meta.fabricmc.net/v2/versions/loader/{minecraftVersion}",
             downloadSourcePreference,
@@ -183,7 +184,8 @@ public sealed class FabricLoaderProvider : ILoaderProvider, ISeparatedInstallPat
                 downloadSpeedLimitMbPerSecond,
                 downloadSpeedLimitState,
                 downloadOperation,
-                speedMeter);
+                speedMeter,
+                runtimeHttpClient: httpClient);
             VanillaLoaderProvider.AttachProgress(launcher, progress);
             var finalVersionName = await ComposedVersionInstallRunner.RunAsync(
                 token => FabricVersionComposer.PrepareFinalVersionAsync(

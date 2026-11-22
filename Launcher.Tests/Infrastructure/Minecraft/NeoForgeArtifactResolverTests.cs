@@ -16,6 +16,18 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 public sealed class NeoForgeArtifactResolverTests
 {
     [Theory]
+    [InlineData("https://maven.neoforged.net/releases/net/neoforged/neoforge/21.11.48/neoforge-21.11.48-installer.jar", "https://bmclapi2.bangbang93.com/neoforge/version/21.11.48/download/installer.jar")]
+    [InlineData("https://maven.neoforged.net/releases/net/neoforged/neoforge/26.1.0.0-alpha.12+snapshot-7/neoforge-26.1.0.0-alpha.12+snapshot-7-installer.jar", "https://bmclapi2.bangbang93.com/neoforge/version/26.1.0.0-alpha.12+snapshot-7/download/installer.jar")]
+    [InlineData("https://maven.neoforged.net/releases/net/neoforged/neoforge/21.11.48/neoforge-21.11.48-installer.jar.sha1", "https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/21.11.48/neoforge-21.11.48-installer.jar.sha1")]
+    [InlineData("https://maven.neoforged.net/releases/net/neoforged/forge/1.20.1-47.1.106/forge-1.20.1-47.1.106-installer.jar", "https://bmclapi2.bangbang93.com/maven/net/neoforged/forge/1.20.1-47.1.106/forge-1.20.1-47.1.106-installer.jar")]
+    public void InstallerMirrorUsesDedicatedEndpointOnlyForModernInstaller(string originalUrl, string mirrorUrl)
+    {
+        var requests = MinecraftDownloadSourceResolver.EnumerateRequests(originalUrl, DownloadSourcePreference.BmclApi, "NeoForge").ToArray();
+        Assert.Equal(mirrorUrl, requests[0].ActualUrl);
+        Assert.Equal(originalUrl, requests[1].ActualUrl);
+    }
+
+    [Theory]
     [InlineData(
         "1.20.4",
         "20.4.237",

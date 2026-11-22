@@ -63,7 +63,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         string minecraftVersion,
         DownloadSourcePreference downloadSourcePreference = LauncherDefaults.DefaultDownloadSourcePreference,
         CancellationToken cancellationToken = default,
-        int downloadSpeedLimitMbPerSecond = 0)
+        int downloadSpeedLimitMbPerSecond = 0,
+        bool interactive = false)
     {
         IReadOnlyList<LoaderVersionInfo> versions = [new LoaderVersionInfo(nameof(LoaderKind.Vanilla))];
         return Task.FromResult(versions);
@@ -139,7 +140,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
             downloadSpeedLimitMbPerSecond,
             downloadSpeedLimitState,
             downloadOperation,
-            speedMeter);
+            speedMeter,
+            runtimeHttpClient: httpClient);
         AttachProgress(launcher, progress);
         var finalVersionName = await ComposedVersionInstallRunner.RunAsync(
             token => VanillaVersionComposer.PrepareFinalVersionAsync(
@@ -334,7 +336,8 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
         MinecraftDownloadOperationContext? operationContext = null,
         SpeedMeter? sharedSpeedMeter = null,
         CmlLibJavaFileMode javaFileMode = CmlLibJavaFileMode.Exclude,
-        LoaderBaseContentPart contentPart = LoaderBaseContentPart.All)
+        LoaderBaseContentPart contentPart = LoaderBaseContentPart.All,
+        HttpClient? runtimeHttpClient = null)
     {
         // 统一注入镜像路由、限速和运行库下载器，保证 Vanilla/Fabric 使用相同下载策略。
         var parameters = MinecraftLauncherParameters.CreateDefault(path);
@@ -359,7 +362,7 @@ public sealed class VanillaLoaderProvider : ILoaderProvider, ISeparatedInstallPa
                 downloadSpeedLimitState,
                 logger,
                 cancellationToken));
-        var runtimeHttpClient = MinecraftHttpClientFactory.CreateTransportClient();
+        runtimeHttpClient ??= MinecraftHttpClientFactory.CreateTransportClient(logger: logger, connectionPurpose: "MinecraftContent");
         var runtimeExecutor = new MinecraftDownloadRequestExecutor(
             runtimeHttpClient,
             logger,

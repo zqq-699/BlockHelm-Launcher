@@ -27,6 +27,35 @@ namespace Launcher.Tests.Infrastructure.Minecraft;
 public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
 {
     [Fact]
+    public async Task SuppliedRuntimeClientDownloadsGameFilesAndRemainsUsable()
+    {
+        var layout = MinecraftInstallPathLayout.Create(Path.Combine(TempRoot, "sandbox"), Path.Combine(TempRoot, "shared"));
+        var handler = new SharedRuntimeHandler();
+        using var client = new HttpClient(handler);
+        var launcher = VanillaLoaderProvider.CreateLauncher(layout.Path, progress: null, runtimeHttpClient: client);
+        var installer = Assert.IsType<DownloadSpeedTrackingGameInstaller>(launcher.GameInstaller);
+        var destination = Path.Combine(layout.Path.Library, "example", "test.jar");
+        await installer.DownloadGameFileAsync(new GameFile("test")
+        {
+            Path = destination, Url = "https://example.test/library.jar", Hash = ComputeSha1("payload"), Size = 7
+        }, null, CancellationToken.None);
+        Assert.Equal("payload", await File.ReadAllTextAsync(destination));
+        Assert.Equal("payload", await client.GetStringAsync("https://example.test/installer.jar"));
+        Assert.Contains("/library.jar", handler.Paths);
+        Assert.Contains("/installer.jar", handler.Paths);
+    }
+
+    private sealed class SharedRuntimeHandler : HttpMessageHandler
+    {
+        public List<string> Paths { get; } = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Paths.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("payload") });
+        }
+    }
+
+    [Fact]
     public void SplitLayoutKeepsVersionsPrivateAndSharedRuntimeOutsideSandbox()
     {
         var sandbox = Path.Combine(TempRoot, "sandbox", ".minecraft");

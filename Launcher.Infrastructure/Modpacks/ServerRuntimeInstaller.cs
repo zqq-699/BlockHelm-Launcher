@@ -317,6 +317,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
         var artifact = ResolveForgeLikeInstallerArtifact(modpack);
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"blockhelm-server-loader-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
+        InstallerProcessResult? installerOutput = null;
         try
         {
             var installerPath = Path.Combine(tempDirectory, "installer.jar");
@@ -384,7 +385,7 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                     progress),
                 cancellationToken).ConfigureAwait(false);
             progress?.Report(new LauncherProgress(InstallProgressStages.RunningLoaderInstaller, string.Empty));
-            await DownloadDiagnostics.RunStageAsync(logger, "ServerJavaInstaller", () => forgeInstallerRunner.RunServerInstallerAsync(
+            installerOutput = await DownloadDiagnostics.RunStageAsync(logger, "ServerJavaInstaller", () => forgeInstallerRunner.RunServerInstallerAsync(
                 runtime.ExecutablePath,
                 preparedInstaller.ExecutionInstallerPath,
                 targetDirectory,
@@ -403,6 +404,11 @@ internal sealed class ServerRuntimeInstaller : IServerRuntimeInstaller
                 installerPlan,
                 cancellationToken)).ConfigureAwait(false);
             ValidateForgeLikeInstall(targetDirectory, modpack, artifact);
+        }
+        catch
+        {
+            installerOutput?.LogAfterFailure(logger);
+            throw;
         }
         finally
         {

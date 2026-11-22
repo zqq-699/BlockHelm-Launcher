@@ -96,7 +96,8 @@ public sealed class MinecraftDownloadRetryTests
             content.Headers.ContentRange = new ContentRangeHeaderValue(start, payload.LongLength - 1, payload.LongLength);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = content });
         }));
-        var executor = CreateExecutor(client, logger: logger, timeProvider: clock, limiter: concurrency);
+        var executor = CreateExecutor(client, logger: logger, timeProvider: clock, limiter: concurrency,
+            minimumSegmentedDownloadSize: 2 * 1024 * 1024);
         var directory = CreateTempDirectory();
         var destination = Path.Combine(directory, "artifact.jar");
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(8));
@@ -105,7 +106,7 @@ public sealed class MinecraftDownloadRetryTests
         var download = outcome == "lightweight"
             ? executor.DownloadFileAsync(url, DownloadSourcePreference.Official, null, destination,
                 Convert.ToHexString(SHA1.HashData(payload)), payload.Length, cancellation.Token,
-                options: DownloadFileOptions.ForAsset(null, payload.Length, directory))
+                options: new DownloadFileOptions(DownloadPersistenceMode.LightweightAtomic, ManagedRoot: directory))
             : executor.DownloadFileAsync(url, DownloadSourcePreference.Official, null,
                 destination, integrity, cancellation.Token);
         try
@@ -176,7 +177,8 @@ public sealed class MinecraftDownloadRetryTests
             FirstByteTimeout = TimeSpan.FromSeconds(20),
             BodyIdleTimeout = TimeSpan.FromSeconds(20)
         };
-        var executor = CreateExecutor(client, options, timeProvider: clock, limiter: concurrency);
+        var executor = CreateExecutor(client, options, timeProvider: clock, limiter: concurrency,
+            minimumSegmentedDownloadSize: 2 * 1024 * 1024);
         var directory = CreateTempDirectory();
         var destination = Path.Combine(directory, "artifact.jar");
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(8));
@@ -884,7 +886,7 @@ public sealed class MinecraftDownloadRetryTests
     [InlineData(
         "NeoForge",
         "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.234/neoforge-21.1.234-installer.jar",
-        "https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/21.1.234/neoforge-21.1.234-installer.jar")]
+        "https://bmclapi2.bangbang93.com/neoforge/version/21.1.234/download/installer.jar")]
     public void CanonicalSourceMappingsRoundTrip(
         string categoryHint,
         string officialUrl,
@@ -1272,9 +1274,9 @@ public sealed class MinecraftDownloadRetryTests
     }
 
     [Theory]
-    [InlineData(2 * 1024 * 1024 - 1, false)]
-    [InlineData(2 * 1024 * 1024, true)]
-    public async Task NonAssetsUseTheTwoMebibyteSegmentationThreshold(int size, bool expectsRange)
+    [InlineData(1024 * 1024 - 1, false)]
+    [InlineData(1024 * 1024, true)]
+    public async Task NonAssetsUseTheOneMebibyteSegmentationThreshold(int size, bool expectsRange)
     {
         var payload = new byte[size];
         var handler = new CallbackRequestHandler((_, request, _) =>
@@ -1523,7 +1525,7 @@ public sealed class MinecraftDownloadRetryTests
     {
         var clock = new ManualTimeProvider();
         const int probeLength = 1024 * 1024;
-        var payload = new byte[probeLength + 768 * 1024];
+        var payload = new byte[probeLength + 255 * 1024];
         var probeWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var slowWindows = 0;
         var ranges = new List<(string Host, long Offset)>();
@@ -1544,7 +1546,7 @@ public sealed class MinecraftDownloadRetryTests
                 ? new StreamContent(new TimedChunkReadStream(clock,
                     ((byte)0, TimeSpan.Zero), ((byte)0, TimeSpan.FromSeconds(10)),
                     ((byte)0, TimeSpan.FromSeconds(10)), ((byte)0, TimeSpan.FromSeconds(10)))
-                    { BytesPerChunk = 64 * 1024 })
+                    { BytesPerChunk = 32 * 1024 })
                 : new ByteArrayContent(payload, (int)offset, (int)(end - offset));
             content.Headers.ContentRange = new ContentRangeHeaderValue(offset, end - 1, payload.Length);
             content.Headers.ContentLength = end - offset;

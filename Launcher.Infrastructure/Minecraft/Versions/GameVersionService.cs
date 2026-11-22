@@ -69,7 +69,7 @@ public sealed class GameVersionService : IGameVersionService
             httpClient,
             logger,
             bandwidthLimiter,
-            category: DownloadConcurrencyCategory.Metadata,
+            category: DownloadConcurrencyCategory.InteractiveVersionCatalog,
             retryOptions: VersionCatalogRetryOptions,
             hostConcurrencyController: hostConcurrencyController);
         var lookup = await executor.ExecuteStaggeredLookupAsync(

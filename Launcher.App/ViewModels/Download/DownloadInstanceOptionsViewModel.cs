@@ -414,7 +414,8 @@ public sealed partial class DownloadInstanceOptionsViewModel : ObservableObject,
                 requestedVersion,
                 downloadSourcePreference,
                 cancellation.Token,
-                downloadSpeedLimitMbPerSecond);
+                downloadSpeedLimitMbPerSecond,
+                interactive: true);
             // 提供方可能在取消后仍返回，因此还要比对 CTS、Loader 对象和 Minecraft 版本。
             if (!IsLoaderRequestCurrent(cancellation, loaderOption, requestedVersion))
                 return;

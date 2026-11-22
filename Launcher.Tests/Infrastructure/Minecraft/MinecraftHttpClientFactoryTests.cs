@@ -5,12 +5,53 @@
  */
 
 using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using Launcher.Infrastructure.Minecraft;
+using Microsoft.Extensions.Logging;
 
 namespace Launcher.Tests.Infrastructure.Minecraft;
 
 public sealed class MinecraftHttpClientFactoryTests
 {
+    [Fact]
+    public async Task ConnectionDiagnosticsRedactProxyEndpointAndPreserveRequests()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var logger = new ConnectionLogger();
+            using var handler = Assert.IsType<SocketsHttpHandler>(MinecraftHttpClientFactory.CreateTransportHandler(logger, "MinecraftContent"));
+            handler.Proxy = new WebProxy($"http://private-user:private-password@127.0.0.1:{port}");
+            using var client = new HttpClient(handler);
+            var server = Task.Run(async () =>
+            {
+                using var connection = await listener.AcceptTcpClientAsync();
+                await using var stream = connection.GetStream();
+                var buffer = new byte[4096];
+                await stream.ReadAsync(buffer);
+                await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"));
+            });
+
+            Assert.Equal("OK", await client.GetStringAsync("http://maven.neoforged.net/example"));
+            await server;
+            var line = Assert.Single(logger.Messages, message => message.Contains("Download connection established."));
+            Assert.Contains("MinecraftContent", line);
+            Assert.Contains("ProxyOrUnknown", line);
+            Assert.Contains("<redacted>", line);
+            Assert.DoesNotContain("127.0.0.1", line);
+            Assert.DoesNotContain("private-user", line);
+            Assert.DoesNotContain("private-password", line);
+            Assert.DoesNotContain(port.ToString(), line);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     [Fact]
     public void TransportBoundsConnectionLifetimeAndRetainsProxyAndManualRedirects()
     {
@@ -57,5 +98,14 @@ public sealed class MinecraftHttpClientFactoryTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
             Task.FromResult(response(request));
+    }
+
+    private sealed class ConnectionLogger : ILogger
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 }

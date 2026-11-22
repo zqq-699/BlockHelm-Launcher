@@ -12,16 +12,49 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CmlLib.Core;
+using Launcher.App.Logging;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.Minecraft;
 using Launcher.Tests.Helpers;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
+using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace Launcher.Tests.Infrastructure.Minecraft;
 
 public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(8);
+
+    [Fact]
+    public async Task MissingProcessorOutputRetainsSuccessfulInstallerContext()
+    {
+        using (var sink = LauncherLogConfiguration.CreateLogger(new LoggingLevelSwitch(LogEventLevel.Verbose),
+            new LoggingLevelSwitch(LogEventLevel.Warning), TempRoot))
+        using (var factory = LoggerFactory.Create(builder => builder.AddSerilog(sink, false)))
+        using (var fixture = new Installation(TempRoot, LoaderKind.NeoForge, false, false, missingProcessorOutput: true)
+        {
+            DiagnosticLogger = factory.CreateLogger("ProcessorOutputTest")
+        })
+        {
+            fixture.FinishInstaller.TrySetResult();
+            fixture.FinishBaseContent.TrySetResult();
+            fixture.FinishDependency.TrySetResult();
+            using var cancellation = new CancellationTokenSource(TestTimeout);
+            await Assert.ThrowsAsync<InvalidDataException>(() => fixture.StartAsync(cancellation.Token));
+            Assert.True(fixture.JavaCompletedSignal.Task.IsCompletedSuccessfully);
+        }
+
+        var output = string.Join('\n', Directory.GetFiles(TempRoot, "bhl*.log").Select(File.ReadAllText));
+        Assert.Contains("Stage=ArtifactValidation", output);
+        Assert.Contains("missing-1.jar", output);
+        Assert.Contains("ProcessId=42 ExitCode=0", output);
+        Assert.Contains("test installer stdout", output);
+        Assert.Contains("test installer stderr", output);
+    }
 
     [Theory]
     [InlineData(LoaderKind.Forge, false)]
@@ -286,6 +319,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
         public bool HoldClient { get; init; }
         public bool SupportsSplitBaseContent { get; init; }
         public bool HoldCanceledBranch { get; init; }
+        public ILogger? DiagnosticLogger { get; init; }
         public Exception BaseFailure { get; } = new InvalidOperationException("Base branch failed.");
         public string InstallerRoot => Path.Combine(sandbox, loader == LoaderKind.Forge ? "launcher-forge" : "launcher-neoforge");
         public string FinalDirectory => Path.Combine(output, "versions", FinalName);
@@ -317,7 +351,8 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
             : NeoForgeArtifactResolver.ResolveInstaller(version, loaderVersion).Url;
 
         public Installation(string root, LoaderKind loader, bool warmCache, bool legacyMetadata,
-            bool withMappingsAndSharedDependency = false, bool fallbackToOriginalInstaller = false, bool useUnifiedCard = false)
+            bool withMappingsAndSharedDependency = false, bool fallbackToOriginalInstaller = false, bool useUnifiedCard = false,
+            bool missingProcessorOutput = false)
         {
             this.loader = loader;
             this.legacyMetadata = legacyMetadata;
@@ -345,15 +380,15 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
             }.ToJsonString();
             if (warmCache)
                 WriteFile(Path.Combine(shared, "versions", version, version + ".jar"), ClientJar);
-            installerBytes = CreateInstaller();
+            installerBytes = CreateInstaller(missingProcessorOutput);
             client = new HttpClient(this, disposeHandler: false);
             progress = new InstallCardProgressMapper(progressCapture, loader, hasOptionalContent: false, useUnifiedCard);
         }
 
         public Task<string> StartAsync(CancellationToken token) => loader == LoaderKind.Forge
-            ? new ForgeLoaderProvider(client, this, this, sandbox, javaRuntimeResolver: this)
+            ? new ForgeLoaderProvider(client, this, this, sandbox, logger: DiagnosticLogger, javaRuntimeResolver: this)
                 .InstallStagedAsync(version, output, shared, FinalName, loaderVersion, progress, DownloadSourcePreference.Official, token, 0)
-            : new NeoForgeLoaderProvider(client, this, this, sandbox, javaRuntimeResolver: this)
+            : new NeoForgeLoaderProvider(client, this, this, sandbox, logger: DiagnosticLogger, javaRuntimeResolver: this)
                 .InstallStagedAsync(version, output, shared, FinalName, loaderVersion, progress, DownloadSourcePreference.Official, token, 0);
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
@@ -456,7 +491,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
             WriteFile(Path.Combine(path.Assets, "prepared.asset"), "vanilla asset");
         }
 
-        public async Task RunInstallerAsync(string javaExecutablePath, string installerJarPath, string minecraftDirectory, CancellationToken token)
+        public async Task<InstallerProcessResult?> RunInstallerAsync(string javaExecutablePath, string installerJarPath, string minecraftDirectory, CancellationToken token)
         {
             JavaStarted = true;
             Assert.Equal(ClientJar, File.ReadAllText(Path.Combine(minecraftDirectory, "versions", version, version + ".jar")));
@@ -488,6 +523,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
                 id, inheritsFrom = version, libraries = new[] { new { name = "example:derived:1" } }
             }));
             JavaCompletedSignal.TrySetResult();
+            return new InstallerProcessResult(42, "test installer stdout", "test installer stderr", null);
         }
 
         public Task<JavaRuntimeInfo> ResolveAsync(LoaderInstallerJavaRuntimeRequest request, CancellationToken token)
@@ -518,7 +554,7 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
             }
         }
 
-        private byte[] CreateInstaller()
+        private byte[] CreateInstaller(bool missingProcessorOutput)
         {
             using var stream = new MemoryStream();
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
@@ -530,6 +566,14 @@ public sealed class ForgeLikeClientPreparationTests : TestTempDirectory
                     ["name"] = "example:preinstall:1", ["downloads"] = new JsonObject { ["artifact"] = library }
                 });
                 var profile = new JsonObject { ["minecraft"] = version, ["libraries"] = libraries };
+                if (missingProcessorOutput)
+                {
+                    profile["processors"] = new JsonArray(new JsonObject
+                    {
+                        ["jar"] = "example:preinstall:1",
+                        ["outputs"] = new JsonObject { ["[example:missing:1]"] = Hash("expected output") }
+                    });
+                }
                 if (withMappingsAndSharedDependency)
                 {
                     libraries.Add(SharedLibraryMetadata());
