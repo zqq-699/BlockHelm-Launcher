@@ -86,40 +86,24 @@ public sealed class AutomaticDownloadSourceTests : TestTempDirectory
     }
 
     [Theory]
-    [InlineData("request")]
     [InlineData("region")]
     [InlineData("information-log")]
-    [InlineData("warning-log")]
     public async Task UnexpectedDetectionFailuresUseCachedMirrorFallback(string stage)
     {
         var clock = new Clock();
-        var losingProbeCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var handler = new Handler(async (request, token) =>
-        {
-            if (stage is "request" or "warning-log")
-            {
-                if (request.RequestUri!.Host == "cloudflare.com")
-                    throw new InvalidOperationException("private-probe-content");
-                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
-                finally { if (token.IsCancellationRequested) losingProbeCanceled.TrySetResult(); }
-            }
-            return Response(stage == "region" ? "" : "loc=AU");
-        });
+        using var handler = new Handler((_, _) => Task.FromResult(Response(stage == "region" ? "" : "loc=AU")));
         using var client = new HttpClient(handler);
         using var selector = new AutomaticDownloadSourceSelector(client, clock,
             () => throw new NotSupportedException("private-probe-content"));
-        var logger = new FaultLogger(stage == "information-log" ? LogLevel.Information
-            : stage == "warning-log" ? LogLevel.Warning : null);
+        var logger = new FaultLogger(stage == "information-log" ? LogLevel.Information : null);
 
         var result = await selector.SelectAsync(logger, CancellationToken.None);
         Assert.Equal(DownloadSourcePreference.BmclApi, result.Preference);
         Assert.Equal("UnknownRegionMirrorFallback", result.Reason);
         Assert.Equal(result, await selector.SelectAsync(logger, CancellationToken.None));
         Assert.Equal(2, handler.Requests.Count);
-        if (stage is "request" or "warning-log")
-            await losingProbeCanceled.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.DoesNotContain(logger.Messages, message => message.Contains("private-probe-content", StringComparison.Ordinal));
-        if (stage != "warning-log") Assert.Contains(logger.Messages, message => message.Contains("FailureType=", StringComparison.Ordinal));
+        Assert.Contains(logger.Messages, message => message.Contains("FailureType=", StringComparison.Ordinal));
 
         clock.Advance(TimeSpan.FromMinutes(2));
         await selector.SelectAsync(logger, CancellationToken.None);

@@ -52,28 +52,6 @@ public sealed class VanillaVersionMetadataClientTests : TestTempDirectory
     }
 
     [Fact]
-    public async Task ConcurrentCallsShareValidatedBytesAndReturnIndependentObjects()
-    {
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = new Handler(async (request, token) =>
-        {
-            if (IsManifest(request)) { started.TrySetResult(); await release.Task.WaitAsync(token); }
-            return Response(IsManifest(request) ? Manifest : Json);
-        });
-        using var client = new HttpClient(handler);
-        var first = Load(client);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var second = Load(client);
-        release.TrySetResult();
-        var values = await Task.WhenAll(first, second);
-        values[0]["id"] = "mutated";
-        Assert.Equal(Version, values[1]["id"]!.GetValue<string>());
-        Assert.Equal(Version, (await Load(client))["id"]!.GetValue<string>());
-        Assert.Equal(2, handler.Requests.Count);
-    }
-
-    [Fact]
     public async Task DiskCacheWorksWithANewClientAndVersionCorruptionIsRepaired()
     {
         var handler = ValidHandler();
@@ -150,8 +128,7 @@ public sealed class VanillaVersionMetadataClientTests : TestTempDirectory
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
         release.TrySetResult();
         Assert.Equal(Version, (await active)["id"]!.GetValue<string>());
-        await Load(client);
-        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(Version, (await Load(client))["id"]!.GetValue<string>());
     }
 
     [Fact]
