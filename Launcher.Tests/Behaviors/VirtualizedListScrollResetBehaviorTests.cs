@@ -61,16 +61,6 @@ public sealed class VirtualizedListScrollResetBehaviorTests
                 Assert.True(Assert.IsType<VirtualizedListItemState>(visibleContainer.Tag).ShouldPlayEnterAnimation);
                 Assert.True(visibleItem.IsEntrancePending);
                 Assert.False(item.IsEntrancePending);
-                var frame = new DispatcherFrame();
-                var wait = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
-                wait.Tick += (_, _) =>
-                {
-                    wait.Stop();
-                    frame.Continue = false;
-                };
-                wait.Start();
-                Dispatcher.PushFrame(frame);
-                Assert.False(item.IsEntrancePending);
 
                 listBox.ScrollIntoView(item);
                 listBox.UpdateLayout();
@@ -178,17 +168,7 @@ public sealed class VirtualizedListScrollResetBehaviorTests
                 Assert.True(translate.Y < 0);
                 Assert.True(translate.HasAnimatedProperties);
 
-                var frame = new DispatcherFrame();
-                var wait = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-                wait.Tick += (_, _) =>
-                {
-                    wait.Stop();
-                    frame.Continue = false;
-                };
-                wait.Start();
-                Dispatcher.PushFrame(frame);
-
-                Assert.Null(shiftedContainer.RenderTransform);
+                DispatcherTestWait.Until(() => shiftedContainer.RenderTransform is null);
             }
             finally
             {

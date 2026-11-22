@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using System.Threading.Channels;
 using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.App.ViewModels.Resources;
@@ -266,15 +267,9 @@ public sealed class ResourcesProjectListViewModelTests
         // 结果落地本身也排在队列里，因此先不 await，由测试推动队列。
         var refresh = viewModel.RefreshAsync();
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while ((!refresh.IsCompleted || viewModel.VisibleProjects.Count < projectCount)
-               && DateTime.UtcNow < deadline)
-        {
-            dispatcher.Flush();
-            await Task.Yield();
-        }
-        dispatcher.Flush();
-        await refresh;
+        await dispatcher.PumpUntilAsync(() => viewModel.VisibleProjects.Count == projectCount
+            && viewModel.VisibleProjects.All(item => item.IconSource == $"icon://{item.Project.ProjectId}"));
+        await refresh.WaitAsync(QueuedUiDispatcher.Timeout);
 
         Assert.Equal(projectCount, viewModel.VisibleProjects.Count);
         Assert.All(viewModel.VisibleProjects, item => Assert.False(string.IsNullOrEmpty(item.IconSource)));
@@ -299,13 +294,8 @@ public sealed class ResourcesProjectListViewModelTests
         Assert.True(viewModel.IsLoading);
         Assert.Empty(viewModel.VisibleProjects);
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (!refresh.IsCompleted && DateTime.UtcNow < deadline)
-        {
-            dispatcher.Flush();
-            await Task.Yield();
-        }
-        await refresh;
+        await dispatcher.PumpUntilAsync(() => viewModel.VisibleProjects.Count > 0);
+        await refresh.WaitAsync(QueuedUiDispatcher.Timeout);
 
         Assert.False(viewModel.IsLoading);
         Assert.Equal("sodium", Assert.Single(viewModel.VisibleProjects).Project.ProjectId);
@@ -313,19 +303,21 @@ public sealed class ResourcesProjectListViewModelTests
 
     private sealed class QueuedUiDispatcher : IUiDispatcher
     {
-        private readonly List<Action> queued = [];
+        public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
+        private readonly Channel<Action> queued = Channel.CreateUnbounded<Action>(
+            new UnboundedChannelOptions { SingleReader = true });
 
         public bool HasAccess => true;
 
         public void Post(Action action) => action();
 
         // 攒起来而不是立刻执行，让测试能自己决定"结果落地"和"缩略图回填"谁先跑。
-        public void PostAfterTransition(Action action) => queued.Add(action);
+        public void PostAfterTransition(Action action) => queued.Writer.TryWrite(action);
 
         public Task PostAfterTransitionAsync(Action action)
         {
             var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            queued.Add(() =>
+            PostAfterTransition(() =>
             {
                 try
                 {
@@ -344,14 +336,13 @@ public sealed class ResourcesProjectListViewModelTests
 
         public Task InvokeAsync(Func<Task> action) => action();
 
-        public void Flush()
+        public async Task PumpUntilAsync(Func<bool> isComplete)
         {
-            lock (queued)
+            using var timeout = new CancellationTokenSource(Timeout);
+            while (!isComplete())
             {
-                var pending = queued.ToArray();
-                queued.Clear();
-                foreach (var action in pending)
-                    action();
+                var action = await queued.Reader.ReadAsync(timeout.Token);
+                action();
             }
         }
     }

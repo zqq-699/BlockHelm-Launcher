@@ -83,14 +83,14 @@ public sealed class MicrosoftReauthenticationPromptTests
         viewModel.OpenMicrosoftReauthenticationDialog(account);
 
         var completion = viewModel.CompleteMicrosoftAccountReauthenticationAsync();
-        await proxy.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.True(viewModel.IsAddAccountDialogBusy);
         Assert.True(viewModel.CanShowMicrosoftAuthenticationCancelButton);
         viewModel.CancelAddAccountDialog();
 
-        Assert.False(await completion.WaitAsync(TimeSpan.FromSeconds(2)));
-        Assert.True(proxy.WasCanceled);
+        Assert.True(proxy.AuthenticationToken.IsCancellationRequested);
+        proxy.CompleteCancellation();
+        Assert.False(await completion);
         Assert.False(viewModel.IsAddAccountDialogBusy);
         Assert.False(viewModel.CanShowMicrosoftAuthenticationCancelButton);
         Assert.Equal(Strings.Status_LoginCanceled, viewModel.MicrosoftLoginMessage);
@@ -151,38 +151,22 @@ public sealed class MicrosoftReauthenticationPromptTests
 
     public class CancellableMicrosoftAccountServiceProxy : DispatchProxy
     {
-        public TaskCompletionSource Started { get; } =
+        private readonly TaskCompletionSource<LauncherAccount> completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public bool WasCanceled { get; private set; }
+        public CancellationToken AuthenticationToken { get; private set; }
+
+        public void CompleteCancellation() => completion.SetCanceled(AuthenticationToken);
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod?.Name == nameof(IMicrosoftAccountService.ReauthenticateInteractivelyAsync))
             {
-                return WaitForCancellationAsync(
-                    (LauncherAccount)args![0]!,
-                    (CancellationToken)args[1]!);
+                AuthenticationToken = (CancellationToken)args![1]!;
+                return completion.Task;
             }
 
             throw new NotSupportedException(targetMethod?.Name);
-        }
-
-        private async Task<LauncherAccount> WaitForCancellationAsync(
-            LauncherAccount account,
-            CancellationToken cancellationToken)
-        {
-            Started.TrySetResult();
-            try
-            {
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-                return account;
-            }
-            catch (OperationCanceledException)
-            {
-                WasCanceled = true;
-                throw;
-            }
         }
     }
 

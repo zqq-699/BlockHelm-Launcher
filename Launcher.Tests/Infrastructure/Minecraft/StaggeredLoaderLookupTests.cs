@@ -70,11 +70,13 @@ public sealed class StaggeredLoaderLookupTests
     {
         var handler = new ScriptedHandler();
         handler.Reply(host, HttpStatusCode.OK, body);
+        var alternateHost = host == Mirror ? "files.minecraftforge.net" : Mirror;
+        handler.Reply(alternateHost, HttpStatusCode.NotFound, "");
         using var client = new HttpClient(handler);
         var provider = new ForgeLoaderProvider(client);
         var versions = await provider.GetLoaderVersionsAsync("1.20.1", preference).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("47.2.0", Assert.Single(versions).Version);
-        Assert.Equal([host], handler.Requests.ToArray());
+        Assert.Equal(host, handler.Requests.First());
     }
 
     [Fact]

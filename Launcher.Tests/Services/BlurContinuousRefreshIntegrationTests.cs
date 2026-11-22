@@ -350,7 +350,8 @@ public sealed class BlurContinuousRefreshIntegrationTests
                 PumpDispatcher(DispatcherPriority.Render);
                 Assert.IsType<BitmapCache>(fixture.Scope.CacheMode);
 
-                PumpFor(TimeSpan.FromMilliseconds(320));
+                DispatcherTestWait.Until(() => fixture.Scope.CacheMode is null
+                    && coordinator.TotalRefreshCount > refreshCountBeforeTransition);
 
                 Assert.Null(fixture.Scope.CacheMode);
                 Assert.Equal(1d, fixture.Scope.Opacity);
@@ -391,7 +392,7 @@ public sealed class BlurContinuousRefreshIntegrationTests
                 Assert.IsType<BitmapCache>(fixture.Scope.CacheMode);
                 Assert.IsType<BitmapCache>(fixture.SecondaryScope!.CacheMode);
 
-                PumpFor(TimeSpan.FromMilliseconds(320));
+                DispatcherTestWait.Until(() => fixture.Scope.CacheMode is null && fixture.SecondaryScope!.CacheMode is null);
 
                 Assert.Null(fixture.Scope.CacheMode);
                 Assert.Null(fixture.SecondaryScope.CacheMode);
@@ -476,22 +477,6 @@ public sealed class BlurContinuousRefreshIntegrationTests
         Dispatcher.CurrentDispatcher.BeginInvoke(
             priority,
             new Action(() => frame.Continue = false));
-        Dispatcher.PushFrame(frame);
-    }
-
-    private static void PumpFor(TimeSpan duration)
-    {
-        var frame = new DispatcherFrame();
-        var timer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = duration
-        };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            frame.Continue = false;
-        };
-        timer.Start();
         Dispatcher.PushFrame(frame);
     }
 

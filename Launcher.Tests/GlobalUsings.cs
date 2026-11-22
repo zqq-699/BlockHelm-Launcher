@@ -29,3 +29,6 @@ global using Launcher.Domain.Models;
 global using Launcher.Tests.Fakes;
 global using Launcher.Tests.Helpers;
 global using static Launcher.Tests.Helpers.TestMinecraftDirectoryDiscoveries;
+
+// Test classes share process-wide download limits, log configuration, and WPF state.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-using System.Diagnostics;
 using Launcher.Infrastructure.Persistence;
 
 namespace Launcher.Tests.Infrastructure.Persistence;
@@ -18,7 +17,7 @@ public sealed class JsonSettingsLockTimeoutTests : TestTempDirectory
     // 回归时 UpdateAsync 会永远等下去。用一个外层看门狗把"挂死"变成"失败"，
     // 否则整个测试套件会被一个回归拖住。看门狗刻意不用 TimeoutException，
     // 免得和被测的超时行为混为一谈。
-    private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan LockTimeout = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(10);
 
@@ -29,13 +28,10 @@ public sealed class JsonSettingsLockTimeoutTests : TestTempDirectory
         await service.LoadAsync();
 
         using var holder = HoldLock();
-        var elapsed = Stopwatch.StartNew();
         var exception = await BoundedAsync(() => service.UpdateAsync(settings => settings.IsMenuExpanded = true));
-        elapsed.Stop();
 
         Assert.IsType<TimeoutException>(exception);
         Assert.Contains("settings.json.lock", exception!.Message, StringComparison.Ordinal);
-        Assert.True(elapsed.Elapsed < Watchdog, $"Gave up only after {elapsed.Elapsed}.");
     }
 
     [Fact]

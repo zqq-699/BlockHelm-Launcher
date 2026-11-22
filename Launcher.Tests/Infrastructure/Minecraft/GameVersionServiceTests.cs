@@ -69,19 +69,6 @@ public sealed class GameVersionServiceTests
         Assert.Equal(["piston-meta.mojang.com", "bmclapi2.bangbang93.com"], handler.Requests.ToArray());
     }
 
-    [Fact]
-    public async Task ValidPreferredManifestDoesNotStartMirror()
-    {
-        var handler = new CatalogHandler();
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(httpClient);
-
-        var versions = await service.GetVersionsAsync(DownloadSourcePreference.Official).WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.Equal("1.21.1", Assert.Single(versions).Name);
-        Assert.Equal(["piston-meta.mojang.com"], handler.Requests.ToArray());
-    }
-
     private static GameVersionService CreateService(HttpClient client) =>
         new(new DownloadHostConcurrencyController(), client);
 

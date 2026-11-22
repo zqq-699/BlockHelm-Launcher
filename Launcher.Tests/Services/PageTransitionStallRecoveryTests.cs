@@ -47,11 +47,7 @@ public sealed class PageTransitionStallRecoveryTests
             Assert.Equal(PageTransitionService.WarmupOpacity, target.Opacity);
             Assert.True(UiTransitionGate.IsTransitionActive);
 
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-            while (UiTransitionGate.IsTransitionActive && DateTime.UtcNow < deadline)
-                PumpDispatcher(DispatcherPriority.ContextIdle);
-
-            Assert.False(UiTransitionGate.IsTransitionActive);
+            DispatcherTestWait.Until(() => !UiTransitionGate.IsTransitionActive);
             Assert.Equal(1d, target.Opacity);
             Assert.Equal(0d, Assert.IsType<TranslateTransform>(target.RenderTransform).Y);
 
@@ -71,13 +67,6 @@ public sealed class PageTransitionStallRecoveryTests
         }
     }
 
-    private static void PumpDispatcher(DispatcherPriority priority)
-    {
-        var frame = new DispatcherFrame();
-        Dispatcher.CurrentDispatcher.BeginInvoke(priority, new Action(() => frame.Continue = false));
-        Dispatcher.PushFrame(frame);
-    }
-
     private static void RunOnStaThread(Action action)
     {
         Exception? failure = null;
@@ -90,6 +79,10 @@ public sealed class PageTransitionStallRecoveryTests
             catch (Exception exception)
             {
                 failure = exception;
+            }
+            finally
+            {
+                UiTransitionGate.ResetForTesting();
             }
         });
         thread.SetApartmentState(ApartmentState.STA);

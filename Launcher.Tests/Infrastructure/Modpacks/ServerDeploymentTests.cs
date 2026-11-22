@@ -471,14 +471,14 @@ public sealed class ServerDeploymentTests : TestTempDirectory
         private readonly string installerSha1 = Convert.ToHexString(SHA1.HashData(installerBytes)).ToLowerInvariant();
         private readonly string serverSha1 = Convert.ToHexString(SHA1.HashData(ServerBytes)).ToLowerInvariant();
 
-        public List<string> RequestedUrls { get; } = [];
+        public System.Collections.Concurrent.ConcurrentQueue<string> RequestedUrls { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             var url = request.RequestUri!.AbsoluteUri;
-            RequestedUrls.Add(url);
+            RequestedUrls.Enqueue(url);
             if (IsMissingMirrorMetadata(request.RequestUri))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request });
             if (checksumUnavailable

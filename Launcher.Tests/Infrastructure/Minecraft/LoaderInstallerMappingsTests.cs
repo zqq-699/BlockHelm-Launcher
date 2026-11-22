@@ -304,19 +304,19 @@ public sealed class LoaderInstallerMappingsTests : TestTempDirectory
 
     private sealed class PreparationLogger : ILogger
     {
-        public List<(LogLevel Level, string Text)> Messages { get; } = [];
+        public System.Collections.Concurrent.ConcurrentQueue<(LogLevel Level, string Text)> Messages { get; } = new();
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter) => Messages.Add((logLevel, formatter(state, exception)));
+            Func<TState, Exception?, string> formatter) => Messages.Enqueue((logLevel, formatter(state, exception)));
     }
 
     private sealed class MappingHandler(bool failOfficial = false, bool corrupt = false, CancellationTokenSource? cancel = null) : HttpMessageHandler
     {
-        public List<Uri> Requests { get; } = [];
+        public System.Collections.Concurrent.ConcurrentQueue<Uri> Requests { get; } = new();
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Requests.Add(request.RequestUri!);
+            Requests.Enqueue(request.RequestUri!);
             if (cancel is not null)
             {
                 cancel.Cancel();

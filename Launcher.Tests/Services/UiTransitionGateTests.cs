@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Windows.Threading;
 using Launcher.App.Services;
@@ -254,12 +253,7 @@ public sealed class UiTransitionGateTests
 
     private static void PumpUntil(Task task)
     {
-        var timeout = Stopwatch.StartNew();
-        while (!task.IsCompleted && timeout.Elapsed < TimeSpan.FromSeconds(1))
-        {
-            Pump();
-            Thread.Yield();
-        }
+        DispatcherTestWait.Until(() => task.IsCompleted);
     }
 
     private static void RunOnStaThread(Action action)

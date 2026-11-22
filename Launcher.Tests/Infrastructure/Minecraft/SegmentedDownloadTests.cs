@@ -427,11 +427,8 @@ public sealed class SegmentedDownloadTests : TestTempDirectory
     public async Task RetryAfterFinalRangeWasWrittenCompletesAndVerifiesFile()
     {
         var raised = 0;
-        var handler = new RecordingRequestHandler(async (_, request, token) =>
-        {
-            if (request.Headers.Range!.Ranges.Single().From != 0) await Task.Delay(50, token);
-            return CreatePartialResponse(request, LargePayload);
-        });
+        var handler = new RecordingRequestHandler((_, request, _) =>
+            Task.FromResult(CreatePartialResponse(request, LargePayload)));
         using var client = CreateClient(handler);
         var destination = Path.Combine(TempRoot, "completed-before-retry.jar");
         await CreateExecutor(client, maxAttempts: 2).DownloadFileAsync(DownloadUrl, DownloadSourcePreference.Official,

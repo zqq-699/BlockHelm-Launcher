@@ -1851,21 +1851,34 @@ public sealed class MinecraftDownloadRetryTests
         Func<int, HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> callback)
         : HttpMessageHandler
     {
-        private int requestCount;
+        private readonly List<(Uri Uri, Dictionary<string, string> Headers)> requests = [];
 
-        public List<Uri> RequestUris { get; } = [];
-        public List<Dictionary<string, string>> RequestHeaders { get; } = [];
+        public IReadOnlyList<Uri> RequestUris
+        {
+            get { lock (requests) return requests.Select(request => request.Uri).ToArray(); }
+        }
+
+        public IReadOnlyList<Dictionary<string, string>> RequestHeaders
+        {
+            get { lock (requests) return requests.Select(request => request.Headers).ToArray(); }
+        }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            RequestUris.Add(request.RequestUri!);
-            RequestHeaders.Add(request.Headers.ToDictionary(
+            var headers = request.Headers.ToDictionary(
                 header => header.Key,
                 header => string.Join(",", header.Value),
-                StringComparer.OrdinalIgnoreCase));
-            return callback(Interlocked.Increment(ref requestCount), request, cancellationToken);
+                StringComparer.OrdinalIgnoreCase);
+            int requestNumber;
+            lock (requests)
+            {
+                requests.Add((request.RequestUri!, headers));
+                requestNumber = requests.Count;
+            }
+
+            return callback(requestNumber, request, cancellationToken);
         }
     }
 

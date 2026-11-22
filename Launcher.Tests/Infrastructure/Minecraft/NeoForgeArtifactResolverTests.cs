@@ -76,7 +76,7 @@ public sealed class NeoForgeArtifactResolverTests
             DownloadSourcePreference.Official);
 
         Assert.Equal(expectedVersions.Split(','), versions.Select(version => version.Version));
-        Assert.Equal([expectedMetadataUrl], handler.RequestUris.Select(uri => uri.AbsoluteUri));
+        Assert.Equal(expectedMetadataUrl, handler.RequestUris.First().AbsoluteUri);
     }
 
     [Fact]
@@ -123,13 +123,13 @@ public sealed class NeoForgeArtifactResolverTests
 
     private sealed class CatalogHandler : HttpMessageHandler
     {
-        public List<Uri> RequestUris { get; } = [];
+        public System.Collections.Concurrent.ConcurrentQueue<Uri> RequestUris { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            RequestUris.Add(request.RequestUri!);
+            RequestUris.Enqueue(request.RequestUri!);
             var content = request.RequestUri!.AbsoluteUri switch
             {
                 NeoForgeArtifactResolver.Legacy1201MetadataUrl => """

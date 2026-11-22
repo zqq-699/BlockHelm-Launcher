@@ -821,13 +821,13 @@ public sealed class MinecraftInstallPathLayoutTests : TestTempDirectory
         HttpStatusCode metadataStatusCode = HttpStatusCode.OK,
         (string Url, string Content)? clientJar = null) : HttpMessageHandler
     {
-        public List<Uri> RequestUris { get; } = [];
+        public System.Collections.Concurrent.ConcurrentQueue<Uri> RequestUris { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            RequestUris.Add(request.RequestUri!);
+            RequestUris.Enqueue(request.RequestUri!);
             var content = request.RequestUri!.AbsolutePath switch
             {
                 "/mc/game/version_manifest_v2.json" => manifestJson,
