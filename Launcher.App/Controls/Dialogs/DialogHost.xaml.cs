@@ -37,6 +37,10 @@ public partial class DialogHost : UserControl
     public static readonly DependencyProperty DialogContentProperty =
         DependencyProperty.Register(nameof(DialogContent), typeof(object), typeof(DialogHost), new PropertyMetadata(null));
 
+    public static readonly DependencyProperty DialogContentTemplateProperty =
+        DependencyProperty.Register(
+            nameof(DialogContentTemplate), typeof(DataTemplate), typeof(DialogHost), new PropertyMetadata(null));
+
     public static readonly DependencyProperty IsOpenProperty =
         DependencyProperty.Register(nameof(IsOpen), typeof(bool), typeof(DialogHost), new PropertyMetadata(false, OnIsOpenChanged));
 
@@ -70,6 +74,12 @@ public partial class DialogHost : UserControl
         set => SetValue(DialogContentProperty, value);
     }
 
+    public DataTemplate? DialogContentTemplate
+    {
+        get => (DataTemplate?)GetValue(DialogContentTemplateProperty);
+        set => SetValue(DialogContentTemplateProperty, value);
+    }
+
     public bool IsOpen
     {
         get => (bool)GetValue(IsOpenProperty);
@@ -100,12 +110,6 @@ public partial class DialogHost : UserControl
         SetIsOpenCore(false, completed);
     }
 
-    public void Prewarm()
-    {
-        if (EnsureIntegratedOverlayService())
-            integratedOverlayService!.Prewarm(this);
-    }
-
     public void AnimateSizeChange(double previousHeight)
     {
         if (!EnsureIntegratedOverlayService())
@@ -128,23 +132,15 @@ public partial class DialogHost : UserControl
             return;
 
         host.ResetIntegratedOverlayService();
-        if (host.UseIntegratedOverlay)
-        {
-            host.EnsureIntegratedOverlayService();
-            if (host.IsOpen)
-                host.SetIsOpenCore(true);
-        }
+        if (host.UseIntegratedOverlay && host.IsOpen)
+            host.SetIsOpenCore(true);
     }
 
     private void DialogHost_Loaded(object sender, RoutedEventArgs e)
     {
-        if (UseIntegratedOverlay)
-        {
-            EnsureIntegratedOverlayService();
-            Prewarm();
-            if (IsOpen)
-                SetIsOpenCore(true);
-        }
+        // 启动时已打开的弹窗接入窗口遮罩，关闭的弹窗在首次打开时再进入布局。
+        if (UseIntegratedOverlay && IsOpen)
+            SetIsOpenCore(true);
     }
 
     private void DialogHost_Unloaded(object sender, RoutedEventArgs e)

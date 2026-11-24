@@ -82,7 +82,5 @@ public interface IAccountDialogService : IMicrosoftAccountReauthenticationDialog
     Task ConfirmSkinModelDialogAsync();
 
     void CancelSkinManagerDialog();
-
-    void Prewarm();
 }
 

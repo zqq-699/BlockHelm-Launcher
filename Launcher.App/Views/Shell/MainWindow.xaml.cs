@@ -80,7 +80,9 @@ public partial class MainWindow : Window
         IThemeService themeService,
         ILogger<MainWindow>? logger = null)
     {
+        var xamlStartedAt = Stopwatch.GetTimestamp();
         InitializeComponent();
+        InitialXamlLoadMs = Stopwatch.GetElapsedTime(xamlStartedAt).TotalMilliseconds;
         StateChanged += MainWindow_StateChanged;
         Activated += (_, _) => stateSyncService.RequestSync();
         UpdateWindowChromeCornerRadius();
@@ -115,6 +117,8 @@ public partial class MainWindow : Window
         Closing += Window_OnClosing;
         Closed += (_, _) => stateSyncService.Stop();
     }
+
+    internal double InitialXamlLoadMs { get; }
 
     public bool IsMenuExpanded
     {
@@ -216,19 +220,6 @@ public partial class MainWindow : Window
         return GeneralPageView.RootElement;
     }
 
-    private void PrewarmTransientUi()
-    {
-        accountDialogService.Prewarm();
-
-        foreach (var comboBox in FindVisualChildren<AnimatedComboBox>(this))
-            comboBox.ApplyTemplate();
-
-        // 折叠的页面不会被测量，虚拟化面板要到第一次真正显示才初始化视口。
-        // 实测该初始化占用 UI 线程数十到上百毫秒，整段落在第一次切页的动画里。
-        // 这里趁空闲把页面提前实例化一次，让用户点进去时已经是热的。
-        PrewarmPageContent(GetPrewarmPages(), 0);
-    }
-
     private FrameworkElement[] GetPrewarmPages() =>
     [
         SettingsPageView,
@@ -241,26 +232,24 @@ public partial class MainWindow : Window
     ];
 
     /// <summary>
-    /// 逐个预热页面内容：临时显示、强制布局，再在更低优先级上收回。
-    /// 一次只热一个页面，让两次预热之间能处理输入，避免连成一段长阻塞。
+    /// 逐个预热页面内容：让隐藏页面在正常布局时完成测量，再在更低优先级上收回。
     /// </summary>
     private void PrewarmPageContent(IReadOnlyList<FrameworkElement> pages, int index)
     {
         // 只扫一轮。曾经按"内容异步到达、单轮盖不住"的假设扫过四轮，
         // 但实测第二轮起每轮只有 10ms 且一无所获：需要预热的列表是用户导航时
         // 才触发加载的，不是启动后自动到达，多扫几轮永远扫不到。
-        if (index >= pages.Count)
+        if (index >= pages.Count || isShutdownInProgress)
             return;
 
         var page = pages[index];
-        // 已经是当前页说明用户先一步点了过去，本来就热了，跳过。
-        if (page.Visibility == Visibility.Visible)
+        if (page.Visibility != Visibility.Collapsed)
         {
             PrewarmPageContent(pages, index + 1);
             return;
         }
 
-        // 预热本身是一次强制布局，撞进动画就是几十毫秒的掉帧——实测出现过 37.7ms。
+        // 首次布局仍然占用 UI 线程，等正在播放的切页动画结束再开始。
         if (UiTransitionGate.IsTransitionActive)
         {
             UiTransitionGate.RunWhenIdle(() => PrewarmPageContent(pages, index));
@@ -268,27 +257,34 @@ public partial class MainWindow : Window
         }
 
         var startedAt = Stopwatch.GetTimestamp();
-        var visibilityBinding = PageContentPrewarm.Begin(page);
+        PageContentPrewarm.Begin(page);
+        var busyProbe = UiPerformanceLog.IsEnabled ? DispatcherBusyProbe.TryAttach(Dispatcher) : null;
 
         // 虚拟化面板把首次视口初始化排在 Background 优先级，所以收尾必须排在更低的
         // ContextIdle 上，等它连同随后的布局一起跑完，页面才算真的热了。
         _ = Dispatcher.BeginInvoke(
             () =>
             {
-                // 必须在 End 之前量：End 会把页面恢复成折叠，那时 ActualWidth 归零、
-                // 所有 Effect 都算"不可见"，量到的尺寸和可见性全是废数据。
-                UiPerformanceLog.LogPageSurface(page, page.Name);
-                if (!PageContentPrewarm.End(page, visibilityBinding))
+                busyProbe?.Dispose();
+                var layoutReady = page.IsMeasureValid && page.IsArrangeValid && page.Visibility != Visibility.Collapsed;
+                try
                 {
-                    logger.LogError(
-                        "Failed to restore the page visibility binding after prewarming. Page={PageName}",
-                        page.Name);
+                    if (layoutReady)
+                        UiPerformanceLog.LogPageSurface(page, page.Name);
+                }
+                finally
+                {
+                    PageContentPrewarm.End(page);
                 }
 
                 logger.LogDebug(
-                    "Page content prewarmed. Page={PageName} ElapsedMs={ElapsedMs:F1}",
+                    "Page content prewarmed. Page={PageName} ElapsedMs={ElapsedMs:F1} LayoutReady={LayoutReady} "
+                    + "DispatcherBusyMs={DispatcherBusyMs:F1} DispatcherWorstOpMs={DispatcherWorstOpMs:F1}",
                     page.Name,
-                    Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+                    Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds,
+                    layoutReady,
+                    busyProbe?.TotalBusyMs,
+                    busyProbe?.WorstOperationMs);
                 PrewarmPageContent(pages, index + 1);
             },
             DispatcherPriority.ContextIdle);
@@ -306,7 +302,7 @@ public partial class MainWindow : Window
             IsMenuExpanded = viewModel.IsMenuExpanded;
             navigationMenuService.SetExpanded(IsMenuExpanded);
             stateSyncService.Start(() => viewModel.Settings, viewModel.SyncExternalInstanceCatalogAsync);
-            _ = Dispatcher.BeginInvoke(PrewarmTransientUi, DispatcherPriority.ContextIdle);
+            _ = Dispatcher.BeginInvoke(() => PrewarmPageContent(GetPrewarmPages(), 0), DispatcherPriority.ContextIdle);
         }
         catch (Exception exception)
         {

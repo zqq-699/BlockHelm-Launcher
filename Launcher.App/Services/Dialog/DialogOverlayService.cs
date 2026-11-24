@@ -143,25 +143,4 @@ public sealed class DialogOverlayService
 
         overlay.BeginAnimation(UIElement.OpacityProperty, animation);
     }
-
-    public void Prewarm(DialogHost host)
-    {
-        Prewarm(host.OverlayRoot, host.SurfaceBorder);
-    }
-
-    public void Prewarm(Grid overlay, Border dialog)
-    {
-        var originalVisibility = overlay.Visibility;
-        var originalOpacity = overlay.Opacity;
-
-        overlay.BeginAnimation(UIElement.OpacityProperty, null);
-        overlay.Visibility = Visibility.Hidden;
-        overlay.Opacity = 0;
-
-        dialog.ApplyTemplate();
-        dialog.UpdateLayout();
-
-        overlay.Visibility = originalVisibility;
-        overlay.Opacity = originalOpacity;
-    }
 }

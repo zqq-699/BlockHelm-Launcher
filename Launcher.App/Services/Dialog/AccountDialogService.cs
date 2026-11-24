@@ -384,13 +384,4 @@ public sealed class AccountDialogService : IAccountDialogService
         accountPage.Appearance.SkinLibrary.CloseManagerDialog();
         skinManagerDialogHost.Hide();
     }
-
-    public void Prewarm()
-    {
-        addAccountHost?.Prewarm();
-        deleteAccountHost?.Prewarm();
-        renameAccountHost?.Prewarm();
-        skinModelDialogHost?.Prewarm();
-        skinManagerDialogHost?.Prewarm();
-    }
 }

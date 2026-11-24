@@ -35,7 +35,8 @@
                 MaxHeight="{Binding ActualHeight, ElementName=Host}"
                 Margin="0,24"
                 Style="{StaticResource DialogSurfaceStyle}">
-            <ContentPresenter Content="{Binding DialogContent, ElementName=Host}" />
+            <ContentPresenter Content="{Binding DialogContent, ElementName=Host}"
+                              ContentTemplate="{Binding DialogContentTemplate, ElementName=Host}" />
         </Border>
     </Grid>
 </UserControl>

@@ -17,6 +17,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -72,7 +74,8 @@ public partial class App : System.Windows.Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
-        var startupStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        var startupStartedAt = Stopwatch.GetTimestamp();
+        var startupStartedUtc = DateTimeOffset.UtcNow;
         var updateApplyOptions = LauncherUpdateApplyOptions.Parse(e.Args);
         if (updateApplyOptions is not null)
         {
@@ -210,8 +213,13 @@ public partial class App : System.Windows.Application
             await RecoverPendingInstanceRenamesOnStartupAsync(
                 serviceProvider.GetRequiredService<IInstanceRenameRecoveryService>());
 
+            var measureStartup = logLevelController.IsDiagnosticLoggingEnabled;
+            var processToOnStartupMs = measureStartup ? TryMeasureProcessStartup(startupStartedUtc) : null;
+            var viewModelRequestedAt = Stopwatch.GetTimestamp();
             var mainViewModel = serviceProvider.GetRequiredService<MainViewModel>();
+            var viewModelResolvedAt = Stopwatch.GetTimestamp();
             await mainViewModel.PrimeAsync(startupSettings, minecraftDirectoryStartupRecovery);
+            var viewModelPrimedAt = Stopwatch.GetTimestamp();
             var themeService = serviceProvider.GetRequiredService<IThemeService>();
             themeService.ApplyPreference(
                 mainViewModel.Settings.Theme,
@@ -221,17 +229,58 @@ public partial class App : System.Windows.Application
             themeService.ApplyBackgroundEffect(
                 mainViewModel.Settings.LauncherBackgroundEffect,
                 mainViewModel.Settings.EnableImageBackgroundControlBlur);
+            var windowRequestedAt = Stopwatch.GetTimestamp();
             var mainWindow = serviceProvider.GetRequiredService<MainWindow>();
+            var windowResolvedAt = Stopwatch.GetTimestamp();
             serviceProvider.GetRequiredService<MainWindowPlacementService>()
                 .Restore(mainWindow, mainViewModel.Settings);
+            var uiThreadStallMonitor = serviceProvider.GetRequiredService<UiThreadStallMonitor>();
+            if (measureStartup)
+                mainWindow.ContentRendered += LogFirstWindowContentRendered;
+            if (UiPerformanceLog.IsEnabled)
+                mainWindow.ContentRendered += uiThreadStallMonitor.SampleStartupInputAfterContentRendered;
+
+            var showStartedAt = Stopwatch.GetTimestamp();
             mainWindow.Show();
+            var windowShownAt = Stopwatch.GetTimestamp();
             UiPerformanceLog.LogRenderEnvironment(TryReadSystemMemorySnapshot(serviceProvider), mainWindow);
-            serviceProvider.GetRequiredService<UiThreadStallMonitor>().Start();
+            uiThreadStallMonitor.Start();
             Log.Information(
                 "Launcher startup completed. DurationMs={DurationMs} Language={Language} DiagnosticLogging={DiagnosticLogging}",
-                System.Diagnostics.Stopwatch.GetElapsedTime(startupStartedAt).TotalMilliseconds,
+                Stopwatch.GetElapsedTime(startupStartedAt).TotalMilliseconds,
                 CultureInfo.CurrentUICulture.Name,
                 logLevelController.IsDiagnosticLoggingEnabled);
+
+            if (measureStartup)
+            {
+                Log.Debug(
+                    "Launcher startup stages measured. ProcessToOnStartupMs={ProcessToOnStartupMs:F1} "
+                    + "BeforeViewModelMs={BeforeViewModelMs:F1} ViewModelResolveMs={ViewModelResolveMs:F1} "
+                    + "ViewModelPrimeMs={ViewModelPrimeMs:F1} ThemeApplyMs={ThemeApplyMs:F1} "
+                    + "WindowResolveMs={WindowResolveMs:F1} WindowXamlMs={WindowXamlMs:F1} "
+                    + "WindowSetupMs={WindowSetupMs:F1} ShowMs={ShowMs:F1}",
+                    processToOnStartupMs,
+                    Stopwatch.GetElapsedTime(startupStartedAt, viewModelRequestedAt).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(viewModelRequestedAt, viewModelResolvedAt).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(viewModelResolvedAt, viewModelPrimedAt).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(viewModelPrimedAt, windowRequestedAt).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(windowRequestedAt, windowResolvedAt).TotalMilliseconds,
+                    mainWindow.InitialXamlLoadMs,
+                    Stopwatch.GetElapsedTime(windowResolvedAt, showStartedAt).TotalMilliseconds,
+                    Stopwatch.GetElapsedTime(showStartedAt, windowShownAt).TotalMilliseconds);
+            }
+
+            void LogFirstWindowContentRendered(object? sender, EventArgs args)
+            {
+                mainWindow.ContentRendered -= LogFirstWindowContentRendered;
+                var onStartupToFirstContentMs = Stopwatch.GetElapsedTime(startupStartedAt).TotalMilliseconds;
+                Log.Debug(
+                    "Launcher first content rendered. ProcessToFirstContentMs={ProcessToFirstContentMs:F1} "
+                    + "OnStartupToFirstContentMs={OnStartupToFirstContentMs:F1}",
+                    processToOnStartupMs + onStartupToFirstContentMs,
+                    onStartupToFirstContentMs);
+            }
+
             _ = CleanupPendingInstanceDeletionsOnStartupAsync(
                 serviceProvider.GetRequiredService<IInstanceDeletionCleanupService>());
             _ = CleanupPendingInstanceInstallsOnStartupAsync(
@@ -272,6 +321,21 @@ public partial class App : System.Windows.Application
         {
             Log.Fatal(exception, "Launcher startup failed.");
             Shutdown(-1);
+        }
+    }
+
+    private static double? TryMeasureProcessStartup(DateTimeOffset startupStartedUtc)
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var duration = startupStartedUtc - new DateTimeOffset(process.StartTime);
+            return duration >= TimeSpan.Zero ? duration.TotalMilliseconds : null;
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            Log.Debug(exception, "Failed to read the launcher process start time.");
+            return null;
         }
     }
 

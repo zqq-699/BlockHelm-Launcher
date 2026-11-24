@@ -18,7 +18,6 @@
  */
 
 using System.Windows;
-using System.Windows.Data;
 
 namespace Launcher.App.Services;
 
@@ -29,43 +28,23 @@ namespace Launcher.App.Services;
 internal static class PageContentPrewarm
 {
     /// <summary>
-    /// 让页面进入可测量状态并返回原有的 Visibility 绑定，供 <see cref="End"/> 装回。
-    /// 使用 Hidden 而非 Visible：Hidden 一样会被测量和排布，足以让虚拟化面板初始化视口，
-    /// 但绝不会被绘制，即使收尾失败也不会与当前页重叠。
+    /// 将折叠页面临时设为 Hidden，让 WPF 在下一轮正常布局中测量页面。
     /// </summary>
-    internal static BindingBase? Begin(FrameworkElement page)
+    internal static void Begin(FrameworkElement page)
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        // 给绑定属性写本地值会直接顶掉绑定表达式，而不是暂时挂起，
-        // 因此必须先把绑定取出来，收尾时原样装回去。
-        var visibilityBinding = BindingOperations.GetBindingBase(page, UIElement.VisibilityProperty);
-        page.Visibility = Visibility.Hidden;
-        page.UpdateLayout();
-        return visibilityBinding;
+        // 保留原绑定，预热期间用户切到该页时可以立即显示。
+        page.SetCurrentValue(UIElement.VisibilityProperty, Visibility.Hidden);
     }
 
     /// <summary>
-    /// 装回 Visibility 绑定。返回是否恢复成功——失败意味着页面会永久可见并压住当前页，
-    /// 因此失败时直接折叠页面兜底，由调用方记录故障。
+    /// 清除预热设置的当前值，重新按原有值源计算可见性。
     /// </summary>
-    internal static bool End(FrameworkElement page, BindingBase? visibilityBinding)
+    internal static void End(FrameworkElement page)
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        if (visibilityBinding is null)
-        {
-            // 原本就没有绑定：ClearValue 退回默认值即可，但默认值是 Visible，
-            // 所以这里必须显式折叠，不能只清本地值。
-            page.Visibility = Visibility.Collapsed;
-            return true;
-        }
-
-        BindingOperations.SetBinding(page, UIElement.VisibilityProperty, visibilityBinding);
-        if (BindingOperations.GetBindingExpressionBase(page, UIElement.VisibilityProperty) is not null)
-            return true;
-
-        page.Visibility = Visibility.Collapsed;
-        return false;
+        page.InvalidateProperty(UIElement.VisibilityProperty);
     }
 }

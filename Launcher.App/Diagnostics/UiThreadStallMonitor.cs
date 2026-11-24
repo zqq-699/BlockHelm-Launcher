@@ -30,11 +30,14 @@ namespace Launcher.App.Diagnostics;
 internal sealed class UiThreadStallMonitor : IDisposable
 {
     internal static readonly TimeSpan ProbeInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan StartupInputProbeInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan StartupInputSampleDuration = TimeSpan.FromSeconds(3);
 
     // 一帧的抖动不算卡顿；超过这个迟到量用户才会察觉到动画停顿。
     internal const double StallThresholdMs = 200d;
 
     private readonly DispatcherTimer timer;
+    private DispatcherTimer? startupInputTimer;
     private long lastTickTimestamp;
     private long stallCount;
     private double worstStallMs;
@@ -65,12 +68,59 @@ internal sealed class UiThreadStallMonitor : IDisposable
         timer.Start();
     }
 
+    internal void SampleStartupInputAfterContentRendered(object? sender, EventArgs e)
+    {
+        if (sender is System.Windows.Window window)
+            window.ContentRendered -= SampleStartupInputAfterContentRendered;
+        if (isDisposed || !UiPerformanceLog.IsEnabled)
+            return;
+
+        var startedAt = Stopwatch.GetTimestamp();
+        var previousTick = startedAt;
+        var worstDelayMs = 0d;
+        var samples = 0;
+        var inputTimer = new DispatcherTimer(DispatcherPriority.Input, timer.Dispatcher)
+        {
+            Interval = StartupInputProbeInterval
+        };
+        inputTimer.Tick += (_, _) =>
+        {
+            var now = Stopwatch.GetTimestamp();
+            var delayMs = CalculateStallMs(
+                Stopwatch.GetElapsedTime(previousTick, now).TotalMilliseconds,
+                StartupInputProbeInterval.TotalMilliseconds);
+            previousTick = now;
+            worstDelayMs = Math.Max(worstDelayMs, delayMs);
+            samples++;
+            var duration = Stopwatch.GetElapsedTime(startedAt, now);
+            if (duration < StartupInputSampleDuration)
+                return;
+
+            inputTimer.Stop();
+            startupInputTimer = null;
+            if (UiPerformanceLog.IsEnabled)
+            {
+                Log.Debug(
+                    "Startup input dispatcher sampled. DurationMs={DurationMs:F0} ProbeIntervalMs={ProbeIntervalMs:F0} "
+                    + "Samples={Samples} WorstDelayMs={WorstDelayMs:F1}",
+                    duration.TotalMilliseconds,
+                    StartupInputProbeInterval.TotalMilliseconds,
+                    samples,
+                    worstDelayMs);
+            }
+        };
+        startupInputTimer = inputTimer;
+        inputTimer.Start();
+    }
+
     public void Dispose()
     {
         if (isDisposed)
             return;
 
         isDisposed = true;
+        startupInputTimer?.Stop();
+        startupInputTimer = null;
         timer.Stop();
         timer.Tick -= Timer_Tick;
     }
