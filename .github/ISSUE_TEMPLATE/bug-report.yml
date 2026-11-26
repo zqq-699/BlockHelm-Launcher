@@ -39,3 +39,12 @@ body:
       description: 请上传相关启动器日志和崩溃报告。如有崩溃报告请上传完整 .zip 压缩包文件。
     validations:
       required: true
+
+  - type: checkboxes
+    id: log-acknowledgement
+    attributes:
+      options:
+        - label: 我已上传包含错误的日志。（不确定就上传所有）
+          required: true
+        - label: 我明白不包含日志的 Bug 反馈可能不会被处理。
+          required: true
