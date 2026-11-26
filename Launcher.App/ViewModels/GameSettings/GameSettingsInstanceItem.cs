@@ -59,7 +59,7 @@ public sealed partial class GameSettingsInstanceItem : ObservableObject
 
     public bool IsAlpha => VersionType.Equals("old_alpha", StringComparison.OrdinalIgnoreCase);
 
-    public string TypeLabel => MinecraftVersionTypeDisplayProvider.GetLabel(VersionType);
+    public string TypeLabel => MinecraftVersionTypeDisplayProvider.GetLabel(IsAprilFools ? "april_fools" : VersionType);
 
     public string LoaderLabel => GameInstanceDisplayFormatter.GetLoaderLabel(Loader);
 

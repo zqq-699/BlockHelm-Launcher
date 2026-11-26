@@ -25,6 +25,7 @@ internal static class MinecraftVersionIconResolver
 {
     public const string DefaultReleaseIconSource = "/Assets/Icons/block/grass_block.png";
     public const string DefaultSnapshotIconSource = "/Assets/Icons/block/dirt_block.png";
+    public const string DefaultAprilFoolsIconSource = "/Assets/Icons/block/TNT_block.png";
     public const string DefaultBetaIconSource = "/Assets/Icons/block/craftingtable_block.png";
     public const string DefaultAlphaIconSource = "/Assets/Icons/block/stone_block.png";
     public const string DefaultFabricIconSource = "/Assets/Icons/block/fabric.png";
@@ -64,6 +65,12 @@ internal static class MinecraftVersionIconResolver
         string? instanceVersionName)
     {
         var normalizedType = NormalizeVersionType(versionType);
+        if (normalizedType == "april_fools"
+            || MinecraftAprilFoolsVersionClassifier.IsAprilFoolsVersion(minecraftVersion)
+            || MinecraftAprilFoolsVersionClassifier.IsAprilFoolsVersion(instanceMinecraftVersion)
+            || MinecraftAprilFoolsVersionClassifier.IsAprilFoolsVersion(instanceVersionName))
+            return DefaultAprilFoolsIconSource;
+
         if (normalizedType.Equals("old_beta", StringComparison.OrdinalIgnoreCase))
             return DefaultBetaIconSource;
 

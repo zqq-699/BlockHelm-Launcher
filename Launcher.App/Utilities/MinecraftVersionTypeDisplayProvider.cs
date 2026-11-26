@@ -30,6 +30,7 @@ internal static class MinecraftVersionTypeDisplayProvider
         {
             "release" => Strings.Download_ReleaseCategory,
             "snapshot" => Strings.Download_SnapshotCategory,
+            "april_fools" => Strings.Download_AprilFoolsCategory,
             "old_beta" => Strings.Download_BetaCategory,
             "old_alpha" => Strings.Download_AlphaCategory,
             _ => fallback

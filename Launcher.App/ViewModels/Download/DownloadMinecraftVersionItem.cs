@@ -38,7 +38,7 @@ public sealed partial class DownloadMinecraftVersionItem : ObservableObject
 
     public string VersionType => MinecraftVersionIconResolver.NormalizeVersionType(Type);
 
-    public string TypeLabel => MinecraftVersionTypeDisplayProvider.GetLabel(VersionType, Version.Type);
+    public string TypeLabel => MinecraftVersionTypeDisplayProvider.GetLabel(IsAprilFools ? "april_fools" : VersionType, Version.Type);
 
     public string ReleaseDateText => Version.ReleaseTime is { } releaseTime
         ? releaseTime.ToLocalTime().ToString("yyyy-MM-dd")
