@@ -25,6 +25,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Launcher.App.Behaviors;
+using Launcher.Application.Services;
 
 namespace Launcher.App.Controls;
 
@@ -614,7 +615,8 @@ public partial class ListPageItemButton : UserControl
     {
         // 模板只绑定 ImageSource；兼容资源对象和路径的解析集中在加载器中完成。
         if (d is ListPageItemButton button)
-            button.ResolvedIconSource = IconSourceImageLoader.TryLoad(e.NewValue);
+            button.ResolvedIconSource = IconSourceImageLoader.TryLoad(
+                e.NewValue, IResourceThumbnailService.ThumbnailSize, IResourceThumbnailService.ThumbnailSize);
     }
 
     private static void OnShouldPlayEnterAnimationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

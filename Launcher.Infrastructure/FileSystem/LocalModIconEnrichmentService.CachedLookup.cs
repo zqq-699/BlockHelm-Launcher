@@ -17,70 +17,83 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-using System.Buffers.Binary;
-using System.Globalization;
 using System.IO;
-using System.Net.Http;
-using System.Security.Cryptography;
-using System.Text;
-using Launcher.Application.Services;
 using Launcher.Domain.Models;
-using Launcher.Infrastructure.CurseForge;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Launcher.Infrastructure.FileSystem;
 
 public sealed partial class LocalModIconEnrichmentService
 {
-private string? TryGetCachedIcon(
-        RemoteIconCacheIndex index,
-        string alias,
-        DateTimeOffset now,
-        bool allowStale,
-        bool updateLastUsed,
-        out bool isStale)
+    private async Task<string?> GetCachedIconAsync(
+        RemoteIconCacheEntry entry,
+        CancellationToken cancellationToken)
     {
-        isStale = false;
-        if (!index.Aliases.TryGetValue(alias, out var entryKey)
-            || !index.Entries.TryGetValue(entryKey, out var entry))
+        var project = CreateModProject(entry.Source, entry.ProjectId, entry.IconUrl);
+        if (project is null)
+            return null;
+
+        var legacyPath = GetLegacyIconPath(entry);
+        if (legacyPath is null)
+            return thumbnailCache.TryGetCachedThumbnailSource(project);
+
+        var shared = await thumbnailCache.MigrateModThumbnailAsync(project, legacyPath, cancellationToken)
+            .ConfigureAwait(false);
+        return shared ?? (File.Exists(legacyPath) ? new Uri(legacyPath).AbsoluteUri : null);
+    }
+
+    private string? GetLegacyIconPath(RemoteIconCacheEntry entry)
+    {
+        if (string.IsNullOrEmpty(entry.FileName))
+            return null;
+
+        var path = GetIconCachePath($"{entry.Source}:{entry.ProjectId}");
+        if (!string.Equals(Path.GetFileName(path), entry.FileName, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var file = new FileInfo(path);
+        return file.Exists
+            && (file.Attributes & FileAttributes.ReparsePoint) == 0
+            && (new DirectoryInfo(cacheDirectory).Attributes & FileAttributes.ReparsePoint) == 0
+            ? path
+            : null;
+    }
+
+    private static ResourceProject? CreateModProject(string source, string projectId, string iconUrl)
+    {
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(iconUrl)
+            || !Enum.TryParse<ResourceProjectSource>(source, ignoreCase: true, out var projectSource)
+            || projectSource is not (ResourceProjectSource.Modrinth or ResourceProjectSource.CurseForge))
         {
             return null;
         }
 
-        return TryGetCachedIconCore(entry, now, allowStale, updateLastUsed, out isStale);
+        return new ResourceProject
+        {
+            Kind = ResourceProjectKind.Mod,
+            Source = projectSource,
+            ProjectId = projectId,
+            IconUrl = iconUrl
+        };
     }
 
-    private string? TryGetCachedIconByEntryKey(
-        RemoteIconCacheIndex index,
-        string entryKey,
-        DateTimeOffset now,
-        bool allowStale,
-        bool updateLastUsed,
-        out bool isStale)
+    private async Task MigrateLegacyCacheAsync()
     {
-        isStale = false;
-        if (!index.Entries.TryGetValue(entryKey, out var entry))
-            return null;
-
-        return TryGetCachedIconCore(entry, now, allowStale, updateLastUsed, out isStale);
-    }
-
-    private string? TryGetCachedIconCore(
-        RemoteIconCacheEntry entry,
-        DateTimeOffset now,
-        bool allowStale,
-        bool updateLastUsed,
-        out bool isStale)
-    {
-        isStale = false;
-        var path = Path.Combine(cacheDirectory, entry.FileName);
-        if (!File.Exists(path))
-            return null;
-
-        if (updateLastUsed)
-            entry.LastUsedAt = now;
-        isStale = now - entry.CachedAt > RefreshAfter;
-        return isStale && !allowStale ? null : new Uri(path).AbsoluteUri;
+        try
+        {
+            var index = await LoadCacheSnapshotAsync(CancellationToken.None).ConfigureAwait(false);
+            foreach (var entry in index.Entries.Values)
+            {
+                if (GetLegacyIconPath(entry) is { } path
+                    && CreateModProject(entry.Source, entry.ProjectId, entry.IconUrl) is { } project)
+                {
+                    await thumbnailCache.MigrateModThumbnailAsync(project, path, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogDebug(exception, "Could not migrate the local Mod thumbnail cache.");
+        }
     }
 }

@@ -94,6 +94,4 @@ internal sealed class RemoteIconCacheEntry
     public DateTimeOffset CachedAt { get; init; }
 
     public DateTimeOffset LastUsedAt { get; set; }
-
-    public long SizeBytes { get; set; }
 }

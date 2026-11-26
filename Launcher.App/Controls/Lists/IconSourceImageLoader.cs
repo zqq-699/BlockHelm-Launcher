@@ -19,9 +19,9 @@
 
 using System.Collections.Concurrent;
 using System.IO;
-using Launcher.App.Logging;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Launcher.App.Logging;
 
 namespace Launcher.App.Controls;
 
@@ -29,10 +29,16 @@ internal static class IconSourceImageLoader
 {
     private const string ComponentPathPrefix = "/BlockHelm_Launcher_x64;component/";
     private const string ComponentUriPrefix = "pack://application:,,,/BlockHelm_Launcher_x64;component";
+    private const long MaximumFileCacheBytes = 16L * 1024 * 1024;
+    private const int MaximumFileCacheEntries = 1024;
 
-    private static readonly ConcurrentDictionary<string, CachedImageSource> CachedImagesByKey = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, ImageSource> PackImages = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object FileCacheLock = new();
+    private static readonly Dictionary<string, LinkedListNode<CachedFileIcon>> FileImages = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly LinkedList<CachedFileIcon> FileImageRecency = new();
+    private static long cachedFileBytes;
 
-    public static ImageSource? TryLoad(object? source)
+    public static ImageSource? TryLoad(object? source, int pixelWidth = 0, int pixelHeight = 0)
     {
         if (source is ImageSource imageSource)
             return imageSource;
@@ -43,13 +49,17 @@ internal static class IconSourceImageLoader
         try
         {
             var uri = CreateIconUri(text.Trim());
-            if (TryGetCachedImage(uri, out var cachedImage))
-                return cachedImage;
+            if (uri.IsAbsoluteUri && uri.IsFile)
+                return LoadFileIcon(uri.LocalPath, text, pixelWidth, pixelHeight);
+
+            var isPack = uri.IsAbsoluteUri && string.Equals(uri.Scheme, "pack", StringComparison.OrdinalIgnoreCase);
+            if (isPack && PackImages.TryGetValue(uri.AbsoluteUri, out var cached))
+                return cached;
 
             var image = new BitmapImage();
             ImageLoadDiagnostics.Observe(image, text);
             image.BeginInit();
-            if (ShouldLoadImmediately(uri))
+            if (isPack)
             {
                 image.CacheOption = BitmapCacheOption.OnLoad;
                 image.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
@@ -59,7 +69,8 @@ internal static class IconSourceImageLoader
             image.EndInit();
             if (image.CanFreeze)
                 image.Freeze();
-            CacheImage(uri, image);
+            if (isPack && image.IsFrozen)
+                PackImages.TryAdd(uri.AbsoluteUri, image);
             return image;
         }
         catch (Exception exception)
@@ -86,79 +97,90 @@ internal static class IconSourceImageLoader
         return new Uri(source, UriKind.RelativeOrAbsolute);
     }
 
-    private static bool ShouldLoadImmediately(Uri uri)
+    private static BitmapImage LoadFileIcon(string path, string source, int pixelWidth, int pixelHeight)
     {
-        return uri.IsFile
-            || string.Equals(uri.Scheme, "pack", StringComparison.OrdinalIgnoreCase);
-    }
+        var file = new FileInfo(path);
+        var state = new FileState(file.LastWriteTimeUtc, file.Length);
+        var useDisplaySize = pixelWidth > 0 && pixelHeight > 0;
+        var key = useDisplaySize ? $"{pixelWidth}x{pixelHeight}:{file.FullName}" : file.FullName;
 
-    private static bool TryGetCachedImage(Uri uri, out ImageSource? imageSource)
-    {
-        imageSource = null;
-        var cacheKey = TryCreateCacheKey(uri);
-        if (string.IsNullOrWhiteSpace(cacheKey))
-            return false;
-
-        if (!CachedImagesByKey.TryGetValue(cacheKey, out var cached))
-            return false;
-
-        if (uri.IsFile && !HasMatchingFileState(uri, cached))
+        lock (FileCacheLock)
         {
-            CachedImagesByKey.TryRemove(cacheKey, out _);
-            return false;
+            if (FileImages.TryGetValue(key, out var cached))
+            {
+                if (cached.Value.State == state)
+                {
+                    FileImageRecency.Remove(cached);
+                    FileImageRecency.AddFirst(cached);
+                    return cached.Value.Image;
+                }
+
+                RemoveCachedFile(cached);
+            }
         }
 
-        imageSource = cached.ImageSource;
-        return true;
+        using var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var image = new BitmapImage();
+        ImageLoadDiagnostics.Observe(image, source);
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        if (useDisplaySize)
+            ApplyDecodeSize(image, stream, pixelWidth, pixelHeight);
+        image.EndInit();
+        image.Freeze();
+
+        CacheFileIcon(key, state, image);
+        return image;
     }
 
-    private static void CacheImage(Uri uri, ImageSource imageSource)
+    private static void ApplyDecodeSize(BitmapImage image, Stream stream, int pixelWidth, int pixelHeight)
     {
-        var cacheKey = TryCreateCacheKey(uri);
-        if (string.IsNullOrWhiteSpace(cacheKey))
+        // Read the frame dimensions without retaining a full-size pixel buffer.
+        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
+        var frame = decoder.Frames[0];
+        var sourceWidth = frame.PixelWidth;
+        var sourceHeight = frame.PixelHeight;
+        stream.Position = 0;
+
+        // Match the list template's UniformToFill scaling and preserve the source aspect ratio.
+        if (sourceWidth <= pixelWidth || sourceHeight <= pixelHeight)
             return;
 
-        if (uri.IsFile)
+        if ((long)pixelWidth * sourceHeight >= (long)pixelHeight * sourceWidth)
+            image.DecodePixelWidth = pixelWidth;
+        else
+            image.DecodePixelHeight = pixelHeight;
+    }
+
+    private static void CacheFileIcon(string key, FileState state, BitmapImage image)
+    {
+        // WPF can use a 32-bit render surface even when the decoded format has fewer bits per pixel.
+        var bytes = ((long)image.PixelWidth * Math.Max(32, image.Format.BitsPerPixel) + 7) / 8 * image.PixelHeight;
+        if (bytes > MaximumFileCacheBytes)
+            return;
+
+        lock (FileCacheLock)
         {
-            var localPath = uri.LocalPath;
-            if (!File.Exists(localPath))
-                return;
+            if (FileImages.TryGetValue(key, out var existing))
+                RemoveCachedFile(existing);
 
-            var fileInfo = new FileInfo(localPath);
-            CachedImagesByKey[cacheKey] = new CachedImageSource(
-                imageSource,
-                fileInfo.LastWriteTimeUtc.Ticks,
-                fileInfo.Length);
-            return;
+            FileImages.Add(key, FileImageRecency.AddFirst(new CachedFileIcon(key, state, image, bytes)));
+            cachedFileBytes += bytes;
+
+            while (cachedFileBytes > MaximumFileCacheBytes || FileImages.Count > MaximumFileCacheEntries)
+                RemoveCachedFile(FileImageRecency.Last!);
         }
-
-        CachedImagesByKey[cacheKey] = new CachedImageSource(imageSource, null, null);
     }
 
-    private static string? TryCreateCacheKey(Uri uri)
+    private static void RemoveCachedFile(LinkedListNode<CachedFileIcon> node)
     {
-        if (uri.IsFile)
-            return uri.LocalPath;
-
-        if (string.Equals(uri.Scheme, "pack", StringComparison.OrdinalIgnoreCase))
-            return uri.AbsoluteUri;
-
-        return null;
+        FileImageRecency.Remove(node);
+        FileImages.Remove(node.Value.Key);
+        cachedFileBytes -= node.Value.Bytes;
     }
 
-    private static bool HasMatchingFileState(Uri uri, CachedImageSource cached)
-    {
-        var localPath = uri.LocalPath;
-        if (!File.Exists(localPath))
-            return false;
+    private readonly record struct FileState(DateTime LastWriteTimeUtc, long Length);
 
-        var fileInfo = new FileInfo(localPath);
-        return cached.LastWriteTimeUtcTicks == fileInfo.LastWriteTimeUtc.Ticks
-            && cached.FileLength == fileInfo.Length;
-    }
-
-    private sealed record CachedImageSource(
-        ImageSource ImageSource,
-        long? LastWriteTimeUtcTicks,
-        long? FileLength);
+    private sealed record CachedFileIcon(string Key, FileState State, BitmapImage Image, long Bytes);
 }

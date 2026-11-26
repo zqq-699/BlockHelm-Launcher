@@ -18,6 +18,8 @@ namespace Launcher.Application.Services;
 /// </summary>
 public interface IResourceThumbnailService
 {
+    const int ThumbnailSize = 64;
+
     string? TryGetCachedThumbnailSource(ResourceProject project);
 
     Task<string?> GetOrCreateThumbnailSourceAsync(

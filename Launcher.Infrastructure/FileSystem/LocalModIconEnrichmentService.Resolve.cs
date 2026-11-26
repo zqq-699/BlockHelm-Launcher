@@ -48,6 +48,7 @@ public sealed partial class LocalModIconEnrichmentService
         if (candidates.Count == 0)
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        StartCacheMigration();
         logger.LogDebug(
             "Remote local mod icon enrichment started. CandidateCount={CandidateCount}",
             candidates.Count);
@@ -83,17 +84,7 @@ public sealed partial class LocalModIconEnrichmentService
             }
         }
 
-        RemoteIconCacheIndex cacheSnapshot;
-        await cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            Directory.CreateDirectory(cacheDirectory);
-            cacheSnapshot = await cacheIndexStore.LoadAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            cacheLock.Release();
-        }
+        var cacheSnapshot = await LoadCacheSnapshotAsync(cancellationToken).ConfigureAwait(false);
 
         var remoteChannel = Channel.CreateUnbounded<ModIconLookupCandidate>(new UnboundedChannelOptions
         {
@@ -117,25 +108,17 @@ public sealed partial class LocalModIconEnrichmentService
                 if (lookup is null)
                     continue;
 
-                var cachedIcon = TryGetCachedIcon(
-                    cacheSnapshot,
-                    lookup.Sha1Alias,
-                    now,
-                    allowStale: true,
-                    updateLastUsed: false,
-                    out var isStale);
-                if (cachedIcon is not null)
+                if (cacheSnapshot.Aliases.TryGetValue(lookup.Sha1Alias, out var entryKey)
+                    && cacheSnapshot.Entries.TryGetValue(entryKey, out var entry)
+                    && await GetCachedIconAsync(entry, cancellationToken).ConfigureAwait(false) is { } cachedIcon)
                 {
                     result[lookup.FullPath] = cachedIcon;
                     contentCacheHits++;
-                    if (cacheSnapshot.Aliases.TryGetValue(lookup.Sha1Alias, out var entryKey))
-                    {
-                        cacheFileAliases[lookup.FileAlias] = entryKey;
-                        touchedEntryKeys.Add(entryKey);
-                    }
+                    cacheFileAliases[lookup.FileAlias] = entryKey;
+                    touchedEntryKeys.Add(entryKey);
 
                     ReportResolvedIcon(lookup.FullPath, cachedIcon);
-                    if (!isStale)
+                    if (now - entry.CachedAt <= RefreshAfter)
                         continue;
                 }
 
@@ -190,43 +173,46 @@ public sealed partial class LocalModIconEnrichmentService
         if (candidates.Count == 0)
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        var now = DateTimeOffset.UtcNow;
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        await cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        var index = await LoadCacheSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var mod in candidates)
         {
-            var index = await cacheIndexStore.LoadAsync(cancellationToken).ConfigureAwait(false);
-            foreach (var mod in candidates)
+            cancellationToken.ThrowIfCancellationRequested();
+            var fileAlias = TryCreateFileAlias(mod.FullPath);
+            if (fileAlias is not null
+                && index.FileAliases.TryGetValue(fileAlias, out var entryKey)
+                && index.Entries.TryGetValue(entryKey, out var entry)
+                && await GetCachedIconAsync(entry, cancellationToken).ConfigureAwait(false) is { } cachedIcon)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var fileAlias = TryCreateFileAlias(mod.FullPath);
-                if (fileAlias is null
-                    || !index.FileAliases.TryGetValue(fileAlias, out var entryKey))
-                {
-                    continue;
-                }
-
-                var cachedIcon = TryGetCachedIconByEntryKey(
-                    index,
-                    entryKey,
-                    now,
-                    allowStale: true,
-                    updateLastUsed: false,
-                    out _);
-                if (cachedIcon is not null)
-                    result[mod.FullPath] = cachedIcon;
+                result[mod.FullPath] = cachedIcon;
             }
         }
-        finally
-        {
-            cacheLock.Release();
-        }
 
+        StartCacheMigration();
         logger.LogDebug(
             "Remote local mod icon cache checked. CandidateCount={CandidateCount} HitCount={HitCount}",
             candidates.Count,
             result.Count);
         return result;
+    }
+
+    private void StartCacheMigration()
+    {
+        if (Interlocked.Exchange(ref cacheMigrationStarted, 1) == 0)
+            _ = Task.Run(MigrateLegacyCacheAsync);
+    }
+
+    private async Task<RemoteIconCacheIndex> LoadCacheSnapshotAsync(CancellationToken cancellationToken)
+    {
+        await cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await cacheIndexStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            cacheLock.Release();
+        }
     }
 
     private async Task<int> ConsumeRemoteCandidatesAsync(

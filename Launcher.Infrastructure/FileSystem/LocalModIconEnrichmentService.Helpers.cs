@@ -63,19 +63,4 @@ public sealed partial class LocalModIconEnrichmentService
         return Path.Combine(cacheDirectory, $"{hash}.png");
     }
 
-    private static void DeleteFileIfExists(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-    }
-
 }

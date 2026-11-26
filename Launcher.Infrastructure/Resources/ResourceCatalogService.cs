@@ -95,6 +95,8 @@ public sealed class ResourceCatalogService :
     public string? TryGetCachedThumbnailSource(ResourceProject project) =>
         thumbnailCache.TryGetCachedThumbnailSource(project);
 
+    internal ResourceThumbnailCacheService ThumbnailCache => thumbnailCache;
+
     public Task<string?> GetOrCreateThumbnailSourceAsync(
         ResourceProject project,
         CancellationToken cancellationToken = default) =>

@@ -146,6 +146,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<IDownloadSpeedLimitState>(),
             serviceProvider.GetService<IImportConcurrencyLimiter>()));
         services.AddSingleton<ResourceCatalogService>();
+        services.AddSingleton(serviceProvider => serviceProvider.GetRequiredService<ResourceCatalogService>().ThumbnailCache);
         services.AddSingleton<IResourceCatalogService>(serviceProvider =>
             serviceProvider.GetRequiredService<ResourceCatalogService>());
         services.AddSingleton<IResourceThumbnailService>(serviceProvider =>

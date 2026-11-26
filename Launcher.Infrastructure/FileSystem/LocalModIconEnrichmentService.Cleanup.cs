@@ -32,8 +32,8 @@ namespace Launcher.Infrastructure.FileSystem;
 
 public sealed partial class LocalModIconEnrichmentService
 {
-/// <summary>
-    /// 每个服务生命周期只清理一次：先删除过期项，超限时再按最近最少使用淘汰到目标大小。
+    /// <summary>
+    /// 每个服务生命周期清理一次本地索引，图标文件由共享资源缓存维护。
     /// </summary>
     private async Task CleanupCacheOnceAsync(CancellationToken cancellationToken)
     {
@@ -53,30 +53,12 @@ public sealed partial class LocalModIconEnrichmentService
 
             foreach (var pair in index.Entries.ToArray())
             {
-                var path = Path.Combine(cacheDirectory, pair.Value.FileName);
-                if (!File.Exists(path) || now - pair.Value.LastUsedAt > UnusedExpiration)
+                var entry = pair.Value;
+                var project = CreateModProject(entry.Source, entry.ProjectId, entry.IconUrl);
+                if (now - entry.LastUsedAt > UnusedExpiration
+                    || (GetLegacyIconPath(entry) is null
+                        && (project is null || thumbnailCache.TryGetCachedThumbnailSource(project) is null)))
                 {
-                    DeleteFileIfExists(path);
-                    index.Entries.Remove(pair.Key);
-                    removed++;
-                }
-                else
-                {
-                    pair.Value.SizeBytes = new FileInfo(path).Length;
-                }
-            }
-
-            var totalBytes = index.Entries.Values.Sum(entry => entry.SizeBytes);
-            if (totalBytes > MaxCacheBytes)
-            {
-                foreach (var pair in index.Entries.OrderBy(pair => pair.Value.LastUsedAt).ToArray())
-                {
-                    if (totalBytes <= TargetCacheBytes)
-                        break;
-
-                    var path = Path.Combine(cacheDirectory, pair.Value.FileName);
-                    DeleteFileIfExists(path);
-                    totalBytes -= pair.Value.SizeBytes;
                     index.Entries.Remove(pair.Key);
                     removed++;
                 }
@@ -101,9 +83,9 @@ public sealed partial class LocalModIconEnrichmentService
             await cacheIndexStore.SaveAsync(index, cancellationToken).ConfigureAwait(false);
             cleanupCompleted = true;
             logger.LogInformation(
-                "Remote local mod icon cache cleanup completed. RemovedCount={RemovedCount} TotalBytes={TotalBytes}",
+                "Remote local mod icon index cleanup completed. RemovedCount={RemovedCount} RemainingCount={RemainingCount}",
                 removed,
-                index.Entries.Values.Sum(entry => entry.SizeBytes));
+                index.Entries.Count);
         }
         finally
         {

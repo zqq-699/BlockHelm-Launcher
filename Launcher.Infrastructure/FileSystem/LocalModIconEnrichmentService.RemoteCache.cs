@@ -57,36 +57,21 @@ public sealed partial class LocalModIconEnrichmentService
     }
 
     /// <summary>
-    /// 限制下载大小、验证并规范化图像，然后在缓存锁内提交文件和索引别名。
+    /// 通过共享资源缓存解析图像，在本地索引中记录文件别名与项目的映射。
     /// </summary>
     private async Task<string?> CacheRemoteIconAsync(
         ModIconLookupCandidate lookup,
         RemoteIconCandidate icon,
         CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(icon.IconUrl, UriKind.Absolute, out _))
+        var project = CreateModProject(icon.Source, icon.ProjectId, icon.IconUrl);
+        if (project is null)
             return null;
 
-        byte[] imageBytes;
-        try
-        {
-            imageBytes = await thumbnailDownloader
-                .DownloadAsync(icon.IconUrl, MaxIconBytes, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(
-                exception,
-                "Failed to download remote local mod icon. Source={Source} ProjectId={ProjectId}",
-                icon.Source,
-                icon.ProjectId);
+        var iconSource = await thumbnailCache.GetOrCreateThumbnailSourceAsync(project, cancellationToken)
+            .ConfigureAwait(false);
+        if (iconSource is null)
             return null;
-        }
 
         await cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -95,47 +80,24 @@ public sealed partial class LocalModIconEnrichmentService
             var index = await cacheIndexStore.LoadAsync(cancellationToken).ConfigureAwait(false);
             var now = DateTimeOffset.UtcNow;
             var entryKey = $"{icon.Source}:{icon.ProjectId}";
-            var cachePath = GetIconCachePath(entryKey);
-
-            try
-            {
-                RemoteIconImageEncoder.SaveAsPng(imageBytes, cachePath);
-            }
-            catch (Exception exception) when (
-                exception is NotSupportedException
-                or InvalidDataException
-                or ArgumentException
-                or IOException)
-            {
-                logger.LogWarning(
-                    exception,
-                    "Remote local mod icon was invalid. Source={Source} ProjectId={ProjectId}",
-                    icon.Source,
-                    icon.ProjectId);
-                return null;
-            }
-
-            var sizeBytes = new FileInfo(cachePath).Length;
             index.Entries[entryKey] = new RemoteIconCacheEntry
             {
                 Source = icon.Source,
                 ProjectId = icon.ProjectId,
                 IconUrl = icon.IconUrl,
-                FileName = Path.GetFileName(cachePath),
+                FileName = index.Entries.GetValueOrDefault(entryKey)?.FileName ?? string.Empty,
                 CachedAt = now,
-                LastUsedAt = now,
-                SizeBytes = sizeBytes
+                LastUsedAt = now
             };
             index.Aliases[lookup.Sha1Alias] = entryKey;
             index.FileAliases[lookup.FileAlias] = entryKey;
             await cacheIndexStore.SaveAsync(index, cancellationToken).ConfigureAwait(false);
 
             logger.LogDebug(
-                "Remote local mod icon cached. Source={Source} ProjectId={ProjectId} SizeBytes={SizeBytes}",
+                "Remote local mod icon mapped to the shared cache. Source={Source} ProjectId={ProjectId}",
                 icon.Source,
-                icon.ProjectId,
-                sizeBytes);
-            return new Uri(cachePath).AbsoluteUri;
+                icon.ProjectId);
+            return iconSource;
         }
         finally
         {

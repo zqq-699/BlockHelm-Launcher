@@ -27,6 +27,7 @@ using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.CurseForge;
 using Launcher.Infrastructure.Minecraft;
+using Launcher.Infrastructure.Resources;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -38,19 +39,15 @@ namespace Launcher.Infrastructure.FileSystem;
 public sealed partial class LocalModIconEnrichmentService : ILocalModIconEnrichmentService
 {
     private const int ProviderBatchSize = 50;
-    private const long MaxIconBytes = 1024L * 1024L;
-    private const long MaxCacheBytes = 50L * 1024L * 1024L;
-    private const long TargetCacheBytes = 40L * 1024L * 1024L;
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromDays(30);
     private static readonly TimeSpan UnusedExpiration = TimeSpan.FromDays(30);
 
-    private readonly HttpClient httpClient;
-    private readonly RemoteThumbnailDownloadClient thumbnailDownloader;
-    private readonly LauncherPathProvider pathProvider;
+    private readonly ResourceThumbnailCacheService thumbnailCache;
     private readonly RemoteModIconProviderClient providerClient;
     private readonly LocalFileFingerprintService fingerprintService;
     private readonly ILogger<LocalModIconEnrichmentService> logger;
     private readonly SemaphoreSlim cacheLock = new(1, 1);
+    private int cacheMigrationStarted;
     private readonly string cacheDirectory;
     private readonly RemoteIconCacheIndexStore cacheIndexStore;
     private bool cleanupCompleted;
@@ -62,21 +59,23 @@ public sealed partial class LocalModIconEnrichmentService : ILocalModIconEnrichm
         ILogger<LocalModIconEnrichmentService>? logger = null,
         IImportConcurrencyLimiter? limiter = null,
         IDownloadSpeedLimitState? downloadSpeedLimitState = null,
-        LocalFileFingerprintService? fingerprintService = null)
+        LocalFileFingerprintService? fingerprintService = null,
+        ResourceThumbnailCacheService? thumbnailCache = null)
     {
-        this.pathProvider = pathProvider ?? new LauncherPathProvider();
-        this.httpClient = LauncherHttpUserAgent.Apply(
+        var resolvedPathProvider = pathProvider ?? new LauncherPathProvider();
+        var resolvedHttpClient = LauncherHttpUserAgent.Apply(
             httpClient ?? MinecraftHttpClientFactory.CreateTransportClient());
         this.logger = logger ?? NullLogger<LocalModIconEnrichmentService>.Instance;
-        thumbnailDownloader = new RemoteThumbnailDownloadClient(
-            this.httpClient,
+        this.thumbnailCache = thumbnailCache ?? new ResourceThumbnailCacheService(
+            resolvedPathProvider,
+            resolvedHttpClient,
             limiter,
             downloadSpeedLimitState,
             this.logger);
-        var apiKeyResolver = curseForgeApiKeyResolver ?? new CurseForgeApiKeyResolver(this.pathProvider);
-        providerClient = new RemoteModIconProviderClient(this.httpClient, apiKeyResolver, this.logger);
+        var apiKeyResolver = curseForgeApiKeyResolver ?? new CurseForgeApiKeyResolver(resolvedPathProvider);
+        providerClient = new RemoteModIconProviderClient(resolvedHttpClient, apiKeyResolver, this.logger);
         this.fingerprintService = fingerprintService ?? new LocalFileFingerprintService();
-        cacheDirectory = Path.Combine(this.pathProvider.DefaultDataDirectory, "cache", "mods", "remote-icons");
+        cacheDirectory = Path.Combine(resolvedPathProvider.DefaultDataDirectory, "cache", "mods", "remote-icons");
         cacheIndexStore = new RemoteIconCacheIndexStore(cacheDirectory, this.logger);
     }
 }
