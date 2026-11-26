@@ -614,6 +614,11 @@ public static class Strings
     public static string GameSettings_DetailPlaceholderBodyFormat => Get(nameof(GameSettings_DetailPlaceholderBodyFormat));
     public static string GameSettings_GeneralDescriptionSection => Get(nameof(GameSettings_GeneralDescriptionSection));
     public static string GameSettings_GeneralSaveDescriptionButton => Get(nameof(GameSettings_GeneralSaveDescriptionButton));
+    public static string GameSettings_CleanupButton => Get(nameof(GameSettings_CleanupButton));
+    public static string GameSettings_CleanupDescription => Get(nameof(GameSettings_CleanupDescription));
+    public static string GameSettings_CleanupBusy => Get(nameof(GameSettings_CleanupBusy));
+    public static string GameSettings_CleanupFailed => Get(nameof(GameSettings_CleanupFailed));
+    public static string GameSettings_CleanupResultFormat => Get(nameof(GameSettings_CleanupResultFormat));
     public static string GameSettings_GeneralInstanceDirectorySection => Get(nameof(GameSettings_GeneralInstanceDirectorySection));
     public static string GameSettings_GeneralOpenInstanceDirectoryButton => Get(nameof(GameSettings_GeneralOpenInstanceDirectoryButton));
     public static string GameSettings_GeneralCreatedAtSection => Get(nameof(GameSettings_GeneralCreatedAtSection));

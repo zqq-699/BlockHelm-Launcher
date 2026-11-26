@@ -1018,6 +1018,22 @@
                 </controls:DialogHost.DialogContentTemplate>
             </controls:DialogHost>
 
+            <controls:DialogHost x:Name="InstanceCleanupDialogHost"
+                                 Grid.ColumnSpan="2" Grid.RowSpan="2"
+                                 DialogWidth="440" UseIntegratedOverlay="True"
+                                 IsOpen="{Binding IsCleanupDialogOpen}"
+                                 DataContext="{Binding GameSettingsPage.Details.General}">
+                <Grid Style="{StaticResource DialogContentGridStyle}">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <TextBlock Text="{x:Static res:Strings.GameSettings_CleanupButton}" Style="{StaticResource DialogTitleTextStyle}" />
+                    <TextBlock Grid.Row="1" Margin="0,16,0,24" Text="{x:Static res:Strings.GameSettings_CleanupDescription}" Style="{StaticResource DialogBodyTextStyle}" />
+                    <StackPanel Grid.Row="2" Style="{StaticResource DialogFooterStyle}">
+                        <Button Style="{StaticResource LauncherDialogButtonStyle}" Content="{x:Static res:Strings.Cancel_Button}" Command="{Binding CancelCleanupCommand}" />
+                        <Button Style="{StaticResource LauncherDangerDialogButtonStyle}" Margin="{StaticResource DialogTrailingButtonMargin}" Content="{x:Static res:Strings.GameSettings_CleanupButton}" Command="{Binding ConfirmCleanupCommand}" />
+                    </StackPanel>
+                </Grid>
+            </controls:DialogHost>
+
             <controls:DialogHost x:Name="DeleteModsDialogHost"
                                  Grid.ColumnSpan="2"
                                  Grid.RowSpan="2"

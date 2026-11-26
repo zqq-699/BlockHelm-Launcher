@@ -2321,7 +2321,7 @@
     <value>儲存描述</value>
   </data>
   <data name="GameSettings_GeneralInstanceDirectorySection" xml:space="preserve">
-    <value>遊戲目錄</value>
+    <value>快捷操作</value>
   </data>
   <data name="GameSettings_GeneralOpenInstanceDirectoryButton" xml:space="preserve">
     <value>開啟遊戲目錄</value>
@@ -3871,4 +3871,9 @@
   <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>較長的更新內容現在可以捲動檢視。</value></data>
   <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>預覽更新子項 {0}：這是一條用於檢查較長更新日誌、自動換行和捲動效果的範例內容。</value></data>
   <data name="Markdown_ContentTruncated" xml:space="preserve"><value>更新日誌內容過長，已截斷顯示。可開啟完整更新日誌繼續查看。</value></data>
+  <data name="GameSettings_CleanupButton" xml:space="preserve"><value>清理垃圾檔案</value></data>
+  <data name="GameSettings_CleanupDescription" xml:space="preserve"><value>確定要清理遊戲垃圾檔案嗎？這包括遊戲記錄、當機報告、錯誤分析等內容。&#xA;&#xA;清理前請關閉此實例，包括透過其他啟動器啟動的遊戲。</value></data>
+  <data name="GameSettings_CleanupBusy" xml:space="preserve"><value>此實例正在啟動、執行或清理，請稍後再試。</value></data>
+  <data name="GameSettings_CleanupFailed" xml:space="preserve"><value>清理失敗，請檢查實例目錄及檔案權限後重試。</value></data>
+  <data name="GameSettings_CleanupResultFormat" xml:space="preserve"><value>清理完成：刪除 {0} 個檔案，略過或未能刪除 {1} 個檔案。</value></data>
 </root>

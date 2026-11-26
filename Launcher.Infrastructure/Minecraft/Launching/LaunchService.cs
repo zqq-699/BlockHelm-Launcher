@@ -50,6 +50,7 @@ public sealed partial class LaunchService : ILaunchService
     private readonly IOfflineSkinLaunchService? offlineSkinLaunchService;
     private readonly LaunchSettingsResolver launchSettingsResolver;
     private readonly ILogger<LaunchService> logger;
+    private readonly InstanceActivityCoordinator? instanceActivityCoordinator;
 
     public LaunchService(
         ILaunchAccountSessionService accountSessionService,
@@ -61,7 +62,8 @@ public sealed partial class LaunchService : ILaunchService
         IGameLanguageService? gameLanguageService = null,
         ILogger<LaunchService>? logger = null,
         IAuthlibInjectorProvisioningService? authlibInjectorProvisioningService = null,
-        IOfflineSkinLaunchService? offlineSkinLaunchService = null)
+        IOfflineSkinLaunchService? offlineSkinLaunchService = null,
+        InstanceActivityCoordinator? instanceActivityCoordinator = null)
         : this(
             accountSessionService,
             new GameFileIntegrityService(downloadSpeedLimitState),
@@ -75,7 +77,8 @@ public sealed partial class LaunchService : ILaunchService
             gameLanguageService,
             logger,
             authlibInjectorProvisioningService,
-            offlineSkinLaunchService)
+            offlineSkinLaunchService,
+            instanceActivityCoordinator: instanceActivityCoordinator)
     {
     }
 
@@ -90,7 +93,8 @@ public sealed partial class LaunchService : ILaunchService
         IGameLanguageService? gameLanguageService = null,
         ILogger<LaunchService>? logger = null,
         IAuthlibInjectorProvisioningService? authlibInjectorProvisioningService = null,
-        IOfflineSkinLaunchService? offlineSkinLaunchService = null)
+        IOfflineSkinLaunchService? offlineSkinLaunchService = null,
+        InstanceActivityCoordinator? instanceActivityCoordinator = null)
         : this(
             accountSessionService,
             gameFileIntegrityService,
@@ -104,7 +108,8 @@ public sealed partial class LaunchService : ILaunchService
             gameLanguageService,
             logger,
             authlibInjectorProvisioningService,
-            offlineSkinLaunchService)
+            offlineSkinLaunchService,
+            instanceActivityCoordinator: instanceActivityCoordinator)
     {
     }
 
@@ -123,7 +128,8 @@ public sealed partial class LaunchService : ILaunchService
         IAuthlibInjectorProvisioningService? authlibInjectorProvisioningService = null,
         IOfflineSkinLaunchService? offlineSkinLaunchService = null,
         IGameStartupReadinessWaiter? gameStartupReadinessWaiter = null,
-        ILaunchProcessTerminator? launchProcessTerminator = null)
+        ILaunchProcessTerminator? launchProcessTerminator = null,
+        InstanceActivityCoordinator? instanceActivityCoordinator = null)
         : this(
             accountSessionService,
             new LegacyManagedVersionRepairAdapter(versionRepairService),
@@ -139,7 +145,8 @@ public sealed partial class LaunchService : ILaunchService
             authlibInjectorProvisioningService,
             offlineSkinLaunchService,
             gameStartupReadinessWaiter,
-            launchProcessTerminator)
+            launchProcessTerminator,
+            instanceActivityCoordinator)
     {
     }
 
@@ -158,9 +165,11 @@ public sealed partial class LaunchService : ILaunchService
         IAuthlibInjectorProvisioningService? authlibInjectorProvisioningService = null,
         IOfflineSkinLaunchService? offlineSkinLaunchService = null,
         IGameStartupReadinessWaiter? gameStartupReadinessWaiter = null,
-        ILaunchProcessTerminator? launchProcessTerminator = null)
+        ILaunchProcessTerminator? launchProcessTerminator = null,
+        InstanceActivityCoordinator? instanceActivityCoordinator = null)
     {
         this.accountSessionService = accountSessionService;
+        this.instanceActivityCoordinator = instanceActivityCoordinator;
         this.gameFileIntegrityService = gameFileIntegrityService;
         this.launcherFactory = launcherFactory;
         this.crashMonitor = crashMonitor;
@@ -341,6 +350,7 @@ public sealed partial class LaunchService : ILaunchService
                         diagnosticContext.InstanceDirectory,
                         diagnosticContext.VersionName);
                     var monitorSession = crashMonitorSession.CreateGameLaunchSession(canceledProcess, diagnosticContext);
+                    KeepInstanceBusyUntilExit(diagnosticContext.InstanceDirectory, monitorSession.ExitTask);
                     _ = ObserveGameExitAfterCancellationCleanupFailureAsync(
                         monitorSession.ExitTask,
                         diagnosticContext);
@@ -411,6 +421,7 @@ public sealed partial class LaunchService : ILaunchService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            ProtectRunningProcess(instance.InstanceDirectory, process);
             var report = await WriteFailureDiagnosticAsync(
                 diagnosticContext,
                 "launch_failed",
@@ -421,6 +432,27 @@ public sealed partial class LaunchService : ILaunchService
                 launchAttemptStartedAt,
                 cancellationToken);
             throw new LaunchFailedException(report, exception);
+        }
+    }
+
+    private void KeepInstanceBusyUntilExit(string instanceDirectory, Task exitTask)
+    {
+        if (instanceActivityCoordinator is null) return;
+        var lease = instanceActivityCoordinator.EnterLaunch(instanceDirectory);
+        _ = exitTask.ContinueWith(_ => lease.Dispose(), CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    private void ProtectRunningProcess(string instanceDirectory, System.Diagnostics.Process? process)
+    {
+        if (instanceActivityCoordinator is null || process is null) return;
+        try
+        {
+            if (!process.HasExited) KeepInstanceBusyUntilExit(instanceDirectory, process.WaitForExitAsync());
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            logger.LogWarning(exception, "Unable to track process after launch failure. InstanceDirectory={InstanceDirectory}", instanceDirectory);
         }
     }
 }

@@ -63,12 +63,50 @@ internal static class WindowsDirectoryHandleMover
 
     internal static SafeFileHandle AcquireReadLease(string path) => OpenDirectory(path, requireDelete: false, shareDelete: false, requireList: true);
 
-    private static SafeFileHandle OpenDirectory(string path, bool requireDelete = true, bool shareDelete = true, bool requireList = false)
+    internal readonly record struct CleanupFileSnapshot(string Identity, long Length, long LastWriteTimeUtcTicks);
+
+    internal static CleanupFileSnapshot? CaptureCleanupFile(string path)
+    {
+        using var handle = OpenDirectory(path, requireDelete: false);
+        return ReadCleanupFileSnapshot(handle);
+    }
+
+    internal static bool DeleteFileIfIdentityMatches(string path, string expectedProof, long length, long lastWriteTimeUtcTicks)
+    {
+        // Deny concurrent writers and renames until the verified handle has been deleted and closed.
+        using var handle = OpenDirectory(path, requireDelete: true, shareDelete: false, shareWrite: false);
+        var snapshot = ReadCleanupFileSnapshot(handle);
+        if (snapshot is not { } current
+            || !string.Equals(current.Identity, expectedProof, StringComparison.Ordinal)
+            || current.Length != length || current.LastWriteTimeUtcTicks != lastWriteTimeUtcTicks) return false;
+        var buffer = Marshal.AllocHGlobal(1);
+        try
+        {
+            Marshal.WriteByte(buffer, 1);
+            if (!SetFileInformationByHandle(handle, 4, buffer, 1))
+                throw new IOException("Unable to delete cleanup file.", new Win32Exception(Marshal.GetLastWin32Error()));
+            return true;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static CleanupFileSnapshot? ReadCleanupFileSnapshot(SafeFileHandle handle)
+    {
+        if (!GetFileInformationByHandle(handle, out var info))
+            throw new IOException("Unable to inspect cleanup file.", new Win32Exception(Marshal.GetLastWin32Error()));
+        if ((info.FileAttributes & (uint)(FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) return null;
+        var identity = $"directory-v2:{info.VolumeSerialNumber:X8}:{((ulong)info.FileIndexHigh << 32) | info.FileIndexLow:X16}";
+        var length = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
+        var fileTime = ((long)info.LastWriteTime.dwHighDateTime << 32) | (uint)info.LastWriteTime.dwLowDateTime;
+        return new CleanupFileSnapshot(identity, length, DateTime.FromFileTimeUtc(fileTime).Ticks);
+    }
+
+    private static SafeFileHandle OpenDirectory(string path, bool requireDelete = true, bool shareDelete = true, bool requireList = false, bool shareWrite = true)
     {
         var handle = CreateFileW(
             Path.GetFullPath(path),
             (requireDelete ? DeleteAccess : 0) | FileReadAttributes | (requireList ? FileListDirectory : 0),
-            ShareRead | ShareWrite | (shareDelete ? ShareDelete : 0),
+            ShareRead | (shareWrite ? ShareWrite : 0) | (shareDelete ? ShareDelete : 0),
             IntPtr.Zero,
             OpenExisting,
             FileFlagBackupSemantics | FileFlagOpenReparsePoint,

@@ -2321,7 +2321,7 @@ Longer content wraps automatically.</value>
     <value>Save Description</value>
   </data>
   <data name="GameSettings_GeneralInstanceDirectorySection" xml:space="preserve">
-    <value>Instance Folder</value>
+    <value>Quick actions</value>
   </data>
   <data name="GameSettings_GeneralOpenInstanceDirectoryButton" xml:space="preserve">
     <value>Open Instance Folder</value>
@@ -3871,4 +3871,9 @@ The current game folder will be backed up first.</value>
   <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>Long release notes can now be scrolled.</value></data>
   <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>Preview update item {0}: this longer example checks release-note wrapping and scrolling behavior.</value></data>
   <data name="Markdown_ContentTruncated" xml:space="preserve"><value>The release notes are too long and have been truncated. Open the full changelog to continue reading.</value></data>
+  <data name="GameSettings_CleanupButton" xml:space="preserve"><value>Clean junk files</value></data>
+  <data name="GameSettings_CleanupDescription" xml:space="preserve"><value>Are you sure you want to clean this game’s junk files? This includes game logs, crash reports, and error diagnostics.&#xA;&#xA;Close this instance first, including games started by other launchers.</value></data>
+  <data name="GameSettings_CleanupBusy" xml:space="preserve"><value>This instance is launching, running, or being cleaned. Try again later.</value></data>
+  <data name="GameSettings_CleanupFailed" xml:space="preserve"><value>Cleanup failed. Check the instance directory and file permissions, then try again.</value></data>
+  <data name="GameSettings_CleanupResultFormat" xml:space="preserve"><value>Cleanup complete: {0} files deleted, {1} skipped or failed.</value></data>
 </root>

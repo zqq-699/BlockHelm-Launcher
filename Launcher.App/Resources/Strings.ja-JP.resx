@@ -2321,7 +2321,7 @@
     <value>説明を保存</value>
   </data>
   <data name="GameSettings_GeneralInstanceDirectorySection" xml:space="preserve">
-    <value>ゲームディレクトリ</value>
+    <value>クイック操作</value>
   </data>
   <data name="GameSettings_GeneralOpenInstanceDirectoryButton" xml:space="preserve">
     <value>ゲームディレクトリを開く</value>
@@ -3871,4 +3871,9 @@
   <data name="Dialog_UpdatePreviewFixTwo" xml:space="preserve"><value>長い更新内容をスクロールして確認できます。</value></data>
   <data name="Dialog_UpdatePreviewAdditionalItemFormat" xml:space="preserve"><value>プレビュー更新項目 {0}：長いリリースノートの折り返しとスクロール動作を確認するためのサンプルです。</value></data>
   <data name="Markdown_ContentTruncated" xml:space="preserve"><value>リリースノートが長いため、表示を省略しました。完全な更新履歴を開いて続きを確認できます。</value></data>
+  <data name="GameSettings_CleanupButton" xml:space="preserve"><value>不要ファイルを削除</value></data>
+  <data name="GameSettings_CleanupDescription" xml:space="preserve"><value>ゲームの不要ファイルを削除しますか？ゲームログ、クラッシュレポート、エラー診断などが含まれます。&#xA;&#xA;他のランチャーから起動したゲームも含め、先にこのインスタンスを終了してください。</value></data>
+  <data name="GameSettings_CleanupBusy" xml:space="preserve"><value>このインスタンスは起動中、実行中、または削除処理中です。後でもう一度お試しください。</value></data>
+  <data name="GameSettings_CleanupFailed" xml:space="preserve"><value>削除に失敗しました。インスタンスのフォルダーと権限を確認してください。</value></data>
+  <data name="GameSettings_CleanupResultFormat" xml:space="preserve"><value>削除完了: {0} ファイルを削除、{1} ファイルをスキップまたは削除失敗。</value></data>
 </root>

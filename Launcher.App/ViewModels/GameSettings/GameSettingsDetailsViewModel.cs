@@ -68,7 +68,8 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
         ILogger<GameSettingsDetailsViewModel>? logger = null,
         ILoggerFactory? loggerFactory = null,
         IModpackExportService? modpackExportService = null,
-        IModUpdateService? modUpdateService = null)
+        IModUpdateService? modUpdateService = null,
+        IInstanceCleanupService? instanceCleanupService = null)
     {
         var resolvedLogger = logger ?? NullLogger<GameSettingsDetailsViewModel>.Instance;
         this.logger = resolvedLogger;
@@ -83,7 +84,10 @@ public sealed partial class GameSettingsDetailsViewModel : ObservableObject, IDi
             editDialog,
             instanceFolderService,
             statusService,
-            persistence);
+            persistence,
+            instanceCleanupService,
+            floatingMessageService,
+            loggerFactory?.CreateLogger<InstanceGeneralSettingsViewModel>());
         General.DeleteInstanceRequested += General_DeleteInstanceRequested;
         Launch = new InstanceLaunchSettingsViewModel(systemMemoryService, modService, persistence);
         Java = new InstanceJavaSettingsViewModel(

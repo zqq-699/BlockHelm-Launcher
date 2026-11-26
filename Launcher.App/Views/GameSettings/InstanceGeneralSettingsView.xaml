@@ -76,15 +76,6 @@
             </GroupBox>
 
             <GroupBox Margin="0,26,0,0"
-                      Header="{x:Static res:Strings.GameSettings_GeneralInstanceDirectorySection}"
-                      Style="{StaticResource LauncherContentSectionStyle}">
-                <Button HorizontalAlignment="Left"
-                        Content="{x:Static res:Strings.GameSettings_GeneralOpenInstanceDirectoryButton}"
-                        Command="{Binding OpenInstanceDirectoryCommand}"
-                        Style="{StaticResource LauncherPrimaryDialogButtonStyle}" />
-            </GroupBox>
-
-            <GroupBox Margin="0,26,0,0"
                       Header="{x:Static res:Strings.GameSettings_GeneralCreatedAtSection}"
                       Style="{StaticResource LauncherContentSectionStyle}">
                 <Border Style="{StaticResource ReadOnlyFieldSurfaceStyle}">
@@ -93,11 +84,25 @@
                 </Border>
             </GroupBox>
 
-            <Button Margin="0,26,0,0"
-                    HorizontalAlignment="Left"
-                    Content="{x:Static res:Strings.GameSettings_DeleteGameButton}"
-                    Command="{Binding RequestDeleteInstanceCommand}"
-                    Style="{StaticResource LauncherDangerDialogButtonStyle}" />
+            <GroupBox Margin="0,26,0,0"
+                      Header="{x:Static res:Strings.GameSettings_GeneralInstanceDirectorySection}"
+                      Style="{StaticResource LauncherContentSectionStyle}">
+                <StackPanel Orientation="Horizontal">
+                    <Button HorizontalAlignment="Left"
+                            Content="{x:Static res:Strings.GameSettings_GeneralOpenInstanceDirectoryButton}"
+                            Command="{Binding OpenInstanceDirectoryCommand}"
+                            Style="{StaticResource LauncherDialogButtonStyle}" />
+                    <Button Margin="12,0,0,0"
+                            Content="{x:Static res:Strings.GameSettings_CleanupButton}"
+                            Command="{Binding RequestCleanupCommand}"
+                            Style="{StaticResource LauncherDialogButtonStyle}" />
+                    <Button Margin="12,0,0,0"
+                            Content="{x:Static res:Strings.GameSettings_DeleteGameButton}"
+                            Command="{Binding RequestDeleteInstanceCommand}"
+                            Style="{StaticResource LauncherDangerDialogButtonStyle}" />
+                </StackPanel>
+            </GroupBox>
+
         </StackPanel>
     </StackPanel>
 </UserControl>

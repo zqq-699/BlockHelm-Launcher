@@ -24,6 +24,8 @@ using Launcher.App.Resources;
 using Launcher.App.Services;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Launcher.App.ViewModels.GameSettings;
 
@@ -38,6 +40,13 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
     private GameSettingsInstanceItem? selectedInstance;
     private GameInstance? settingsInstance;
     private bool suppressAutoSave;
+    private readonly IInstanceCleanupService? cleanupService;
+    private readonly IFloatingMessageService floatingMessageService;
+    private readonly ILogger logger;
+    private InstanceCleanupPreview? cleanupPreview;
+
+    [ObservableProperty] private bool isCleanupDialogOpen;
+    [ObservableProperty] private bool isCleanupBusy;
 
     [ObservableProperty]
     private string descriptionText = string.Empty;
@@ -46,12 +55,18 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
         GameSettingsEditDialogViewModel editDialog,
         IInstanceFolderService instanceFolderService,
         IStatusService statusService,
-        InstanceSettingsPersistenceCoordinator persistence)
+        InstanceSettingsPersistenceCoordinator persistence,
+        IInstanceCleanupService? cleanupService,
+        IFloatingMessageService floatingMessageService,
+        ILogger<InstanceGeneralSettingsViewModel>? logger)
     {
         this.editDialog = editDialog;
         this.instanceFolderService = instanceFolderService;
         this.statusService = statusService;
         this.persistence = persistence;
+        this.cleanupService = cleanupService;
+        this.floatingMessageService = floatingMessageService;
+        this.logger = logger ?? NullLogger<InstanceGeneralSettingsViewModel>.Instance;
     }
 
     public event Action<GameSettingsInstanceItem>? DeleteInstanceRequested;
@@ -66,6 +81,11 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
 
     public void SetSelectedInstance(GameSettingsInstanceItem? value, GameInstance? editableInstance = null)
     {
+        if (!ReferenceEquals(selectedInstance?.Instance, value?.Instance))
+        {
+            IsCleanupDialogOpen = false;
+            cleanupPreview = null;
+        }
         if (selectedInstanceNotifier is not null)
             selectedInstanceNotifier.PropertyChanged -= SelectedInstance_PropertyChanged;
 
@@ -132,6 +152,60 @@ public sealed partial class InstanceGeneralSettingsViewModel : GameSettingsDetai
 
         if (!instanceFolderService.TryOpen(folderPath))
             statusService.Report(Strings.Status_OpenInstanceFolderFailed);
+    }
+
+    private bool CanRequestCleanup() => cleanupService is not null && !IsCleanupBusy;
+
+    partial void OnIsCleanupBusyChanged(bool value) => RequestCleanupCommand.NotifyCanExecuteChanged();
+
+    [RelayCommand(CanExecute = nameof(CanRequestCleanup))]
+    private async Task RequestCleanupAsync()
+    {
+        if (selectedInstance is null || cleanupService is null || IsCleanupBusy) return;
+        var instance = selectedInstance.Instance;
+        IsCleanupBusy = true;
+        try
+        {
+            var preview = await cleanupService.ScanAsync(instance);
+            if (!ReferenceEquals(selectedInstance?.Instance, instance)) return;
+            cleanupPreview = preview;
+            IsCleanupDialogOpen = true;
+        }
+        catch (InstanceCleanupBusyException) { floatingMessageService.Show(Strings.GameSettings_CleanupBusy); }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Instance cleanup scan failed. InstanceDirectory={InstanceDirectory}", instance.InstanceDirectory);
+            floatingMessageService.Show(Strings.GameSettings_CleanupFailed);
+        }
+        finally { IsCleanupBusy = false; }
+    }
+
+    [RelayCommand]
+    private void CancelCleanup() { IsCleanupDialogOpen = false; cleanupPreview = null; }
+
+    [RelayCommand]
+    private async Task ConfirmCleanupAsync()
+    {
+        var preview = cleanupPreview;
+        if (cleanupService is null || preview is null || IsCleanupBusy) return;
+        var categories = Enum.GetValues<InstanceCleanupCategory>().ToHashSet();
+        IsCleanupDialogOpen = false;
+        cleanupPreview = null;
+        IsCleanupBusy = true;
+        try
+        {
+            var result = await cleanupService.CleanAsync(preview, categories);
+            var message = string.Format(Strings.GameSettings_CleanupResultFormat, result.Deleted, result.Skipped);
+            statusService.Report(message);
+            floatingMessageService.Show(message);
+        }
+        catch (InstanceCleanupBusyException) { floatingMessageService.Show(Strings.GameSettings_CleanupBusy); }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Instance cleanup failed. InstanceDirectory={InstanceDirectory}", preview.Instance.InstanceDirectory);
+            floatingMessageService.Show(Strings.GameSettings_CleanupFailed);
+        }
+        finally { IsCleanupBusy = false; }
     }
 
     [RelayCommand]
