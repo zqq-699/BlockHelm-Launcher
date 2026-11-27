@@ -1,41 +1,46 @@
 /*
  * BlockHelm Launcher
  * Copyright (C) 2026 Quan Zhou
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 3.
- *
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-using System.Collections.Concurrent;
-using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.FileSystem;
+using Launcher.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging;
 
 namespace Launcher.Infrastructure.Resources;
 
 public sealed class ResourceThumbnailCacheService
 {
-    private const long MaximumThumbnailBytes = 1024L * 1024L;
-    private const long MaximumCacheBytes = 100L * 1024L * 1024L;
-    private const long TargetCacheBytes = 80L * 1024L * 1024L;
+    private const long MaximumDownloadBytes = 1024L * 1024L;
+    private const long MaximumCacheBytes = 50L * 1024L * 1024L;
+    private const long TargetCacheBytes = 30L * 1024L * 1024L;
+    private const int SizeRefreshInterval = 128;
+    private const int ProjectLockCount = 128;
+    internal const string CacheVersion = "v1";
+    private const int ImageHashLength = 64;
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromDays(30);
+    private static readonly TimeSpan AccessTimeResolution = TimeSpan.FromMinutes(10);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> entryLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim[] projectLocks = Enumerable.Range(0, ProjectLockCount)
+        .Select(_ => new SemaphoreSlim(1, 1)).ToArray();
     private readonly SemaphoreSlim commitLock = new(1, 1);
-    private readonly string cacheDirectory;
+    private readonly string imageDirectory;
+    private readonly string projectDirectory;
+    private readonly string writeLockPath;
     private readonly RemoteThumbnailDownloadClient downloader;
     private readonly ILogger logger;
     private long cacheSizeBytes = -1;
-    private int compactionStarted;
+    private int imagesAddedSinceScan;
+    private bool trimPending;
 
     public ResourceThumbnailCacheService(
         LauncherPathProvider pathProvider,
@@ -44,84 +49,94 @@ public sealed class ResourceThumbnailCacheService
         IDownloadSpeedLimitState? downloadSpeedLimitState,
         ILogger logger)
     {
-        cacheDirectory = Path.Combine(pathProvider.DefaultDataDirectory, "cache", "resources", "thumbnails");
+        CacheDirectory = Path.Combine(pathProvider.DefaultDataDirectory, "cache", "resources", "thumbnails", CacheVersion);
+        imageDirectory = Path.Combine(CacheDirectory, "images");
+        projectDirectory = Path.Combine(CacheDirectory, "projects");
+        writeLockPath = Path.Combine(CacheDirectory, "write.lock");
         downloader = new RemoteThumbnailDownloadClient(httpClient, limiter, downloadSpeedLimitState, logger);
         this.logger = logger;
     }
 
+    internal string CacheDirectory { get; }
+
     public string? TryGetCachedThumbnailSource(ResourceProject project)
     {
-        StartCacheCompaction();
-        try
-        {
-            return TryGetCacheEntry(project) is { } entry ? TryGetCachedSource(entry) : null;
-        }
-        catch (Exception exception) when (
-            exception is IOException
-            or UnauthorizedAccessException
-            or ArgumentException
-            or NotSupportedException)
-        {
-            logger.LogWarning(
-                exception,
-                "Failed to inspect resource project thumbnail cache. Kind={Kind} Source={Source} ProjectId={ProjectId}",
-                project.Kind,
-                project.Source,
-                project.ProjectId);
-            return null;
-        }
+        return GetProjectPaths(project) is { } paths
+            ? GetCachedSource(ReadReference(paths.ReferencePath))
+            : null;
     }
 
-    public async Task<string?> GetOrCreateThumbnailSourceAsync(
+    public Task<string?> GetOrCreateThumbnailSourceAsync(
         ResourceProject project,
+        CancellationToken cancellationToken) => ResolveThumbnailSourceAsync(project, fromCachedProject: false, cancellationToken);
+
+    internal Task<string?> GetOrCreateThumbnailFromCachedProjectAsync(
+        ResourceProject project,
+        CancellationToken cancellationToken) => ResolveThumbnailSourceAsync(project, fromCachedProject: true, cancellationToken);
+
+    private async Task<string?> ResolveThumbnailSourceAsync(
+        ResourceProject project,
+        bool fromCachedProject,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(project);
-        StartCacheCompaction();
-        if (TryGetCacheEntry(project) is not { } entry)
+        if (GetProjectPaths(project) is not { } paths)
             return null;
 
-        var cachePath = entry.Path;
-        var entryLock = entryLocks.GetOrAdd(cachePath, static _ => new SemaphoreSlim(1, 1));
-        await entryLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (TryUseReference(ReadReference(paths.ReferencePath), paths.UrlHash, fromCachedProject, out var source))
+            return source;
+
+        var lockIndex = (uint)StringComparer.Ordinal.GetHashCode(paths.ReferencePath) % ProjectLockCount;
+        var projectLock = projectLocks[lockIndex];
+        await projectLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await MigrateLegacyFilesAsync(entry, null, cancellationToken).ConfigureAwait(false);
-            if (IsFresh(entry))
-                return ToFileSource(cachePath);
+            if (TryUseReference(ReadReference(paths.ReferencePath), paths.UrlHash, fromCachedProject, out source))
+                return source;
 
-            var bytes = await downloader.DownloadAsync(
-                project.IconUrl!,
-                MaximumThumbnailBytes,
-                cancellationToken).ConfigureAwait(false);
-            var temporaryPath = $"{cachePath}.{Guid.NewGuid():N}.tmp";
+            var bytes = await downloader.DownloadAsync(project.IconUrl!, MaximumDownloadBytes, cancellationToken)
+                .ConfigureAwait(false);
+            var thumbnail = RemoteIconImageEncoder.EncodeThumbnail(bytes);
+            var imagePath = GetImagePath(thumbnail.ContentHash);
+
+            await commitLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                RemoteIconImageEncoder.SaveAsPng(bytes, temporaryPath, entry.UrlHash);
-                await commitLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
+                Directory.CreateDirectory(CacheDirectory);
+                await using var writeLock = await CrossProcessVersionLock.AcquireAsync(writeLockPath, null, cancellationToken)
+                    .ConfigureAwait(false);
+                // A different launcher may have published a newer project URL during the download.
+                if (fromCachedProject && TryUseReference(ReadReference(paths.ReferencePath, ignoreReadErrors: false), paths.UrlHash,
+                        fromCachedProject, out source))
                 {
-                    Directory.CreateDirectory(cacheDirectory);
-                    var previousLength = File.Exists(cachePath) ? new FileInfo(cachePath).Length : 0;
-                    File.Move(temporaryPath, cachePath, overwrite: true);
-                    TrackCacheWriteAndTrim(cachePath, previousLength);
+                    return source;
                 }
-                finally
+
+                var added = await PublishImageAsync(imagePath, thumbnail.Png, cancellationToken).ConfigureAwait(false);
+                if (!added)
+                    RecordUse(new FileInfo(imagePath));
+                if (added && cacheSizeBytes >= 0)
                 {
-                    commitLock.Release();
+                    cacheSizeBytes += thumbnail.Png.Length;
+                    imagesAddedSinceScan++;
                 }
+
+                // Publish the reference only after the immutable image is available.
+                await AtomicJsonFileWriter.WriteAsync(
+                    paths.ReferencePath, new ThumbnailReference(thumbnail.ContentHash, paths.UrlHash, DateTimeOffset.UtcNow),
+                    JsonOptions, cancellationToken).ConfigureAwait(false);
+                TrimCache(imagePath);
             }
             finally
             {
-                TryDelete(temporaryPath);
+                commitLock.Release();
             }
 
             logger.LogDebug(
                 "Resource project thumbnail cached. Kind={Kind} Source={Source} ProjectId={ProjectId}",
-                project.Kind,
-                project.Source,
-                project.ProjectId);
-            return ToFileSource(cachePath);
+                project.Kind, project.Source, project.ProjectId);
+            return new Uri(imagePath).AbsoluteUri;
         }
         catch (OperationCanceledException)
         {
@@ -132,118 +147,27 @@ public sealed class ResourceThumbnailCacheService
             logger.LogWarning(
                 exception,
                 "Failed to cache resource project thumbnail. Kind={Kind} Source={Source} ProjectId={ProjectId}",
-                project.Kind,
-                project.Source,
-                project.ProjectId);
+                project.Kind, project.Source, project.ProjectId);
             return TryGetCachedThumbnailSource(project);
         }
         finally
         {
-            entryLock.Release();
+            projectLock.Release();
         }
     }
 
-    internal async Task<string?> MigrateModThumbnailAsync(
-        ResourceProject project,
-        string? localThumbnailPath,
-        CancellationToken cancellationToken)
+    private static async Task<bool> PublishImageAsync(string imagePath, byte[] png, CancellationToken cancellationToken)
     {
-        if (TryGetCacheEntry(project) is not { LegacyOnlinePath: not null } entry)
-            return null;
-
-        StartCacheCompaction();
-        var entryLock = entryLocks.GetOrAdd(entry.Path, static _ => new SemaphoreSlim(1, 1));
-        await entryLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await MigrateLegacyFilesAsync(entry, localThumbnailPath, cancellationToken).ConfigureAwait(false);
-            return TryGetCachedSource(entry);
-        }
-        finally
-        {
-            entryLock.Release();
-        }
-    }
-
-    private async Task MigrateLegacyFilesAsync(
-        ThumbnailCacheEntry entry,
-        string? localThumbnailPath,
-        CancellationToken cancellationToken)
-    {
-        if (!File.Exists(entry.LegacyOnlinePath)
-            && !File.Exists(entry.LegacyOriginalPath)
-            && !File.Exists(localThumbnailPath))
-        {
-            return;
-        }
-
-        await commitLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var directory = new DirectoryInfo(cacheDirectory);
-            if (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) != 0)
-                return;
-
-            var onlineFiles = new[] { GetRegularFile(entry.LegacyOnlinePath), GetRegularFile(entry.LegacyOriginalPath) }
-                .OfType<FileInfo>();
-            var local = GetRegularFile(localThumbnailPath);
-            var current = GetRegularFile(entry.Path);
-            if (current is null && File.Exists(entry.Path))
-                return;
-
-            var previousLength = current?.Length ?? 0;
-            var imported = false;
-            if (current is null || !RemoteIconImageEncoder.HasUrlHash(entry.Path))
-            {
-                var candidates = local is null ? onlineFiles : onlineFiles.Append(local);
-                imported = candidates.OrderByDescending(file => file.LastWriteTimeUtc)
-                    .Any(file => TryImportLegacyFile(file, entry, overwrite: current is not null));
-                if (!imported)
-                    return;
-            }
-
-            foreach (var online in onlineFiles)
-            {
-                var bytes = online.Length;
-                TryDelete(online.FullName);
-                if (cacheSizeBytes >= 0 && !File.Exists(online.FullName))
-                    cacheSizeBytes -= bytes;
-            }
-            if (local is not null)
-                TryDelete(local.FullName);
-            if (imported)
-                TrackCacheWriteAndTrim(entry.Path, previousLength);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            logger.LogDebug(exception, "Could not merge legacy project thumbnails.");
-        }
-        finally
-        {
-            commitLock.Release();
-        }
-    }
-
-    private bool TryImportLegacyFile(FileInfo candidate, ThumbnailCacheEntry entry, bool overwrite)
-    {
-        var temporaryPath = $"{entry.Path}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            var lastWriteTime = candidate.LastWriteTimeUtc;
-            using (var source = candidate.Open(FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
-                RemoteIconImageEncoder.SaveAsPng(source, temporaryPath, entry.UrlHash);
-
-            File.SetLastWriteTimeUtc(temporaryPath, lastWriteTime);
-            File.Move(temporaryPath, entry.Path, overwrite);
-            return true;
-        }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or InvalidDataException or FormatException
-                or NotSupportedException or ArgumentException or InvalidOperationException
-                or System.Runtime.InteropServices.COMException)
-        {
-            logger.LogDebug(exception, "Could not read a legacy project thumbnail.");
+        if (File.Exists(imagePath))
             return false;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(imagePath)!);
+        var temporaryPath = $"{imagePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllBytesAsync(temporaryPath, png, cancellationToken).ConfigureAwait(false);
+            return await AtomicFileMove.MoveAsync(temporaryPath, imagePath, overwrite: false, cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -251,117 +175,168 @@ public sealed class ResourceThumbnailCacheService
         }
     }
 
-    private void StartCacheCompaction()
+    private (string ReferencePath, string UrlHash)? GetProjectPaths(ResourceProject project)
     {
-        if (Interlocked.Exchange(ref compactionStarted, 1) != 0)
-            return;
-
-        _ = Task.Run(() => RemoteIconImageEncoder.CompactCacheAsync(cacheDirectory, commitLock, logger, saved =>
-        {
-            if (cacheSizeBytes >= 0)
-                cacheSizeBytes -= saved;
-        }));
-    }
-
-    private ThumbnailCacheEntry? TryGetCacheEntry(ResourceProject project)
-    {
-        if (string.IsNullOrWhiteSpace(project.IconUrl)
-            || !Uri.TryCreate(project.IconUrl, UriKind.Absolute, out var uri)
-            || (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        if (!Uri.TryCreate(project.IconUrl, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             return null;
         }
 
-        var key = $"{project.Source}:{project.ProjectId}";
-        var oldKey = Hash($"{key}|{uri.AbsoluteUri}");
-        var oldPath = Path.Combine(cacheDirectory, $"{oldKey}.png");
-        return project.Kind == ResourceProjectKind.Mod && !string.IsNullOrWhiteSpace(project.ProjectId)
-            ? new ThumbnailCacheEntry(Path.Combine(cacheDirectory, $"{Hash(key)}.png"), Hash(uri.AbsoluteUri), oldPath)
-            : new ThumbnailCacheEntry(oldPath, null, null);
+        var urlHash = Hash(uri.AbsoluteUri);
+        var key = string.IsNullOrWhiteSpace(project.ProjectId)
+            ? $"{project.Source}:{project.Kind}:url:{urlHash}"
+            : $"{project.Source}:{project.Kind}:id:{project.ProjectId}";
+        return (Path.Combine(projectDirectory, $"{Hash(key)}.json"), urlHash);
     }
 
     private static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
-    private static string? TryGetCachedSource(ThumbnailCacheEntry entry)
-    {
-        if (File.Exists(entry.Path))
-            return ToFileSource(entry.Path);
-        if (entry.LegacyOnlinePath is { } legacy && File.Exists(legacy))
-            return ToFileSource(legacy);
-        return entry.LegacyOriginalPath is { } original && File.Exists(original) ? ToFileSource(original) : null;
-    }
-
-    private static FileInfo? GetRegularFile(string? path)
-    {
-        if (path is null)
-            return null;
-        var file = new FileInfo(path);
-        return file.Exists && (file.Attributes & FileAttributes.ReparsePoint) == 0 ? file : null;
-    }
-
-    private static bool IsFresh(ThumbnailCacheEntry entry) =>
-        File.Exists(entry.Path)
-        && DateTime.UtcNow - File.GetLastWriteTimeUtc(entry.Path) <= RefreshAfter
-        && (entry.UrlHash is null || RemoteIconImageEncoder.HasUrlHash(entry.Path, entry.UrlHash));
-
-    private static string ToFileSource(string path)
-    {
-        var version = File.GetLastWriteTimeUtc(path).Ticks;
-        return $"{new Uri(path).AbsoluteUri}?v={version.ToString(CultureInfo.InvariantCulture)}";
-    }
-
-    private void TrackCacheWriteAndTrim(string cachePath, long previousLength)
-    {
-        var currentLength = new FileInfo(cachePath).Length;
-        if (cacheSizeBytes < 0)
-        {
-            cacheSizeBytes = new DirectoryInfo(cacheDirectory)
-                .EnumerateFiles("*.png", SearchOption.TopDirectoryOnly)
-                .Sum(file => file.Length);
-        }
-        else
-        {
-            cacheSizeBytes += currentLength - previousLength;
-        }
-
-        if (cacheSizeBytes <= MaximumCacheBytes)
-            return;
-
-        var files = new DirectoryInfo(cacheDirectory)
-            .EnumerateFiles("*.png", SearchOption.TopDirectoryOnly)
-            .OrderBy(file => string.Equals(file.FullName, cachePath, StringComparison.OrdinalIgnoreCase) ? 1 : 0)
-            .ThenBy(file => file.LastWriteTimeUtc)
-            .ToList();
-        foreach (var file in files)
-        {
-            if (cacheSizeBytes <= TargetCacheBytes)
-                break;
-            var length = file.Length;
-            TryDelete(file.FullName);
-            if (!File.Exists(file.FullName))
-                cacheSizeBytes -= length;
-        }
-    }
-
-    private static void TryDelete(string path)
+    private ThumbnailReference? ReadReference(string path, bool ignoreReadErrors = true)
     {
         try
         {
-            if (File.Exists(path))
-                File.Delete(path);
+            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var reference = JsonSerializer.Deserialize<ThumbnailReference>(stream, JsonOptions);
+            return reference?.ContentHash is { Length: ImageHashLength } hash && hash.All(Uri.IsHexDigit) ? reference : null;
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
+            return null;
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is JsonException
+            || (ignoreReadErrors && exception is IOException or UnauthorizedAccessException))
         {
+            logger.LogDebug(exception, "Failed to read a cached project thumbnail reference.");
+            return null;
         }
     }
 
-    private readonly record struct ThumbnailCacheEntry(string Path, string? UrlHash, string? LegacyOnlinePath)
+    private bool TryUseReference(ThumbnailReference? reference, string urlHash, bool fromCachedProject, out string? source)
     {
-        public string? LegacyOriginalPath => System.IO.Path.ChangeExtension(LegacyOnlinePath, ".original.png");
+        source = null;
+        if (reference is null)
+            return false;
+
+        if (reference.UrlHash != urlHash)
+        {
+            if (fromCachedProject)
+                source = GetCachedSource(reference);
+            return fromCachedProject;
+        }
+
+        if (DateTimeOffset.UtcNow - reference.FetchedAt <= RefreshAfter)
+            source = GetCachedSource(reference);
+        return source is not null;
     }
+
+    private string? GetCachedSource(ThumbnailReference? reference)
+    {
+        if (reference is null)
+            return null;
+
+        var image = new FileInfo(GetImagePath(reference.ContentHash));
+        if (!image.Exists)
+            return null;
+
+        RecordUse(image);
+        return new Uri(image.FullName).AbsoluteUri;
+    }
+
+    private void RecordUse(FileInfo image)
+    {
+        try
+        {
+            // Treat the PNG timestamp as recent use and limit touches on repeated hits.
+            var now = DateTime.UtcNow;
+            if (now - image.LastWriteTimeUtc >= AccessTimeResolution)
+                image.LastWriteTimeUtc = now;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogDebug(exception, "Could not record resource thumbnail use.");
+        }
+    }
+
+    private string GetImagePath(string contentHash) => Path.Combine(imageDirectory, $"{contentHash}.png");
+
+    private void TrimCache(string currentImagePath)
+    {
+        // Reconcile writes from other launcher processes periodically.
+        if (!trimPending && cacheSizeBytes >= 0 && cacheSizeBytes < MaximumCacheBytes
+            && imagesAddedSinceScan < SizeRefreshInterval)
+            return;
+
+        var images = new DirectoryInfo(imageDirectory).EnumerateFiles("*.png")
+            .Where(file => file.Name.Length == ImageHashLength + ".png".Length
+                && file.Name[..ImageHashLength].All(Uri.IsHexDigit)
+                && (file.Attributes & FileAttributes.ReparsePoint) == 0)
+            .ToArray();
+        cacheSizeBytes = images.Sum(file => file.Length);
+        imagesAddedSinceScan = 0;
+        trimPending = cacheSizeBytes >= MaximumCacheBytes || (trimPending && cacheSizeBytes > TargetCacheBytes);
+        if (!trimPending)
+            return;
+
+        (string Path, string? ContentHash)[] references;
+        try
+        {
+            references = Directory.EnumerateFiles(projectDirectory, "*.json")
+                .Select(path => (path, ReadReference(path, ignoreReadErrors: false)?.ContentHash))
+                .ToArray();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogDebug(exception, "Resource thumbnail cleanup deferred because project references could not be read.");
+            return;
+        }
+
+        var referencedHashes = new HashSet<string>(references.Select(reference => reference.ContentHash)
+            .OfType<string>(), StringComparer.OrdinalIgnoreCase);
+        var remainingHashes = new HashSet<string>(images.Select(file => file.Name[..ImageHashLength]),
+            StringComparer.OrdinalIgnoreCase);
+        var initialSize = cacheSizeBytes;
+
+        foreach (var file in images.OrderBy(file => referencedHashes.Contains(file.Name[..ImageHashLength]))
+                     .ThenBy(file => file.LastWriteTimeUtc))
+        {
+            if (cacheSizeBytes <= TargetCacheBytes)
+                break;
+            if (string.Equals(file.FullName, currentImagePath, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var length = file.Length;
+            if (TryDelete(file.FullName))
+            {
+                cacheSizeBytes -= length;
+                remainingHashes.Remove(file.Name[..ImageHashLength]);
+            }
+        }
+
+        foreach (var (path, contentHash) in references)
+        {
+            if (contentHash is null || !remainingHashes.Contains(contentHash))
+                TryDelete(path);
+        }
+
+        trimPending = cacheSizeBytes > TargetCacheBytes;
+        logger.LogDebug("Resource thumbnail cache trimmed. InitialBytes={InitialBytes} RemainingBytes={RemainingBytes}",
+            initialSize, cacheSizeBytes);
+    }
+
+    private static bool TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private sealed record ThumbnailReference(string ContentHash, string UrlHash, DateTimeOffset FetchedAt);
 }

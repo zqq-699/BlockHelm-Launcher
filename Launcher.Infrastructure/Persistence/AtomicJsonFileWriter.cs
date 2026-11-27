@@ -24,25 +24,22 @@ namespace Launcher.Infrastructure.Persistence;
 
 internal static class AtomicJsonFileWriter
 {
-    // 网络盘、杀毒软件与索引器可能短暂持有目标文件句柄，使替换式重命名返回 ACCESS_DENIED。
-    // 这类占用是瞬时的，沿用 VersionRenameTransaction 的重试节奏把它挡在调用方之外。
-    private const int MaxMoveAttempts = 5;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(150);
-
     public static Task WriteAsync<T>(
         string destinationPath,
         T value,
         JsonSerializerOptions options,
         CancellationToken cancellationToken,
-        Action? validateDestination = null) =>
+        Action? validateDestination = null,
+        bool replaceOpenDestination = false) =>
         WriteAsync(
             destinationPath,
             value,
             options,
             cancellationToken,
-            MaxMoveAttempts,
-            token => Task.Delay(RetryDelay, token),
-            validateDestination);
+            AtomicFileMove.MaximumAttempts,
+            AtomicFileMove.DelayBeforeRetryAsync,
+            validateDestination,
+            replaceOpenDestination);
 
     internal static async Task WriteAsync<T>(
         string destinationPath,
@@ -51,7 +48,8 @@ internal static class AtomicJsonFileWriter
         CancellationToken cancellationToken,
         int maxMoveAttempts,
         Func<CancellationToken, Task> retryAsync,
-        Action? validateDestination = null)
+        Action? validateDestination = null,
+        bool replaceOpenDestination = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         ArgumentNullException.ThrowIfNull(options);
@@ -84,45 +82,20 @@ internal static class AtomicJsonFileWriter
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            await MoveWithRetryAsync(
+            await AtomicFileMove.MoveAsync(
                     temporaryPath,
                     fullDestinationPath,
+                    overwrite: true,
+                    cancellationToken,
                     maxMoveAttempts,
                     retryAsync,
-                    cancellationToken,
-                    validateDestination)
+                    validateDestination,
+                    replaceOpenDestination)
                 .ConfigureAwait(false);
         }
         finally
         {
             TryDeleteTemporaryFile(temporaryPath);
-        }
-    }
-
-    private static async Task MoveWithRetryAsync(
-        string source,
-        string destination,
-        int maxMoveAttempts,
-        Func<CancellationToken, Task> retryAsync,
-        CancellationToken cancellationToken,
-        Action? validateDestination)
-    {
-        for (var attempt = 1; ; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            validateDestination?.Invoke();
-            try
-            {
-                File.Move(source, destination, overwrite: true);
-                return;
-            }
-            catch (Exception exception) when (
-                attempt < maxMoveAttempts
-                && exception is IOException or UnauthorizedAccessException)
-            {
-                await retryAsync(cancellationToken).ConfigureAwait(false);
-            }
         }
     }
 

@@ -57,10 +57,4 @@ public sealed partial class LocalModIconEnrichmentService
         }
     }
 
-    private string GetIconCachePath(string entryKey)
-    {
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(entryKey))).ToLowerInvariant();
-        return Path.Combine(cacheDirectory, $"{hash}.png");
-    }
-
 }

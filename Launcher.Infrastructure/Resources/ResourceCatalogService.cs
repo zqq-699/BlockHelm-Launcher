@@ -102,6 +102,11 @@ public sealed class ResourceCatalogService :
         CancellationToken cancellationToken = default) =>
         thumbnailCache.GetOrCreateThumbnailSourceAsync(project, cancellationToken);
 
+    public Task<string?> GetOrCreateThumbnailFromCachedProjectAsync(
+        ResourceProject project,
+        CancellationToken cancellationToken = default) =>
+        thumbnailCache.GetOrCreateThumbnailFromCachedProjectAsync(project, cancellationToken);
+
     public async Task<ResourceProject?> GetProjectAsync(
         ResourceProjectReference reference,
         CancellationToken cancellationToken = default)

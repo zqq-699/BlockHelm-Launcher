@@ -40,56 +40,47 @@ public sealed partial class LocalModIconEnrichmentService
         if (cleanupCompleted)
             return;
 
-        await cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await cleanupLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (cleanupCompleted)
                 return;
 
-            Directory.CreateDirectory(cacheDirectory);
-            var index = await cacheIndexStore.LoadAsync(cancellationToken).ConfigureAwait(false);
             var now = DateTimeOffset.UtcNow;
             var removed = 0;
-
-            foreach (var pair in index.Entries.ToArray())
+            var remaining = 0;
+            await cacheIndexStore.UpdateAsync(index =>
             {
-                var entry = pair.Value;
-                var project = CreateModProject(entry.Source, entry.ProjectId, entry.IconUrl);
-                if (now - entry.LastUsedAt > UnusedExpiration
-                    || (GetLegacyIconPath(entry) is null
-                        && (project is null || thumbnailCache.TryGetCachedThumbnailSource(project) is null)))
+                foreach (var pair in index.Entries.ToArray())
                 {
-                    index.Entries.Remove(pair.Key);
-                    removed++;
+                    var entry = pair.Value;
+                    if (now - entry.LastUsedAt > UnusedExpiration || GetCachedIcon(entry) is null)
+                    {
+                        index.Entries.Remove(pair.Key);
+                        removed++;
+                    }
                 }
-            }
 
-            foreach (var alias in index.Aliases
-                         .Where(pair => !index.Entries.ContainsKey(pair.Value))
-                         .Select(pair => pair.Key)
-                         .ToArray())
-            {
-                index.Aliases.Remove(alias);
-            }
+                var changed = removed > 0;
+                foreach (var aliases in new[] { index.Aliases, index.FileAliases })
+                {
+                    foreach (var alias in aliases.Where(pair => !index.Entries.ContainsKey(pair.Value)).ToArray())
+                        changed |= aliases.Remove(alias.Key);
+                }
 
-            foreach (var alias in index.FileAliases
-                         .Where(pair => !index.Entries.ContainsKey(pair.Value))
-                         .Select(pair => pair.Key)
-                         .ToArray())
-            {
-                index.FileAliases.Remove(alias);
-            }
+                remaining = index.Entries.Count;
+                return changed;
+            }, cancellationToken).ConfigureAwait(false);
 
-            await cacheIndexStore.SaveAsync(index, cancellationToken).ConfigureAwait(false);
             cleanupCompleted = true;
             logger.LogInformation(
                 "Remote local mod icon index cleanup completed. RemovedCount={RemovedCount} RemainingCount={RemainingCount}",
                 removed,
-                index.Entries.Count);
+                remaining);
         }
         finally
         {
-            cacheLock.Release();
+            cleanupLock.Release();
         }
     }
 

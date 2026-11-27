@@ -9,6 +9,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Launcher.Application.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure;
@@ -248,6 +249,40 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
     }
 
     [Fact]
+    public async Task UpdatedProjectIconReplacesCachedIconInResourcePackList()
+    {
+        Directory.CreateDirectory(TempRoot);
+        var path = Path.Combine(TempRoot, "updated-resource-pack.zip");
+        var bytes = Encoding.UTF8.GetBytes("resource pack with an updated project icon");
+        File.WriteAllBytes(path, bytes);
+        var sha1 = Convert.ToHexString(SHA1.HashData(bytes)).ToLowerInvariant();
+        var paths = new LauncherPathProvider(TempRoot);
+        var candidate = new LocalResourceCategoryCandidate(path, ResourceProjectKind.ResourcePack);
+        using (var client = new HttpClient(new ModrinthMatchHandler(sha1)))
+            await new LocalResourceCategoryEnrichmentService(paths, client).ResolveMetadataAsync([candidate]);
+
+        var indexPath = Path.Combine(paths.DefaultDataDirectory, "cache", "resources", "local-categories", "index.json");
+        var index = JsonNode.Parse(File.ReadAllText(indexPath))!;
+        Assert.Single(index["entries"]!.AsObject()).Value!["checkedAt"] = DateTimeOffset.UtcNow.AddHours(-7);
+        File.WriteAllText(indexPath, index.ToJsonString());
+
+        const string newUrl = "https://cdn.example/updated.png";
+        const string oldImage = "file:///cache/old.png";
+        const string newImage = "file:///cache/updated.png";
+        using var refreshedClient = new HttpClient(new ModrinthMatchHandler(sha1, iconUrl: newUrl));
+        var thumbnailService = new RecordingThumbnailService(cachedSource: oldImage, downloadedSource: newImage);
+        var service = new LocalResourceCategoryEnrichmentService(paths, refreshedClient, thumbnailService: thumbnailService);
+        var progress = new List<string>();
+
+        var result = await service.ResolveMetadataAsync([candidate],
+            iconProgress: new InlineProgress<LocalContentIconResolution>(icon => progress.Add(icon.IconSource)));
+
+        Assert.Equal(newImage, Assert.Single(result).Value.IconSource);
+        Assert.Equal(newUrl, Assert.Single(thumbnailService.DownloadedProjects).IconUrl);
+        Assert.Equal(new[] { oldImage, newImage }, progress);
+    }
+
+    [Fact]
     public async Task MatchedProjectIconsReportIndividuallyBeforeWholeBatchCompletes()
     {
         Directory.CreateDirectory(TempRoot);
@@ -439,7 +474,8 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
         Assert.Equal(paths.Length, resolved.Count);
     }
 
-    private sealed class ModrinthMatchHandler(string sha1, string? slug = null) : HttpMessageHandler
+    private sealed class ModrinthMatchHandler(
+        string sha1, string? slug = null, string iconUrl = "https://cdn.example/shader.png") : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -448,7 +484,7 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
             var json = request.RequestUri!.AbsolutePath switch
             {
                 "/v2/version_files" => $"{{\"{sha1}\":{{\"project_id\":\"shader-project\"}}}}",
-                "/v2/projects" => $$"""[{"id":"shader-project","slug":"{{slug}}","icon_url":"https://cdn.example/shader.png","categories":["fabric","fantasy","realistic","fantasy"]}]""",
+                "/v2/projects" => $$"""[{"id":"shader-project","slug":"{{slug}}","icon_url":"{{iconUrl}}","categories":["fabric","fantasy","realistic","fantasy"]}]""",
                 _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
             };
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -557,9 +593,14 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
             ResourceProject project,
             CancellationToken cancellationToken = default)
         {
-            DownloadedProjects.Add(project);
-            return Task.FromResult(downloadedSource);
+            if (downloadedSource is not null)
+                DownloadedProjects.Add(project);
+            return Task.FromResult(downloadedSource ?? cachedSource);
         }
+
+        public Task<string?> GetOrCreateThumbnailFromCachedProjectAsync(
+            ResourceProject project, CancellationToken cancellationToken = default) =>
+            GetOrCreateThumbnailSourceAsync(project, cancellationToken);
     }
 
     private sealed class ControlledThumbnailService(
@@ -576,6 +617,10 @@ public sealed class LocalResourceCategoryEnrichmentServiceTests : TestTempDirect
         public Task AllDownloadsStarted => allDownloadsStarted.Task;
 
         public string? TryGetCachedThumbnailSource(ResourceProject project) => null;
+
+        public Task<string?> GetOrCreateThumbnailFromCachedProjectAsync(
+            ResourceProject project, CancellationToken cancellationToken = default) =>
+            GetOrCreateThumbnailSourceAsync(project, cancellationToken);
 
         public async Task<string?> GetOrCreateThumbnailSourceAsync(
             ResourceProject project,

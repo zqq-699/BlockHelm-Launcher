@@ -25,4 +25,11 @@ public interface IResourceThumbnailService
     Task<string?> GetOrCreateThumbnailSourceAsync(
         ResourceProject project,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Uses locally cached project metadata without replacing a different icon URL already recorded for the project.
+    /// </summary>
+    Task<string?> GetOrCreateThumbnailFromCachedProjectAsync(
+        ResourceProject project,
+        CancellationToken cancellationToken = default);
 }

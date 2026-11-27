@@ -375,6 +375,10 @@ public sealed class ResourcesProjectListViewModelTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<string?>($"icon://{project.ProjectId}");
 
+        public Task<string?> GetOrCreateThumbnailFromCachedProjectAsync(
+            ResourceProject project, CancellationToken cancellationToken = default) =>
+            GetOrCreateThumbnailSourceAsync(project, cancellationToken);
+
         public Task<ResourceProjectVersionsResult> GetProjectVersionsAsync(
             ResourceProjectVersionsRequest request,
             CancellationToken cancellationToken = default) =>

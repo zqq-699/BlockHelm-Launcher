@@ -31,6 +31,7 @@ using Launcher.App.Services;
 using Launcher.Domain.Models;
 using Launcher.Infrastructure.DependencyInjection;
 using Launcher.Infrastructure.Persistence;
+using Launcher.Infrastructure.Resources;
 using Launcher.Infrastructure.Updates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -287,6 +288,8 @@ public partial class App : System.Windows.Application
                 serviceProvider.GetRequiredService<IInstanceInstallCleanupService>());
             _ = CleanupModpackSandboxesOnStartupAsync(
                 serviceProvider.GetRequiredService<IModpackSandboxCleanupService>());
+            _ = CleanupLegacyProjectIconsOnStartupAsync(
+                serviceProvider.GetRequiredService<LegacyProjectIconCacheCleanup>());
             try
             {
                 if (LauncherUpdateStartupCoordinator.TryConfirmStartup(
@@ -575,6 +578,18 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             Log.Warning(exception, "Modpack loader sandbox cleanup failed; startup cleanup will retry later.");
+        }
+    }
+
+    private static async Task CleanupLegacyProjectIconsOnStartupAsync(LegacyProjectIconCacheCleanup cleanupService)
+    {
+        try
+        {
+            await cleanupService.CleanupAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Legacy project icon cleanup failed; startup cleanup will retry later.");
         }
     }
 

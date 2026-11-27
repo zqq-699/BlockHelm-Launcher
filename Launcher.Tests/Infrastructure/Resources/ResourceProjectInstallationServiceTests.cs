@@ -413,6 +413,10 @@ public sealed class ResourceProjectInstallationServiceTests
             ResourceProject project,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(TryGetCachedThumbnailSource(project));
+
+        public Task<string?> GetOrCreateThumbnailFromCachedProjectAsync(
+            ResourceProject project, CancellationToken cancellationToken = default) =>
+            GetOrCreateThumbnailSourceAsync(project, cancellationToken);
     }
 
     private sealed class StubModpackImportService : ILocalModpackImportService

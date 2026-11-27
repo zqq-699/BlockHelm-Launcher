@@ -32,22 +32,47 @@ internal sealed class RemoteIconCacheIndexStore
     };
 
     private readonly string indexPath;
+    private readonly string writeLockPath;
     private readonly ILogger logger;
 
     public RemoteIconCacheIndexStore(string cacheDirectory, ILogger logger)
     {
-        indexPath = Path.Combine(cacheDirectory, "index.json");
+        indexPath = Path.Combine(cacheDirectory, "mod-index.json");
+        writeLockPath = Path.Combine(cacheDirectory, "mod-index.lock");
         this.logger = logger;
     }
 
     public async Task<RemoteIconCacheIndex> LoadAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(indexPath))
-            return new RemoteIconCacheIndex();
-
         try
         {
-            await using var stream = File.OpenRead(indexPath);
+            return await ReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException exception)
+        {
+            logger.LogWarning(exception, "Failed to read remote local mod icon cache index.");
+            return new RemoteIconCacheIndex();
+        }
+    }
+
+    public async Task UpdateAsync(Func<RemoteIconCacheIndex, bool> update, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(indexPath)!);
+        await using var writeLock = await CrossProcessVersionLock.AcquireAsync(writeLockPath, null, cancellationToken)
+            .ConfigureAwait(false);
+        var index = await ReadAsync(cancellationToken).ConfigureAwait(false);
+        if (update(index))
+        {
+            await AtomicJsonFileWriter.WriteAsync(indexPath, index, JsonOptions, cancellationToken, replaceOpenDestination: true)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task<RemoteIconCacheIndex> ReadAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = File.Open(indexPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             return await JsonSerializer.DeserializeAsync<RemoteIconCacheIndex>(
                        stream,
                        JsonOptions,
@@ -59,16 +84,10 @@ internal sealed class RemoteIconCacheIndexStore
             logger.LogWarning(exception, "Failed to parse remote local mod icon cache index.");
             return new RemoteIconCacheIndex();
         }
-        catch (IOException exception)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            logger.LogWarning(exception, "Failed to read remote local mod icon cache index.");
             return new RemoteIconCacheIndex();
         }
-    }
-
-    public Task SaveAsync(RemoteIconCacheIndex index, CancellationToken cancellationToken)
-    {
-        return AtomicJsonFileWriter.WriteAsync(indexPath, index, JsonOptions, cancellationToken);
     }
 }
 
@@ -88,8 +107,6 @@ internal sealed class RemoteIconCacheEntry
     public string ProjectId { get; init; } = string.Empty;
 
     public string IconUrl { get; init; } = string.Empty;
-
-    public string FileName { get; init; } = string.Empty;
 
     public DateTimeOffset CachedAt { get; init; }
 

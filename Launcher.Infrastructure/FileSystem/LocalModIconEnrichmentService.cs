@@ -46,9 +46,7 @@ public sealed partial class LocalModIconEnrichmentService : ILocalModIconEnrichm
     private readonly RemoteModIconProviderClient providerClient;
     private readonly LocalFileFingerprintService fingerprintService;
     private readonly ILogger<LocalModIconEnrichmentService> logger;
-    private readonly SemaphoreSlim cacheLock = new(1, 1);
-    private int cacheMigrationStarted;
-    private readonly string cacheDirectory;
+    private readonly SemaphoreSlim cleanupLock = new(1, 1);
     private readonly RemoteIconCacheIndexStore cacheIndexStore;
     private bool cleanupCompleted;
 
@@ -75,7 +73,6 @@ public sealed partial class LocalModIconEnrichmentService : ILocalModIconEnrichm
         var apiKeyResolver = curseForgeApiKeyResolver ?? new CurseForgeApiKeyResolver(resolvedPathProvider);
         providerClient = new RemoteModIconProviderClient(resolvedHttpClient, apiKeyResolver, this.logger);
         this.fingerprintService = fingerprintService ?? new LocalFileFingerprintService();
-        cacheDirectory = Path.Combine(resolvedPathProvider.DefaultDataDirectory, "cache", "mods", "remote-icons");
-        cacheIndexStore = new RemoteIconCacheIndexStore(cacheDirectory, this.logger);
+        cacheIndexStore = new RemoteIconCacheIndexStore(this.thumbnailCache.CacheDirectory, this.logger);
     }
 }
